@@ -1,7 +1,7 @@
+import { drizzleAdapter } from '@better-auth/drizzle-adapter'
 import { createHMAC } from '@better-auth/utils/hmac'
 import { getChainIdFromMessage } from '@reown/appkit-siwe'
 import { betterAuth } from 'better-auth'
-import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { createAuthMiddleware } from 'better-auth/api'
 import { deleteSessionCookie } from 'better-auth/cookies'
 import { generateRandomString } from 'better-auth/crypto'
