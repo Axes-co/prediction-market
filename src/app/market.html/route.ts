@@ -128,7 +128,7 @@ export async function GET(request: NextRequest) {
   }
 
   const html = `<!DOCTYPE html>
-<html lang="en">
+<html lang="${escapeAttr(resolvedLocale)}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />

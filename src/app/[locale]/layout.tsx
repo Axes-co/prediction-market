@@ -10,6 +10,7 @@ import PwaServiceWorker from '@/components/PwaServiceWorker'
 import SiteStructuredData from '@/components/seo/SiteStructuredData'
 import TestModeBannerDeferred from '@/components/TestModeBannerDeferred'
 import { loadEnabledLocales } from '@/i18n/locale-settings'
+import { isRtlLocale } from '@/i18n/locales'
 import { routing } from '@/i18n/routing'
 import { cacheTags } from '@/lib/cache-tags'
 import { openSauceOne } from '@/lib/fonts'
@@ -83,6 +84,7 @@ export default async function LocaleLayout({ params, children }: LayoutProps<'/[
   return (
     <html
       lang={locale}
+      dir={isRtlLocale(locale) ? 'rtl' : 'ltr'}
       className={openSauceOne.variable}
       data-theme-preset={runtimeTheme.theme.presetId}
       suppressHydrationWarning

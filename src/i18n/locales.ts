@@ -1,4 +1,4 @@
-export const SUPPORTED_LOCALES = ['en', 'de', 'es', 'pt', 'fr', 'zh'] as const
+export const SUPPORTED_LOCALES = ['en', 'de', 'es', 'pt', 'fr', 'zh', 'ar', 'ja', 'ko', 'tr', 'hi', 'vi', 'th', 'id', 'ms', 'ru', 'uk', 'it'] as const
 
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
 
@@ -15,6 +15,24 @@ export const LOCALE_LABELS: Record<SupportedLocale, string> = {
   pt: 'Português',
   fr: 'French',
   zh: '中文',
+  ar: 'العربية',
+  ja: '日本語',
+  ko: '한국어',
+  tr: 'Türkçe',
+  hi: 'हिन्दी',
+  vi: 'Tiếng Việt',
+  th: 'ไทย',
+  id: 'Bahasa Indonesia',
+  ms: 'Bahasa Melayu',
+  ru: 'Русский',
+  uk: 'Українська',
+  it: 'Italiano',
+}
+
+export const RTL_LOCALES: SupportedLocale[] = ['ar']
+
+export function isRtlLocale(locale: string): boolean {
+  return RTL_LOCALES.includes(locale as SupportedLocale)
 }
 
 export const LOOP_LABELS: Record<SupportedLocale, string> = {
@@ -24,6 +42,18 @@ export const LOOP_LABELS: Record<SupportedLocale, string> = {
   pt: 'Língua',
   fr: 'Langue',
   zh: '语言',
+  ar: 'اللغة',
+  ja: '言語',
+  ko: '언어',
+  tr: 'Dil',
+  hi: 'भाषा',
+  vi: 'Ngôn ngữ',
+  th: 'ภาษา',
+  id: 'Bahasa',
+  ms: 'Bahasa',
+  ru: 'Язык',
+  uk: 'Мова',
+  it: 'Lingua',
 }
 
 export function normalizeEnabledLocales(locales: string[]): SupportedLocale[] {

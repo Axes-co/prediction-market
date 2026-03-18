@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "https://data-api.kuest.com",
+      "url": "https://data-api.axes.co",
       "description": "Production"
     }
   ],

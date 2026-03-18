@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "https://price-reference.kuest.com",
+      "url": "https://price-reference.axes.co",
       "description": "Production"
     }
   ],
