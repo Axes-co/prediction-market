@@ -12,9 +12,10 @@ import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 
 const INITIAL_CATEGORY_COUNT = 12
 
+type SocialField = 'discordLink' | 'twitterLink' | 'facebookLink' | 'instagramLink' | 'tiktokLink' | 'linkedinLink' | 'youtubeLink'
+
 interface SocialLinkConfig {
-  field: 'discordLink' | 'twitterLink' | 'facebookLink' | 'instagramLink' | 'tiktokLink' | 'linkedinLink' | 'youtubeLink'
-  labelKey: string
+  field: SocialField
   icon: React.ReactNode
 }
 
@@ -80,13 +81,13 @@ function FacebookIcon() {
 }
 
 const SOCIAL_LINKS: SocialLinkConfig[] = [
-  { field: 'twitterLink', labelKey: 'ftr.twt', icon: <TwitterIcon /> },
-  { field: 'discordLink', labelKey: 'ftr.dsc', icon: <DiscordIcon /> },
-  { field: 'instagramLink', labelKey: 'ftr.ins', icon: <InstagramIcon /> },
-  { field: 'tiktokLink', labelKey: 'ftr.tik', icon: <TikTokIcon /> },
-  { field: 'linkedinLink', labelKey: 'ftr.lnk', icon: <LinkedInIcon /> },
-  { field: 'youtubeLink', labelKey: 'ftr.ytb', icon: <YouTubeIcon /> },
-  { field: 'facebookLink', labelKey: 'ftr.fbk', icon: <FacebookIcon /> },
+  { field: 'twitterLink', icon: <TwitterIcon /> },
+  { field: 'discordLink', icon: <DiscordIcon /> },
+  { field: 'instagramLink', icon: <InstagramIcon /> },
+  { field: 'tiktokLink', icon: <TikTokIcon /> },
+  { field: 'linkedinLink', icon: <LinkedInIcon /> },
+  { field: 'youtubeLink', icon: <YouTubeIcon /> },
+  { field: 'facebookLink', icon: <FacebookIcon /> },
 ]
 
 export default function Footer() {
@@ -98,6 +99,16 @@ export default function Footer() {
   const mainCategories = tags.filter(tag => tag.slug !== 'trending' && tag.slug !== 'new')
   const visibleCategories = showAllCategories ? mainCategories : mainCategories.slice(0, INITIAL_CATEGORY_COUNT)
   const hasMoreCategories = mainCategories.length > INITIAL_CATEGORY_COUNT
+
+  const socialLabels: Record<SocialField, string> = {
+    twitterLink: t('ftr.twt'),
+    discordLink: t('ftr.dsc'),
+    instagramLink: t('ftr.ins'),
+    tiktokLink: t('ftr.tik'),
+    linkedinLink: t('ftr.lnk'),
+    youtubeLink: t('ftr.ytb'),
+    facebookLink: t('ftr.fbk'),
+  }
 
   const activeSocials = SOCIAL_LINKS.filter(s => site[s.field])
   const socialIcons = activeSocials.filter(s => site[s.field])
@@ -173,7 +184,7 @@ export default function Footer() {
                     {t('ftr.sup')}
                   </a>
                 )}
-                {activeSocials.map(({ field, labelKey, icon }) => (
+                {activeSocials.map(({ field, icon }) => (
                   <a
                     key={field}
                     href={site[field]!}
@@ -182,7 +193,7 @@ export default function Footer() {
                     className="flex items-center gap-2 text-sm font-medium text-foreground transition-colors hover:text-muted-foreground"
                   >
                     {icon}
-                    <span>{t(labelKey)}</span>
+                    <span>{socialLabels[field]}</span>
                   </a>
                 ))}
               </div>
@@ -230,13 +241,13 @@ export default function Footer() {
           {/* Social Icons */}
           {socialIcons.length > 0 && (
             <div className="flex items-center gap-3">
-              {socialIcons.map(({ field, labelKey, icon }) => (
+              {socialIcons.map(({ field, icon }) => (
                 <a
                   key={field}
                   href={site[field]!}
                   target="_blank"
                   rel="noopener noreferrer"
-                  aria-label={t(labelKey)}
+                  aria-label={socialLabels[field]}
                   className="text-foreground transition-colors hover:text-muted-foreground"
                 >
                   {icon}
