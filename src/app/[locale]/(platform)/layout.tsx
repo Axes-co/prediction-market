@@ -4,6 +4,7 @@ import type { SupportedLocale } from '@/i18n/locales'
 import { getExtracted, setRequestLocale } from 'next-intl/server'
 import { cacheTag } from 'next/cache'
 import AffiliateQueryHandler from '@/app/[locale]/(platform)/_components/AffiliateQueryHandler'
+import Footer from '@/app/[locale]/(platform)/_components/Footer'
 import Header from '@/app/[locale]/(platform)/_components/Header'
 import NavigationTabs from '@/app/[locale]/(platform)/_components/NavigationTabs'
 import PlatformViewerState from '@/app/[locale]/(platform)/_components/PlatformViewerState'
@@ -37,6 +38,7 @@ export default async function PlatformLayout({ params, children }: LayoutProps<'
           <Header />
           <NavigationTabs />
           {children}
+          <Footer year={new Date().getFullYear()} />
           <AffiliateQueryHandler />
         </PlatformNavigationProvider>
       </FilterProvider>
