@@ -21,6 +21,7 @@ import {
   sanitizeThemeSiteLogoSvg,
   validateThemeSiteDescription,
   validateThemeSiteExternalUrl,
+  validateThemeSiteFooterDisclaimer,
   validateThemeSiteGoogleAnalyticsId,
   validateThemeSiteLogoImagePath,
   validateThemeSiteLogoMode,
@@ -47,6 +48,7 @@ const THEME_SITE_TIKTOK_LINK_KEY = 'site_tiktok_link'
 const THEME_SITE_LINKEDIN_LINK_KEY = 'site_linkedin_link'
 const THEME_SITE_YOUTUBE_LINK_KEY = 'site_youtube_link'
 const THEME_SITE_SUPPORT_URL_KEY = 'site_support_url'
+const THEME_SITE_FOOTER_DISCLAIMER_KEY = 'site_footer_disclaimer'
 const GENERAL_PWA_ICON_192_PATH_KEY = 'pwa_icon_192_path'
 const GENERAL_PWA_ICON_512_PATH_KEY = 'pwa_icon_512_path'
 const GENERAL_FEE_RECIPIENT_WALLET_KEY = 'fee_recipient_wallet'
@@ -102,6 +104,8 @@ interface NormalizedThemeSiteConfig {
   youtubeLinkValue: string
   supportUrl: string | null
   supportUrlValue: string
+  footerDisclaimer: string | null
+  footerDisclaimerValue: string
   feeRecipientWallet: `0x${string}`
   feeRecipientWalletValue: string
   lifiIntegrator: string | null
@@ -142,6 +146,7 @@ export interface ThemeSiteSettingsFormState {
   linkedinLink: string
   youtubeLink: string
   supportUrl: string
+  footerDisclaimer: string
   feeRecipientWallet: string
   lifiIntegrator: string
   lifiApiKey: string
@@ -284,6 +289,7 @@ function normalizeThemeSiteConfig(params: {
   linkedinLinkValue: string | null | undefined
   youtubeLinkValue: string | null | undefined
   supportUrlValue: string | null | undefined
+  footerDisclaimerValue: string | null | undefined
   feeRecipientWalletValue: string | null | undefined
   lifiIntegratorValue?: string | null | undefined
   lifiApiKeyValue?: string | null | undefined
@@ -303,6 +309,7 @@ function normalizeThemeSiteConfig(params: {
   linkedinLinkErrorLabel: string
   youtubeLinkErrorLabel: string
   supportUrlErrorLabel: string
+  footerDisclaimerErrorLabel?: string
   feeRecipientWalletErrorLabel: string
   lifiIntegratorErrorLabel?: string
   lifiApiKeyErrorLabel?: string
@@ -385,6 +392,14 @@ function normalizeThemeSiteConfig(params: {
     return { data: null, error: supportUrlValidated.error }
   }
 
+  const footerDisclaimerValidated = validateThemeSiteFooterDisclaimer(
+    params.footerDisclaimerValue,
+    params.footerDisclaimerErrorLabel ?? 'Footer disclaimer',
+  )
+  if (footerDisclaimerValidated.error) {
+    return { data: null, error: footerDisclaimerValidated.error }
+  }
+
   const feeRecipientWalletValidated = normalizeFeeRecipientWalletAddress(
     params.feeRecipientWalletValue,
     params.feeRecipientWalletErrorLabel,
@@ -455,6 +470,8 @@ function normalizeThemeSiteConfig(params: {
       youtubeLinkValue: youtubeLinkValidated.value ?? '',
       supportUrl: supportUrlValidated.value,
       supportUrlValue: supportUrlValidated.value ?? '',
+      footerDisclaimer: footerDisclaimerValidated.value,
+      footerDisclaimerValue: footerDisclaimerValidated.value ?? '',
       feeRecipientWallet: feeRecipientWalletValidated.value!,
       feeRecipientWalletValue: feeRecipientWalletValidated.value!,
       lifiIntegrator: lifiIntegratorValidated.value,
@@ -493,6 +510,7 @@ function buildThemeSiteIdentity(config: NormalizedThemeSiteConfig): ThemeSiteIde
     linkedinLink: config.linkedinLink,
     youtubeLink: config.youtubeLink,
     supportUrl: config.supportUrl,
+    footerDisclaimer: config.footerDisclaimer,
     pwaIcon192Path: config.pwaIcon192Path,
     pwaIcon512Path: config.pwaIcon512Path,
     pwaIcon192Url,
@@ -604,6 +622,7 @@ export function getThemeSiteSettingsFormState(allSettings?: SettingsMap): ThemeS
     linkedinLinkValue: generalSettings?.[THEME_SITE_LINKEDIN_LINK_KEY]?.value ?? defaultSite.linkedinLink,
     youtubeLinkValue: generalSettings?.[THEME_SITE_YOUTUBE_LINK_KEY]?.value ?? defaultSite.youtubeLink,
     supportUrlValue: generalSettings?.[THEME_SITE_SUPPORT_URL_KEY]?.value ?? defaultSite.supportUrl,
+    footerDisclaimerValue: generalSettings?.[THEME_SITE_FOOTER_DISCLAIMER_KEY]?.value ?? defaultSite.footerDisclaimer,
     feeRecipientWalletValue: generalSettings?.[GENERAL_FEE_RECIPIENT_WALLET_KEY]?.value ?? ZERO_ADDRESS,
     siteNameErrorLabel: 'Site name',
     siteDescriptionErrorLabel: 'Site description',
@@ -642,6 +661,7 @@ export function getThemeSiteSettingsFormState(allSettings?: SettingsMap): ThemeS
       linkedinLink: normalized.data.linkedinLinkValue,
       youtubeLink: normalized.data.youtubeLinkValue,
       supportUrl: normalized.data.supportUrlValue,
+      footerDisclaimer: normalized.data.footerDisclaimerValue,
       feeRecipientWallet: isZeroAddress(normalized.data.feeRecipientWalletValue)
         ? ''
         : normalized.data.feeRecipientWalletValue,
@@ -668,6 +688,7 @@ export function getThemeSiteSettingsFormState(allSettings?: SettingsMap): ThemeS
     linkedinLink: defaultSite.linkedinLink ?? '',
     youtubeLink: defaultSite.youtubeLink ?? '',
     supportUrl: defaultSite.supportUrl ?? '',
+    footerDisclaimer: defaultSite.footerDisclaimer ?? '',
     feeRecipientWallet: '',
     lifiIntegrator,
     lifiApiKey: '',
@@ -710,6 +731,7 @@ export function validateThemeSiteSettingsInput(params: {
   linkedinLink: string | null | undefined
   youtubeLink: string | null | undefined
   supportUrl: string | null | undefined
+  footerDisclaimer: string | null | undefined
   feeRecipientWallet: string | null | undefined
   lifiIntegrator: string | null | undefined
   lifiApiKey: string | null | undefined
@@ -731,6 +753,7 @@ export function validateThemeSiteSettingsInput(params: {
     linkedinLinkValue: params.linkedinLink,
     youtubeLinkValue: params.youtubeLink,
     supportUrlValue: params.supportUrl,
+    footerDisclaimerValue: params.footerDisclaimer,
     feeRecipientWalletValue: params.feeRecipientWallet,
     lifiIntegratorValue: params.lifiIntegrator,
     lifiApiKeyValue: params.lifiApiKey,
@@ -803,6 +826,7 @@ export async function loadRuntimeThemeState(): Promise<RuntimeThemeState> {
         linkedinLinkValue: generalSettings?.[THEME_SITE_LINKEDIN_LINK_KEY]?.value,
         youtubeLinkValue: generalSettings?.[THEME_SITE_YOUTUBE_LINK_KEY]?.value,
         supportUrlValue: generalSettings?.[THEME_SITE_SUPPORT_URL_KEY]?.value,
+        footerDisclaimerValue: generalSettings?.[THEME_SITE_FOOTER_DISCLAIMER_KEY]?.value,
         feeRecipientWalletValue: generalSettings?.[GENERAL_FEE_RECIPIENT_WALLET_KEY]?.value ?? ZERO_ADDRESS,
         siteNameErrorLabel: 'Site name in settings',
         siteDescriptionErrorLabel: 'Site description in settings',

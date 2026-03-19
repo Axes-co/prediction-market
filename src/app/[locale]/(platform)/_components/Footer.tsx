@@ -213,6 +213,13 @@ export default function Footer({ year }: { year: number }) {
               <FooterLocaleSwitcher />
 
             </div>
+
+            {/* Disclaimer */}
+            {site.footerDisclaimer && (
+              <p className="text-xs/relaxed text-muted-foreground/60">
+                {site.footerDisclaimer}
+              </p>
+            )}
           </div>
 
         </div>

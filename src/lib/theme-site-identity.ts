@@ -55,6 +55,7 @@ export interface ThemeSiteIdentity extends ThemeSiteSocialLinks {
   logoUrl: string
   googleAnalyticsId: string | null
   supportUrl: string | null
+  footerDisclaimer: string | null
   pwaIcon192Path: string | null
   pwaIcon512Path: string | null
   pwaIcon192Url: string
@@ -101,6 +102,7 @@ export function createDefaultThemeSiteIdentity(): ThemeSiteIdentity {
     linkedinLink: null,
     youtubeLink: null,
     supportUrl: null,
+    footerDisclaimer: null,
     pwaIcon192Path: null,
     pwaIcon512Path: null,
     pwaIcon192Url: DEFAULT_THEME_SITE_PWA_ICON_192_URL,
@@ -294,6 +296,19 @@ export function validateThemeSiteLogoImagePath(value: string | null | undefined,
 
   if (/[^\w./-]/.test(normalized)) {
     return { value: null, error: `${sourceLabel} contains unsupported characters.` }
+  }
+
+  return { value: normalized, error: null }
+}
+
+export function validateThemeSiteFooterDisclaimer(value: string | null | undefined, sourceLabel: string) {
+  const normalized = normalizeOptionalString(value)
+  if (!normalized) {
+    return { value: null, error: null as string | null }
+  }
+
+  if (normalized.length > 2000) {
+    return { value: null, error: `${sourceLabel} must be at most 2000 characters.` }
   }
 
   return { value: normalized, error: null }

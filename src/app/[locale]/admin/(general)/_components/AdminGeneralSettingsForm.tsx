@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input'
 import { InputError } from '@/components/ui/input-error'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { cn, sanitizeSvg } from '@/lib/utils'
 
 const initialState = {
@@ -136,6 +137,7 @@ export default function AdminGeneralSettingsForm({
   const initialLinkedinLink = initialThemeSiteSettings.linkedinLink
   const initialYoutubeLink = initialThemeSiteSettings.youtubeLink
   const initialSupportUrl = initialThemeSiteSettings.supportUrl
+  const initialFooterDisclaimer = initialThemeSiteSettings.footerDisclaimer
   const initialFeeRecipientWallet = initialThemeSiteSettings.feeRecipientWallet
   const initialLiFiIntegrator = initialThemeSiteSettings.lifiIntegrator
   const initialLiFiApiKey = initialThemeSiteSettings.lifiApiKey
@@ -163,6 +165,7 @@ export default function AdminGeneralSettingsForm({
   const [linkedinLink, setLinkedinLink] = useState(initialLinkedinLink)
   const [youtubeLink, setYoutubeLink] = useState(initialYoutubeLink)
   const [supportUrl, setSupportUrl] = useState(initialSupportUrl)
+  const [footerDisclaimer, setFooterDisclaimer] = useState(initialFooterDisclaimer)
   const [feeRecipientWallet, setFeeRecipientWallet] = useState(initialFeeRecipientWallet)
   const [lifiIntegrator, setLifiIntegrator] = useState(initialLiFiIntegrator)
   const [lifiApiKey, setLifiApiKey] = useState(initialLiFiApiKey)
@@ -243,6 +246,10 @@ export default function AdminGeneralSettingsForm({
   useEffect(() => {
     setSupportUrl(initialSupportUrl)
   }, [initialSupportUrl])
+
+  useEffect(() => {
+    setFooterDisclaimer(initialFooterDisclaimer)
+  }, [initialFooterDisclaimer])
 
   useEffect(() => {
     setFeeRecipientWallet(initialFeeRecipientWallet)
@@ -646,6 +653,19 @@ export default function AdminGeneralSettingsForm({
                 onChange={event => setSupportUrl(event.target.value)}
                 disabled={isPending}
                 placeholder={t('Discord, Telegram, WhatsApp link, or support email (optional)')}
+              />
+            </div>
+
+            <div className="grid gap-2 md:col-span-2">
+              <Label htmlFor="theme-footer-disclaimer">{t('Footer disclaimer')}</Label>
+              <Textarea
+                id="theme-footer-disclaimer"
+                name="footer_disclaimer"
+                maxLength={2000}
+                value={footerDisclaimer}
+                onChange={event => setFooterDisclaimer(event.target.value)}
+                disabled={isPending}
+                placeholder={t('Legal disclaimer or company information shown at the bottom of the footer (optional)')}
               />
             </div>
           </div>
