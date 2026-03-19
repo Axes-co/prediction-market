@@ -11,6 +11,15 @@ interface SiteLogoIconProps {
   size?: number
 }
 
+const HARDCODED_FILL_PATTERN = /\bfill\s*=\s*"(?!none|transparent|currentColor)#?[^"]+"/gi
+const HARDCODED_STROKE_PATTERN = /\bstroke\s*=\s*"(?!none|transparent|currentColor)#?[^"]+"/gi
+
+function makeThemeAware(svg: string) {
+  return svg
+    .replace(HARDCODED_FILL_PATTERN, 'fill="currentColor"')
+    .replace(HARDCODED_STROKE_PATTERN, 'stroke="currentColor"')
+}
+
 export default function SiteLogoIcon({
   logoSvg,
   logoImageUrl,
@@ -38,7 +47,7 @@ export default function SiteLogoIcon({
   return (
     <span
       className={cn(className, svgClassName)}
-      dangerouslySetInnerHTML={{ __html: logoSvg }}
+      dangerouslySetInnerHTML={{ __html: makeThemeAware(logoSvg) }}
     />
   )
 }
