@@ -64,13 +64,7 @@ export default function Footer({ year }: { year: number }) {
 
           {/* Logo & Description */}
           <div className="flex flex-col items-start gap-2">
-            <IntentPrefetchLink
-              href="/"
-              className="
-                flex items-center gap-2 text-xl font-medium text-foreground transition-opacity
-                hover:opacity-80
-              "
-            >
+            <IntentPrefetchLink href="/" className="block">
               <SiteLogoIcon
                 logoSvg={site.logoSvg}
                 logoImageUrl={site.logoImageUrl}
@@ -79,7 +73,6 @@ export default function Footer({ year }: { year: number }) {
                 imageClassName="size-8 object-contain"
                 size={32}
               />
-              <span className="text-lg font-semibold">{site.name}</span>
             </IntentPrefetchLink>
             <p className="text-base font-medium text-foreground">{site.description}</p>
           </div>
@@ -87,7 +80,7 @@ export default function Footer({ year }: { year: number }) {
           {/* 3-Column Grid */}
           <div className="grid grid-cols-2 gap-8 lg:grid-cols-[1fr_auto_auto] lg:gap-16">
 
-            {/* Categories */}
+            {/* Categories — dynamic from navigation context (same source as header tabs) */}
             {mainCategories.length > 0 && (
               <div className="col-span-2 flex flex-col lg:col-span-1">
                 <h3 className="mb-3 text-sm font-medium text-muted-foreground">
@@ -121,34 +114,32 @@ export default function Footer({ year }: { year: number }) {
             )}
 
             {/* Support & Social */}
-            {activeSocials.length > 0 && (
-              <div className="flex flex-col">
-                <h3 className="mb-3 text-sm font-medium text-muted-foreground">
-                  {t('Support & Social')}
-                </h3>
-                <div className="flex flex-col gap-3">
-                  <IntentPrefetchLink href="/docs/users" className={LINK_CLASS}>
-                    {t('Documentation')}
-                  </IntentPrefetchLink>
-                  {activeSocials.map(({ field, label }) => (
-                    <a
-                      key={field}
-                      href={site[field]!}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={LINK_CLASS}
-                    >
-                      {label}
-                    </a>
-                  ))}
-                  {site.supportUrl && (
-                    <a href={site.supportUrl} target="_blank" rel="noopener noreferrer" className={LINK_CLASS}>
-                      {t('Support')}
-                    </a>
-                  )}
-                </div>
+            <div className="flex flex-col">
+              <h3 className="mb-3 text-sm font-medium text-muted-foreground">
+                {t('Support & Social')}
+              </h3>
+              <div className="flex flex-col gap-3">
+                <IntentPrefetchLink href="/docs/users" className={LINK_CLASS}>
+                  {t('Documentation')}
+                </IntentPrefetchLink>
+                {activeSocials.map(({ field, label }) => (
+                  <a
+                    key={field}
+                    href={site[field]!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={LINK_CLASS}
+                  >
+                    {label}
+                  </a>
+                ))}
+                {site.supportUrl && (
+                  <a href={site.supportUrl} target="_blank" rel="noopener noreferrer" className={LINK_CLASS}>
+                    {t('Support')}
+                  </a>
+                )}
               </div>
-            )}
+            </div>
 
             {/* Site Links */}
             <div className="flex flex-col">
@@ -161,6 +152,9 @@ export default function Footer({ year }: { year: number }) {
                 </IntentPrefetchLink>
                 <IntentPrefetchLink href="/docs/api-reference" className={LINK_CLASS}>
                   {t('APIs')}
+                </IntentPrefetchLink>
+                <IntentPrefetchLink href="/activity" className={LINK_CLASS}>
+                  {t('Activity')}
                 </IntentPrefetchLink>
                 <IntentPrefetchLink href="/docs/users" className={LINK_CLASS}>
                   {t('Documentation')}
