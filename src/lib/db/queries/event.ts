@@ -814,6 +814,8 @@ function eventResource(
       neg_risk: Boolean(market.neg_risk),
       neg_risk_other: Boolean(market.neg_risk_other),
       sports_market_type: market.sports?.sports_market_type ?? null,
+      sports_game_start_time: market.sports?.sports_game_start_time?.toISOString?.() ?? null,
+      sports_start_time: market.sports?.sports_start_time?.toISOString?.() ?? null,
       sports_group_item_title: market.sports?.sports_group_item_title ?? null,
       sports_group_item_threshold: market.sports?.sports_group_item_threshold ?? null,
       end_time: market.end_time?.toISOString?.() ?? null,
@@ -885,6 +887,8 @@ function eventResource(
     rules: event.rules || undefined,
     series_slug: event.series_slug ?? null,
     series_recurrence: event.series_recurrence ?? null,
+    sports_event_id: event.sports?.sports_event_id ?? null,
+    sports_parent_event_id: toOptionalNumber(event.sports?.sports_parent_event_id),
     sports_event_slug: event.sports?.sports_event_slug ?? null,
     sports_sport_slug: resolveCanonicalSportsSportSlug(sportsSlugResolver, {
       sportsSportSlug: event.sports?.sports_sport_slug ?? null,

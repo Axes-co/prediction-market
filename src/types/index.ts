@@ -14,6 +14,8 @@ export interface Event {
   rules?: string
   series_slug?: string | null
   series_recurrence?: string | null
+  sports_event_id?: string | null
+  sports_parent_event_id?: number | null
   sports_event_slug?: string | null
   sports_sport_slug?: string | null
   sports_section?: 'games' | 'props' | null
@@ -106,6 +108,8 @@ export interface Market {
   block_timestamp: string
   metadata?: any
   sports_market_type?: string | null
+  sports_game_start_time?: string | null
+  sports_start_time?: string | null
   sports_group_item_title?: string | null
   sports_group_item_threshold?: string | null
   volume_24h: number
