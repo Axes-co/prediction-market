@@ -2,7 +2,7 @@
 
 import { ChevronDownIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import FooterLocaleSwitcher from '@/app/[locale]/(platform)/_components/FooterLocaleSwitcher'
 import { usePlatformNavigationData } from '@/app/[locale]/(platform)/_providers/PlatformNavigationProvider'
 import IntentPrefetchLink from '@/components/IntentPrefetchLink'
@@ -109,6 +109,9 @@ export default function Footer() {
     youtubeLink: t('ftr.ytb'),
     facebookLink: t('ftr.fbk'),
   }
+
+  const [year, setYear] = useState('')
+  useEffect(() => { setYear(String(new Date().getFullYear())) }, [])
 
   const activeSocials = SOCIAL_LINKS.filter(s => site[s.field])
   const socialIcons = activeSocials.filter(s => site[s.field])
@@ -259,7 +262,7 @@ export default function Footer() {
           {/* Copyright & Language */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <span className="text-sm text-muted-foreground">
-              {`${site.name} \u00A9 ${new Date().getFullYear()}`}
+              {`${site.name} \u00A9 ${year}`}
             </span>
             <FooterLocaleSwitcher />
           </div>
