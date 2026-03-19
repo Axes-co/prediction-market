@@ -38,7 +38,7 @@ export default async function PlatformLayout({ params, children }: LayoutProps<'
           <Header />
           <NavigationTabs />
           {children}
-          <Footer />
+          <Footer year={new Date().getFullYear()} />
           <AffiliateQueryHandler />
         </PlatformNavigationProvider>
       </FilterProvider>
