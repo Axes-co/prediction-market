@@ -1,6 +1,7 @@
 'use client'
 
 import type { SupportedLocale } from '@/i18n/locales'
+import { GlobeIcon } from 'lucide-react'
 import { useLocale } from 'next-intl'
 import { useParams } from 'next/navigation'
 import { useEffect, useRef, useState, useTransition } from 'react'
@@ -80,11 +81,7 @@ export default function FooterLocaleSwitcher() {
           disabled:opacity-50
         "
       >
-        <svg className="size-4" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
-          <ellipse cx="9" cy="9" rx="3" ry="7.25" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
-          <line x1="1.75" y1="9" x2="16.25" y2="9" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
-          <circle cx="9" cy="9" r="7.25" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
-        </svg>
+        <GlobeIcon className="size-4" />
         <span>{currentLabel}</span>
         <svg className="size-3 transition-transform group-data-[state=open]:rotate-180" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg">
           <polyline fill="none" points="1.75 4.25 6 8.5 10.25 4.25" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
