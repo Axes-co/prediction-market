@@ -127,11 +127,11 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
     if (typeof window === 'undefined') {
       return ''
     }
-    const profileSlug = user?.username?.trim() || user?.proxy_wallet_address?.trim() || ''
+    const profileSlug = user?.username?.trim() || user?.address?.trim() || ''
     return profileSlug
       ? new URL(buildPublicProfilePath(profileSlug) ?? '/', window.location.origin).toString()
       : window.location.origin
-  }, [user?.proxy_wallet_address, user?.username])
+  }, [user?.address, user?.username])
 
   async function handleClaimAll() {
     if (isSubmitting) {

@@ -44,7 +44,7 @@ export function PositionShareDialog({ open, onOpenChange, payload }: PositionSha
     }
     const profileSlug = payload.userName?.trim()
       || user?.username?.trim()
-      || user?.proxy_wallet_address?.trim()
+      || user?.address?.trim()
       || ''
     if (!profileSlug) {
       return typeof window !== 'undefined' ? window.location.origin : ''
@@ -53,7 +53,7 @@ export function PositionShareDialog({ open, onOpenChange, payload }: PositionSha
     return typeof window !== 'undefined'
       ? new URL(profilePath, window.location.origin).toString()
       : profilePath
-  }, [payload, user?.proxy_wallet_address, user?.username])
+  }, [payload, user?.address, user?.username])
 
   const buildShareText = useCallback(
     (siteTag: string) => [
