@@ -116,6 +116,20 @@ const EMPTY_QUERY_SELECTION: SportsEventQuerySelection = {
   outcomeIndex: null,
 }
 
+function areRecordValuesEqual<T extends string | null | undefined>(
+  left: Record<string, T>,
+  right: Record<string, T>,
+) {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+
+  if (leftKeys.length !== rightKeys.length) {
+    return false
+  }
+
+  return leftKeys.every(key => left[key] === right[key])
+}
+
 function parseRequestedOutcomeIndex(value: string | null | undefined) {
   const rawValue = value?.trim() ?? ''
   const parsed = Number.parseInt(rawValue, 10)
@@ -933,8 +947,10 @@ export default function SportsEventCenter({
   const setIsMobileOrderPanelOpen = useOrder(state => state.setIsMobileOrderPanelOpen)
   const openLivestream = useSportsLivestream(state => state.openStream)
   const activeStreamUrl = useSportsLivestream(state => state.streamUrl)
+  const orderEventId = useOrder(state => state.event?.id ?? null)
   const orderMarketConditionId = useOrder(state => state.market?.condition_id ?? null)
   const orderOutcomeIndex = useOrder(state => state.outcome?.outcome_index ?? null)
+  const orderSide = useOrder(state => state.side)
   const user = useUser()
   const [querySelection, setQuerySelection] = useState<SportsEventQuerySelection>(EMPTY_QUERY_SELECTION)
   const [oddsFormat, setOddsFormat] = useState<OddsFormat>('price')
@@ -1599,7 +1615,9 @@ export default function SportsEventCenter({
 
     setSelectedAuxiliaryButtonByConditionId((current) => {
       if (isNewCard) {
-        return defaultSelectedByCondition
+        return areRecordValuesEqual(current, defaultSelectedByCondition)
+          ? current
+          : defaultSelectedByCondition
       }
 
       const next = { ...defaultSelectedByCondition }
@@ -1636,17 +1654,19 @@ export default function SportsEventCenter({
         }
       }
 
-      return next
+      return areRecordValuesEqual(current, next) ? current : next
     })
 
     setTabByAuxiliaryConditionId((current) => {
       const next = { ...current }
+      let changed = false
       auxiliaryPanelsForSelection.forEach(({ key }) => {
         if (!next[key]) {
           next[key] = 'orderBook'
+          changed = true
         }
       })
-      return next
+      return changed ? next : current
     })
 
     const marketMatchedAuxiliaryConditionId = shouldApplyMarketSlugSelection && marketSlugToButtonKey
@@ -1722,7 +1742,9 @@ export default function SportsEventCenter({
 
     setSelectedButtonBySection((current) => {
       if (isNewCard) {
-        return defaultSelectedBySection
+        return areRecordValuesEqual(current, defaultSelectedBySection)
+          ? current
+          : defaultSelectedBySection
       }
 
       const next: Record<EventSectionKey, string | null> = {
@@ -1752,7 +1774,7 @@ export default function SportsEventCenter({
         }
       }
 
-      return next
+      return areRecordValuesEqual(current, next) ? current : next
     })
 
     const defaultTradeButton = (shouldApplyMarketSlugSelection ? marketSlugToButtonKey : null)
@@ -2038,6 +2060,15 @@ export default function SportsEventCenter({
       return
     }
 
+    if (
+      orderEventId === activeCard.event.id
+      && orderMarketConditionId === market.condition_id
+      && orderOutcomeIndex === outcome.outcome_index
+      && orderSide === ORDER_SIDE.BUY
+    ) {
+      return
+    }
+
     setOrderEvent(activeCard.event)
     setOrderMarket(market)
     setOrderOutcome(outcome)
@@ -2045,6 +2076,10 @@ export default function SportsEventCenter({
   }, [
     activeCard,
     activeTradeContextButtonKey,
+    orderEventId,
+    orderMarketConditionId,
+    orderOutcomeIndex,
+    orderSide,
     setOrderEvent,
     setOrderMarket,
     setOrderOutcome,
@@ -2511,7 +2546,7 @@ export default function SportsEventCenter({
                         <span className="relative z-1 mr-1 uppercase opacity-80">{button.label}</span>
                         <span className={cn(
                           'relative z-1 text-sm leading-none tabular-nums transition-opacity',
-                          isActive ? 'text-foreground opacity-100' : 'opacity-45',
+                          isActive ? 'opacity-100' : 'opacity-45',
                         )}
                         >
                           {formatButtonOdds(button.cents)}
@@ -2801,8 +2836,8 @@ export default function SportsEventCenter({
                 onOpenRedeemForCondition={handleOpenRedeemForCondition}
                 oddsFormat={oddsFormat}
                 onChangeTab={() => {}}
-                onSelectButton={(buttonKey) => {
-                  setActiveTradeButtonKey(buttonKey)
+                onSelectButton={(buttonKey, options) => {
+                  updateSectionSelection('moneyline', buttonKey, options)
                 }}
               />
             </div>
@@ -2963,7 +2998,7 @@ export default function SportsEventCenter({
                                           <span className="relative z-1 mr-1 uppercase opacity-80">{button.label}</span>
                                           <span className={cn(
                                             'relative z-1 text-sm leading-none tabular-nums transition-opacity',
-                                            isActive ? 'text-foreground opacity-100' : 'opacity-45',
+                                            isActive ? 'opacity-100' : 'opacity-45',
                                           )}
                                           >
                                             {formatButtonOdds(button.cents)}

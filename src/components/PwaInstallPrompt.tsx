@@ -166,9 +166,7 @@ export default function PwaInstallPrompt() {
             <div className="min-w-0">
               <h3 className="text-sm font-semibold text-foreground">{t('Install app')}</h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                {isIos
-                  ? t('Install this app from Safari to keep it on your home screen.')
-                  : t('Install this app for a faster, full-screen experience.')}
+                {t('Install this app for a faster, full-screen experience.')}
               </p>
             </div>
 
