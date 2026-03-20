@@ -16,6 +16,8 @@ import { maybeShowAffiliateToast } from '@/lib/affiliate-toast'
 import {
   buildFeatureList,
   buildIframeCode,
+  buildIframeSrc,
+  buildPreviewSrc,
   buildWebComponentCode,
   EMBED_SCRIPT_URL,
 } from '@/lib/embed-widget'
@@ -29,6 +31,12 @@ interface AffiliateWidgetDialogProps {
     slug: string
     name: string
   }[]
+  /**
+   * When provided, the dialog renders the embed widget for this specific
+   * market and hides the category / market selectors.  Used on event pages
+   * where the market is already known.
+   */
+  eventSlug?: string
 }
 
 interface WidgetMarket {
@@ -252,6 +260,7 @@ export default function AffiliateWidgetDialog({
   open,
   onOpenChange,
   categories,
+  eventSlug,
 }: AffiliateWidgetDialogProps) {
   const t = useExtracted()
   const locale = useLocale()
@@ -285,7 +294,9 @@ export default function AffiliateWidgetDialog({
     () => marketsByCategory[selectedCategory] ?? [],
     [marketsByCategory, selectedCategory],
   )
-  const selectedMarket = currentMarkets.find(market => market.id === selectedMarketId) ?? currentMarkets[0]
+  const selectedMarket = eventSlug
+    ? { id: eventSlug, slug: eventSlug, label: eventSlug }
+    : (currentMarkets.find(market => market.id === selectedMarketId) ?? currentMarkets[0])
   const embedElementName = `${siteSlug}-market-embed`
   const embedIframeTitle = `${siteSlug}-market-iframe`
 
@@ -415,26 +426,30 @@ export default function AffiliateWidgetDialog({
     : IFRAME_HEIGHT_NO_CHART
   const iframeSrc = useMemo(
     () =>
-      buildAffiliateIframeSrc(
-        SITE_URL,
-        selectedCategory,
-        locale,
-        theme,
-        features,
-        affiliateCode,
-      ),
-    [selectedCategory, locale, theme, features, affiliateCode],
+      eventSlug
+        ? buildIframeSrc(SITE_URL, eventSlug, theme, features, affiliateCode)
+        : buildAffiliateIframeSrc(
+            SITE_URL,
+            selectedCategory,
+            locale,
+            theme,
+            features,
+            affiliateCode,
+          ),
+    [eventSlug, selectedCategory, locale, theme, features, affiliateCode],
   )
   const previewSrc = useMemo(
     () =>
-      buildAffiliatePreviewSrc(
-        selectedCategory,
-        locale,
-        theme,
-        features,
-        affiliateCode,
-      ),
-    [selectedCategory, locale, theme, features, affiliateCode],
+      eventSlug
+        ? buildPreviewSrc(eventSlug, theme, features, affiliateCode)
+        : buildAffiliatePreviewSrc(
+            selectedCategory,
+            locale,
+            theme,
+            features,
+            affiliateCode,
+          ),
+    [eventSlug, selectedCategory, locale, theme, features, affiliateCode],
   )
   const iframeCode = useMemo(
     () => buildIframeCode(iframeSrc, iframeHeight, embedIframeTitle),
@@ -554,27 +569,29 @@ export default function AffiliateWidgetDialog({
                 </div>
               </div>
 
-              <div className="space-y-3">
-                <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('Categories')}</Label>
-                <Select value={selectedCategory} onValueChange={setSelectedCategory} disabled={categories.length === 0}>
-                  <SelectTrigger className={`
-                    w-full bg-transparent text-sm
-                    hover:bg-transparent
-                    dark:bg-transparent
-                    dark:hover:bg-transparent
-                  `}
-                  >
-                    <SelectValue placeholder={t('Categories')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categories.map(category => (
-                      <SelectItem key={category.slug} value={category.slug}>
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {!eventSlug && (
+                <div className="space-y-3">
+                  <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('Categories')}</Label>
+                  <Select value={selectedCategory} onValueChange={setSelectedCategory} disabled={categories.length === 0}>
+                    <SelectTrigger className={`
+                      w-full bg-transparent text-sm
+                      hover:bg-transparent
+                      dark:bg-transparent
+                      dark:hover:bg-transparent
+                    `}
+                    >
+                      <SelectValue placeholder={t('Categories')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map(category => (
+                        <SelectItem key={category.slug} value={category.slug}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div className="space-y-3">
                 <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('OPTIONS')}</Label>

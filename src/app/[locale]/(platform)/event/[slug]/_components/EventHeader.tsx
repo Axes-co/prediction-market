@@ -1,6 +1,7 @@
 import type { Event } from '@/types'
 import { useEffect, useState } from 'react'
 import EventBookmark from '@/app/[locale]/(platform)/event/[slug]/_components/EventBookmark'
+import EventEmbedWidget from '@/app/[locale]/(platform)/event/[slug]/_components/EventEmbedWidget'
 import EventShare from '@/app/[locale]/(platform)/event/[slug]/_components/EventShare'
 import EventIconImage from '@/components/EventIconImage'
 import { cn } from '@/lib/utils'
@@ -58,6 +59,7 @@ export default function EventHeader({ event }: EventHeaderProps) {
       <div className="flex items-center gap-3 text-foreground">
         <EventShare event={event} />
         <EventBookmark event={event} />
+        <EventEmbedWidget event={event} />
       </div>
     </div>
   )
