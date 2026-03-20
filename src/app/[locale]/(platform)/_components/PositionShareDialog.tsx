@@ -14,6 +14,7 @@ import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 import { buildPublicProfilePath } from '@/lib/platform-routing'
 import { buildShareCardUrl } from '@/lib/share-card'
 import { cn } from '@/lib/utils'
+import { useUser } from '@/stores/useUser'
 
 interface PositionShareDialogProps {
   open: boolean
@@ -25,6 +26,7 @@ export function PositionShareDialog({ open, onOpenChange, payload }: PositionSha
   const t = useExtracted()
   const isMobile = useIsMobile()
   const site = useSiteIdentity()
+  const user = useUser()
   const [shareCardStatus, setShareCardStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [shareCardBlob, setShareCardBlob] = useState<Blob | null>(null)
   const [isCopyingShareImage, setIsCopyingShareImage] = useState(false)
@@ -40,12 +42,18 @@ export function PositionShareDialog({ open, onOpenChange, payload }: PositionSha
     if (!payload) {
       return ''
     }
-    const profileSlug = payload.userName?.trim() || 'user'
-    const profilePath = buildPublicProfilePath(profileSlug) ?? '/@user'
+    const profileSlug = payload.userName?.trim()
+      || user?.username?.trim()
+      || user?.proxy_wallet_address?.trim()
+      || ''
+    if (!profileSlug) {
+      return typeof window !== 'undefined' ? window.location.origin : ''
+    }
+    const profilePath = buildPublicProfilePath(profileSlug) ?? '/'
     return typeof window !== 'undefined'
       ? new URL(profilePath, window.location.origin).toString()
       : profilePath
-  }, [payload])
+  }, [payload, user?.proxy_wallet_address, user?.username])
 
   const buildShareText = useCallback(
     (siteTag: string) => [
