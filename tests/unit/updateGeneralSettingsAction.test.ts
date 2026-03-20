@@ -121,7 +121,7 @@ describe('updateGeneralSettingsAction', () => {
     expect(mocks.encryptSecret).toHaveBeenCalledWith('openrouter-123')
 
     const savedPayload = mocks.updateSettings.mock.calls[0][0] as Array<{ group: string, key: string, value: string }>
-    expect(savedPayload).toHaveLength(21)
+    expect(savedPayload).toHaveLength(24)
     expect(savedPayload.find(entry => entry.key === 'site_name')?.value).toBe('Kuest')
     expect(savedPayload.find(entry => entry.key === 'site_description')?.value).toBe('Prediction market')
     expect(savedPayload.find(entry => entry.key === 'site_logo_mode')?.value).toBe('svg')
@@ -136,6 +136,9 @@ describe('updateGeneralSettingsAction', () => {
     expect(savedPayload.find(entry => entry.key === 'site_tiktok_link')?.value).toBe('')
     expect(savedPayload.find(entry => entry.key === 'site_linkedin_link')?.value).toBe('')
     expect(savedPayload.find(entry => entry.key === 'site_youtube_link')?.value).toBe('')
+    expect(savedPayload.find(entry => entry.key === 'site_whatsapp_link')?.value).toBe('')
+    expect(savedPayload.find(entry => entry.key === 'site_telegram_link')?.value).toBe('')
+    expect(savedPayload.find(entry => entry.key === 'site_reddit_link')?.value).toBe('')
     expect(savedPayload.find(entry => entry.key === 'site_support_url')?.value).toBe('https://kuest.com/support')
     expect(savedPayload.find(entry => entry.key === 'fee_recipient_wallet')?.value).toBe('0x1111111111111111111111111111111111111111')
     expect(savedPayload.find(entry => entry.key === 'lifi_integrator')?.value).toBe('kuest-fork')
