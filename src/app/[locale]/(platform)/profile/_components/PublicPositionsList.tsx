@@ -350,11 +350,8 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
       return null
     }
 
-    return buildShareCardPayload(sharePosition, {
-      userName: user?.username || undefined,
-      userImage: user?.image || undefined,
-    })
-  }, [sharePosition, user?.image, user?.username])
+    return buildShareCardPayload(sharePosition, { userName: userAddress })
+  }, [sharePosition, userAddress])
 
   const handleShareOpenChange = useCallback((open: boolean) => {
     setIsShareDialogOpen(open)

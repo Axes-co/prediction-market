@@ -14,7 +14,6 @@ import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 import { buildPublicProfilePath } from '@/lib/platform-routing'
 import { buildShareCardUrl } from '@/lib/share-card'
 import { cn } from '@/lib/utils'
-import { useUser } from '@/stores/useUser'
 
 interface PositionShareDialogProps {
   open: boolean
@@ -26,7 +25,6 @@ export function PositionShareDialog({ open, onOpenChange, payload }: PositionSha
   const t = useExtracted()
   const isMobile = useIsMobile()
   const site = useSiteIdentity()
-  const user = useUser()
   const [shareCardStatus, setShareCardStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [shareCardBlob, setShareCardBlob] = useState<Blob | null>(null)
   const [isCopyingShareImage, setIsCopyingShareImage] = useState(false)
@@ -38,14 +36,11 @@ export function PositionShareDialog({ open, onOpenChange, payload }: PositionSha
     return buildShareCardUrl(payload)
   }, [payload])
 
-  const shareProfileUrl = useMemo(() => {
+  const shareUrl = useMemo(() => {
     if (!payload) {
       return ''
     }
-    const profileSlug = payload.userName?.trim()
-      || user?.username?.trim()
-      || user?.proxy_wallet_address?.trim()
-      || ''
+    const profileSlug = payload.userName?.trim() || ''
     if (!profileSlug) {
       return typeof window !== 'undefined' ? window.location.origin : ''
     }
@@ -53,14 +48,10 @@ export function PositionShareDialog({ open, onOpenChange, payload }: PositionSha
     return typeof window !== 'undefined'
       ? new URL(profilePath, window.location.origin).toString()
       : profilePath
-  }, [payload, user?.proxy_wallet_address, user?.username])
+  }, [payload])
 
   const buildShareText = useCallback(
-    (siteTag: string) => [
-      t('I just put my money where my mouth is on {site}.', { site: siteTag }),
-      '',
-      t('Trade against me:'),
-    ].join('\n'),
+    (siteTag: string) => t('Check out this trade on {site}.', { site: siteTag }),
     [t],
   )
 
@@ -228,7 +219,7 @@ export function PositionShareDialog({ open, onOpenChange, payload }: PositionSha
         <SocialShareButtons
           site={site}
           buildShareText={buildShareText}
-          shareUrl={shareProfileUrl}
+          shareUrl={shareUrl}
           disabled={!isShareReady || isCopyingShareImage}
           className="flex items-center justify-center gap-2"
         />

@@ -834,10 +834,10 @@ export default function EventMarketPositions({
       return null
     }
     return buildShareCardPayload(buildShareCardPosition(sharePosition), {
-      userName: user?.username || undefined,
+      userName: user?.username?.trim() || user?.proxy_wallet_address?.trim() || undefined,
       userImage: user?.image || undefined,
     })
-  }, [sharePosition, user?.image, user?.username])
+  }, [sharePosition, user?.image, user?.proxy_wallet_address, user?.username])
 
   const handleShareOpenChange = useCallback((open: boolean) => {
     setIsShareDialogOpen(open)
