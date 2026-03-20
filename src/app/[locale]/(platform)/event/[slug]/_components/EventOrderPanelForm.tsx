@@ -1,7 +1,9 @@
+import type { InfiniteData } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
+import type { PortfolioUserOpenOrder } from '@/app/[locale]/(platform)/portfolio/_types/PortfolioOpenOrdersTypes'
 import type { OddsFormat } from '@/lib/odds-format'
 import type { SafeTransactionRequestPayload } from '@/lib/safe/transactions'
-import type { Event, Market, Outcome } from '@/types'
+import type { Event, Market, Outcome, UserPosition } from '@/types'
 import { useAppKitAccount } from '@reown/appkit/react'
 import { useQueryClient } from '@tanstack/react-query'
 import { CheckIcon, TriangleAlertIcon } from 'lucide-react'
@@ -41,6 +43,12 @@ import { defaultNetwork } from '@/lib/appkit'
 import { CLOB_ORDER_TYPE, DEFAULT_ERROR_MESSAGE, getExchangeEip712Domain, ORDER_SIDE, ORDER_TYPE, OUTCOME_INDEX } from '@/lib/constants'
 import { resolveEventPagePath } from '@/lib/events-routing'
 import { formatCentsLabel, formatCurrency, formatSharesLabel, toCents } from '@/lib/formatters'
+import {
+  applyPositionDeltasToUserPositions,
+  buildOptimisticOpenOrder,
+  prependOpenOrderToInfiniteData,
+  updateQueryDataWhere,
+} from '@/lib/optimistic-trading'
 import {
   calculateMarketFill,
   normalizeBookLevels,
@@ -246,6 +254,7 @@ export default function EventOrderPanelForm({
   const [shouldShakeLimitShares, setShouldShakeLimitShares] = useState(false)
   const [isClaimSubmitting, setIsClaimSubmitting] = useState(false)
   const [claimedConditionIds, setClaimedConditionIds] = useState<Record<string, true>>({})
+  const [hasMounted, setHasMounted] = useState(false)
   const limitSharesInputRef = useRef<HTMLInputElement | null>(null)
   const limitSharesNumber = Number.parseFloat(state.limitShares) || 0
   const { balance, isLoadingBalance } = useBalance()
@@ -340,6 +349,10 @@ export default function EventOrderPanelForm({
     makerAddress,
     conditionId: activeMarket?.condition_id,
   })
+
+  useEffect(() => {
+    setHasMounted(true)
+  }, [])
 
   const normalizedOrderBook = useMemo(() => {
     const summary = outcomeTokenId ? orderBookSummaryQuery.data?.[outcomeTokenId] : undefined
@@ -667,7 +680,8 @@ export default function EventOrderPanelForm({
   const effectiveMarketBuyCost = state.side === ORDER_SIDE.BUY && state.type === ORDER_TYPE.MARKET
     ? (marketBuyFill?.totalCost ?? amountNumber)
     : 0
-  const shouldShowDepositCta = isConnected
+  const isInteractiveWalletReady = hasMounted && isConnected
+  const shouldShowDepositCta = isInteractiveWalletReady
     && state.side === ORDER_SIDE.BUY
     && state.type === ORDER_TYPE.MARKET
     && Math.max(effectiveMarketBuyCost, amountNumber) > balance.raw
@@ -1070,19 +1084,117 @@ export default function EventOrderPanelForm({
         avgSellPrice: submittedAvgSellPriceLabel,
         buyPrice: submittedBuyPriceCents,
         queryClient,
-        outcomeIndex: submittedOutcomeIndex,
+        outcomeIndex: submittedOutcomeIndex as typeof OUTCOME_INDEX.YES | typeof OUTCOME_INDEX.NO,
         lastMouseEvent: submittedLastMouseEvent,
       })
 
-      if (activeMarket.condition_id && user?.id) {
-        void queryClient.invalidateQueries({ queryKey: openOrdersQueryKey })
-        void queryClient.invalidateQueries({ queryKey: eventOpenOrdersQueryKey })
-        void queryClient.invalidateQueries({ queryKey: ['orderbook-summary'] })
+      const optimisticPositionDelta = submittedIsLimitOrder
+        ? null
+        : {
+            conditionId: activeMarket.condition_id,
+            outcomeIndex: submittedOutcomeIndex as typeof OUTCOME_INDEX.YES | typeof OUTCOME_INDEX.NO,
+            sharesDelta: submittedSide === ORDER_SIDE.BUY ? submittedBuySharesValue : -sellOrderSnapshot.shares,
+            avgPrice: submittedSide === ORDER_SIDE.BUY
+              ? ((submittedBuyPriceCents ?? 0) / 100)
+              : undefined,
+            currentPrice: submittedSide === ORDER_SIDE.BUY
+              ? ((submittedBuyPriceCents ?? 0) / 100)
+              : (avgSellPriceCentsValue ? avgSellPriceCentsValue / 100 : undefined),
+            title: activeMarket.short_title || activeMarket.title,
+            slug: activeMarket.slug,
+            eventSlug: event.slug,
+            iconUrl: activeMarket.icon_url,
+            outcomeText: activeOutcome.outcome_text,
+            isActive: true,
+            isResolved: false,
+          }
+
+      if (optimisticPositionDelta && optimisticPositionDelta.sharesDelta !== 0) {
+        updateQueryDataWhere<UserPosition[]>(
+          queryClient,
+          ['order-panel-user-positions', makerAddress, activeMarket.condition_id],
+          currentQueryKey =>
+            currentQueryKey[1] === makerAddress
+            && currentQueryKey[2] === activeMarket.condition_id,
+          current => applyPositionDeltasToUserPositions(current, [optimisticPositionDelta]),
+        )
+
+        updateQueryDataWhere<UserPosition[]>(
+          queryClient,
+          ['user-market-positions'],
+          currentQueryKey =>
+            currentQueryKey[1] === makerAddress
+            && currentQueryKey[2] === activeMarket.condition_id
+            && currentQueryKey[3] === 'active',
+          current => applyPositionDeltasToUserPositions(current, [optimisticPositionDelta]),
+        )
+
+        updateQueryDataWhere<UserPosition[]>(
+          queryClient,
+          ['event-user-positions'],
+          currentQueryKey =>
+            currentQueryKey[1] === makerAddress
+            && currentQueryKey[2] === event.id,
+          current => applyPositionDeltasToUserPositions(current, [optimisticPositionDelta]),
+        )
+
+        updateQueryDataWhere<UserPosition[]>(
+          queryClient,
+          ['user-event-positions'],
+          currentQueryKey =>
+            currentQueryKey[1] === makerAddress
+            && currentQueryKey[2] === 'active',
+          current => applyPositionDeltasToUserPositions(current, [optimisticPositionDelta]),
+        )
+      }
+
+      if (submittedIsLimitOrder && activeMarket.condition_id && user?.id) {
+        const limitPriceValue = (Number.parseFloat(state.limitPrice || '0') || 0) / 100
+        const limitSharesValue = Number.parseFloat(state.limitShares || '0') || 0
+        const totalValue = limitPriceValue * limitSharesValue
+        const orderId = result?.orderId ?? payload.salt.toString()
+        const optimisticOrder = buildOptimisticOpenOrder({
+          id: orderId,
+          side: submittedSide === ORDER_SIDE.BUY ? 'buy' : 'sell',
+          type: state.limitExpirationEnabled ? CLOB_ORDER_TYPE.GTD : CLOB_ORDER_TYPE.GTC,
+          price: limitPriceValue,
+          shares: limitSharesValue,
+          totalValue,
+          expiration: state.limitExpirationEnabled ? Number(payload.expiration) : null,
+          outcomeIndex: submittedOutcomeIndex as typeof OUTCOME_INDEX.YES | typeof OUTCOME_INDEX.NO,
+          outcomeText: submittedOutcomeText,
+          conditionId: activeMarket.condition_id,
+          marketTitle: activeMarket.short_title || activeMarket.title,
+          marketSlug: activeMarket.slug,
+          eventSlug: event.slug,
+          eventTitle: event.title,
+          iconUrl: activeMarket.icon_url,
+        })
+
+        queryClient.setQueryData<InfiniteData<{ data: PortfolioUserOpenOrder[], next_cursor: string }>>(openOrdersQueryKey, current =>
+          prependOpenOrderToInfiniteData(current, optimisticOrder))
+        queryClient.setQueryData<InfiniteData<{ data: PortfolioUserOpenOrder[], next_cursor: string }>>(eventOpenOrdersQueryKey, current =>
+          prependOpenOrderToInfiniteData(current, optimisticOrder))
+
+        updateQueryDataWhere<InfiniteData<{ data: PortfolioUserOpenOrder[], next_cursor: string }>>(
+          queryClient,
+          ['public-open-orders', makerAddress],
+          currentQueryKey => currentQueryKey[1] === makerAddress,
+          current => prependOpenOrderToInfiniteData(current, optimisticOrder),
+        )
+      }
+
+      if (submittedIsLimitOrder && activeMarket.condition_id && user?.id) {
         setTimeout(() => {
           void queryClient.invalidateQueries({ queryKey: openOrdersQueryKey })
           void queryClient.invalidateQueries({ queryKey: eventOpenOrdersQueryKey })
           void queryClient.invalidateQueries({ queryKey: ['orderbook-summary'] })
-        }, 10_000)
+        }, 15_000)
+        setTimeout(() => {
+          void queryClient.invalidateQueries({ queryKey: openOrdersQueryKey })
+          void queryClient.invalidateQueries({ queryKey: eventOpenOrdersQueryKey })
+          void queryClient.invalidateQueries({ queryKey: ['orderbook-summary'] })
+        }, 60_000)
       }
 
       void queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
@@ -1209,13 +1321,25 @@ export default function EventOrderPanelForm({
       queryClient.setQueriesData({ queryKey: ['sports-card-user-positions'] }, current =>
         markConditionAsClaimedInPositions(current as any[] | undefined, conditionId))
 
-      void queryClient.invalidateQueries({ queryKey: ['order-panel-user-positions'] })
-      void queryClient.invalidateQueries({ queryKey: ['user-market-positions'] })
-      void queryClient.invalidateQueries({ queryKey: ['event-user-positions'] })
-      void queryClient.invalidateQueries({ queryKey: ['user-event-positions'] })
-      void queryClient.invalidateQueries({ queryKey: ['user-conditional-shares'] })
-      void queryClient.invalidateQueries({ queryKey: ['portfolio-value'] })
       void queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
+      setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: ['order-panel-user-positions'] })
+        void queryClient.invalidateQueries({ queryKey: ['user-market-positions'] })
+        void queryClient.invalidateQueries({ queryKey: ['event-user-positions'] })
+        void queryClient.invalidateQueries({ queryKey: ['user-event-positions'] })
+        void queryClient.invalidateQueries({ queryKey: ['user-conditional-shares'] })
+        void queryClient.invalidateQueries({ queryKey: ['portfolio-value'] })
+        void queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
+      }, 4_000)
+      setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: ['order-panel-user-positions'] })
+        void queryClient.invalidateQueries({ queryKey: ['user-market-positions'] })
+        void queryClient.invalidateQueries({ queryKey: ['event-user-positions'] })
+        void queryClient.invalidateQueries({ queryKey: ['user-event-positions'] })
+        void queryClient.invalidateQueries({ queryKey: ['user-conditional-shares'] })
+        void queryClient.invalidateQueries({ queryKey: ['portfolio-value'] })
+        void queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
+      }, 12_000)
     }
     catch (error) {
       console.error('Failed to submit claim.', error)
@@ -1333,8 +1457,11 @@ export default function EventOrderPanelForm({
                 type={state.type}
                 availableMergeShares={availableMergeShares}
                 availableSplitBalance={availableSplitBalance}
+                eventId={event.id}
+                eventSlug={event.slug}
                 isNegRiskMarket={isNegRiskMarket}
                 conditionId={activeMarket?.condition_id}
+                marketSlug={activeMarket?.slug}
                 eventPath={resolveEventPagePath(event)}
                 marketTitle={activeMarket?.title || activeMarket?.short_title}
                 marketIconUrl={activeMarket?.icon_url}
@@ -1503,11 +1630,11 @@ export default function EventOrderPanelForm({
               )}
 
               <EventOrderPanelSubmitButton
-                type={!isConnected || shouldShowDepositCta ? 'button' : 'submit'}
+                type={!isInteractiveWalletReady || shouldShowDepositCta ? 'button' : 'submit'}
                 isLoading={state.isLoading}
                 isDisabled={state.isLoading}
                 onClick={(event) => {
-                  if (!isConnected) {
+                  if (!isInteractiveWalletReady) {
                     void open()
                     return
                   }
@@ -1519,7 +1646,7 @@ export default function EventOrderPanelForm({
                   state.setLastMouseEvent(event)
                 }}
                 label={(() => {
-                  if (!isConnected) {
+                  if (!isInteractiveWalletReady) {
                     return t('Trade')
                   }
                   if (shouldShowDepositCta) {
