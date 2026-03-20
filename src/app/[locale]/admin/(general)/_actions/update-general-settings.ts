@@ -116,6 +116,9 @@ export async function updateGeneralSettingsAction(
   const tiktokLinkRaw = formData.get('tiktok_link')
   const linkedinLinkRaw = formData.get('linkedin_link')
   const youtubeLinkRaw = formData.get('youtube_link')
+  const whatsappLinkRaw = formData.get('whatsapp_link')
+  const telegramLinkRaw = formData.get('telegram_link')
+  const redditLinkRaw = formData.get('reddit_link')
   const supportUrlRaw = formData.get('support_url')
   const footerDisclaimerRaw = formData.get('footer_disclaimer')
   const feeRecipientWalletRaw = formData.get('fee_recipient_wallet')
@@ -139,6 +142,9 @@ export async function updateGeneralSettingsAction(
   const tiktokLink = typeof tiktokLinkRaw === 'string' ? tiktokLinkRaw : ''
   const linkedinLink = typeof linkedinLinkRaw === 'string' ? linkedinLinkRaw : ''
   const youtubeLink = typeof youtubeLinkRaw === 'string' ? youtubeLinkRaw : ''
+  const whatsappLink = typeof whatsappLinkRaw === 'string' ? whatsappLinkRaw : ''
+  const telegramLink = typeof telegramLinkRaw === 'string' ? telegramLinkRaw : ''
+  const redditLink = typeof redditLinkRaw === 'string' ? redditLinkRaw : ''
   const supportUrl = typeof supportUrlRaw === 'string' ? supportUrlRaw : ''
   const footerDisclaimer = typeof footerDisclaimerRaw === 'string' ? footerDisclaimerRaw : ''
   const feeRecipientWallet = typeof feeRecipientWalletRaw === 'string' ? feeRecipientWalletRaw : ''
@@ -204,6 +210,9 @@ export async function updateGeneralSettingsAction(
     tiktokLink,
     linkedinLink,
     youtubeLink,
+    whatsappLink,
+    telegramLink,
+    redditLink,
     supportUrl,
     footerDisclaimer,
     feeRecipientWallet,
@@ -253,6 +262,9 @@ export async function updateGeneralSettingsAction(
     { group: 'general', key: 'site_tiktok_link', value: validated.data.tiktokLinkValue },
     { group: 'general', key: 'site_linkedin_link', value: validated.data.linkedinLinkValue },
     { group: 'general', key: 'site_youtube_link', value: validated.data.youtubeLinkValue },
+    { group: 'general', key: 'site_whatsapp_link', value: validated.data.whatsappLinkValue },
+    { group: 'general', key: 'site_telegram_link', value: validated.data.telegramLinkValue },
+    { group: 'general', key: 'site_reddit_link', value: validated.data.redditLinkValue },
     { group: 'general', key: 'site_support_url', value: validated.data.supportUrlValue },
     { group: 'general', key: 'site_footer_disclaimer', value: validated.data.footerDisclaimerValue },
     { group: 'general', key: 'fee_recipient_wallet', value: validated.data.feeRecipientWalletValue },

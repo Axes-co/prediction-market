@@ -5,10 +5,12 @@ import { CopyIcon, Loader2Icon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import { SocialShareButtons } from '@/components/SocialShareButtons'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { useIsMobile } from '@/hooks/useIsMobile'
+import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 import { buildPublicProfilePath } from '@/lib/platform-routing'
 import { buildShareCardUrl } from '@/lib/share-card'
 import { cn } from '@/lib/utils'
@@ -22,10 +24,10 @@ interface PositionShareDialogProps {
 export function PositionShareDialog({ open, onOpenChange, payload }: PositionShareDialogProps) {
   const t = useExtracted()
   const isMobile = useIsMobile()
+  const site = useSiteIdentity()
   const [shareCardStatus, setShareCardStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [shareCardBlob, setShareCardBlob] = useState<Blob | null>(null)
   const [isCopyingShareImage, setIsCopyingShareImage] = useState(false)
-  const [isSharingOnX, setIsSharingOnX] = useState(false)
 
   const shareCardUrl = useMemo(() => {
     if (!payload) {
@@ -34,11 +36,30 @@ export function PositionShareDialog({ open, onOpenChange, payload }: PositionSha
     return buildShareCardUrl(payload)
   }, [payload])
 
+  const shareProfileUrl = useMemo(() => {
+    if (!payload) {
+      return ''
+    }
+    const profileSlug = payload.userName?.trim() || 'user'
+    const profilePath = buildPublicProfilePath(profileSlug) ?? '/@user'
+    return typeof window !== 'undefined'
+      ? new URL(profilePath, window.location.origin).toString()
+      : profilePath
+  }, [payload])
+
+  const buildShareText = useCallback(
+    (siteTag: string) => [
+      t('I just put my money where my mouth is on {site}.', { site: siteTag }),
+      '',
+      t('Trade against me:'),
+    ].join('\n'),
+    [t],
+  )
+
   const resetState = useCallback(() => {
     setShareCardStatus('idle')
     setShareCardBlob(null)
     setIsCopyingShareImage(false)
-    setIsSharingOnX(false)
   }, [])
 
   useEffect(() => {
@@ -141,34 +162,6 @@ export function PositionShareDialog({ open, onOpenChange, payload }: PositionSha
     }
   }, [shareCardBlob, shareCardUrl, t])
 
-  const handleShareOnX = useCallback(() => {
-    if (!payload) {
-      return
-    }
-
-    setIsSharingOnX(true)
-    try {
-      const profileSlug = payload.userName?.trim() || 'user'
-      const baseUrl = window.location.origin
-      const profilePath = buildPublicProfilePath(profileSlug) ?? '/@user'
-      const profileUrl = new URL(profilePath, baseUrl).toString()
-      const shareText = [
-        t('I just put my money where my mouth is on @kuest.'),
-        '',
-        t('Trade against me: {url}', { url: profileUrl }),
-      ].join('\n')
-
-      const shareUrl = new URL('https://x.com/intent/tweet')
-      shareUrl.searchParams.set('text', shareText)
-      window.open(shareUrl.toString(), '_blank', 'noopener,noreferrer')
-    }
-    finally {
-      window.setTimeout(() => {
-        setIsSharingOnX(false)
-      }, 200)
-    }
-  }, [payload, t])
-
   const handleOpenChange = useCallback((nextOpen: boolean) => {
     onOpenChange(nextOpen)
     if (!nextOpen) {
@@ -212,40 +205,25 @@ export function PositionShareDialog({ open, onOpenChange, payload }: PositionSha
           </div>
         )}
       </div>
-      <div className="flex flex-col gap-3 sm:flex-row">
+      <div className="flex flex-col gap-3">
         <Button
           variant="outline"
-          className="flex-1"
+          className="w-full"
           onClick={handleCopyShareImage}
-          disabled={!isShareReady || isCopyingShareImage || isSharingOnX}
+          disabled={!isShareReady || isCopyingShareImage}
         >
           {isCopyingShareImage
             ? <Loader2Icon className="size-4 animate-spin" />
             : <CopyIcon className="size-4" />}
           {isCopyingShareImage ? t('Copying...') : t('Copy image')}
         </Button>
-        <Button
-          className="flex-1"
-          onClick={handleShareOnX}
-          disabled={!isShareReady || isCopyingShareImage || isSharingOnX}
-        >
-          {isSharingOnX
-            ? <Loader2Icon className="size-4 animate-spin" />
-            : (
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 251 256"
-                  className="size-4"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M149.079 108.399L242.33 0h-22.098l-80.97 94.12L74.59 0H0l97.796 142.328L0 256h22.1l85.507-99.395L175.905 256h74.59L149.073 108.399zM118.81 143.58l-9.909-14.172l-78.84-112.773h33.943l63.625 91.011l9.909 14.173l82.705 118.3H186.3l-67.49-96.533z"
-                    fill="currentColor"
-                  />
-                </svg>
-              )}
-          {isSharingOnX ? t('Opening...') : t('Share')}
-        </Button>
+        <SocialShareButtons
+          site={site}
+          buildShareText={buildShareText}
+          shareUrl={shareProfileUrl}
+          disabled={!isShareReady || isCopyingShareImage}
+          className="flex items-center justify-center gap-2"
+        />
       </div>
     </div>
   )

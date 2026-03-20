@@ -10,8 +10,11 @@ import {
   FacebookIcon,
   InstagramIcon,
   LinkedInIcon,
+  RedditIcon,
+  TelegramIcon,
   TikTokIcon,
   TwitterIcon,
+  WhatsAppIcon,
   YouTubeIcon,
 } from '@/components/icons/social'
 import IntentPrefetchLink from '@/components/IntentPrefetchLink'
@@ -20,7 +23,7 @@ import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 
 const INITIAL_CATEGORY_COUNT = 14
 
-type SocialField = 'twitterLink' | 'discordLink' | 'instagramLink' | 'tiktokLink' | 'linkedinLink' | 'youtubeLink' | 'facebookLink'
+type SocialField = 'twitterLink' | 'discordLink' | 'instagramLink' | 'tiktokLink' | 'linkedinLink' | 'youtubeLink' | 'facebookLink' | 'whatsappLink' | 'telegramLink' | 'redditLink'
 
 const SOCIAL_CONFIG: Array<{ field: SocialField, label: string, icon: React.ReactNode }> = [
   { field: 'twitterLink', label: '\uD835\uDD4F (Twitter)', icon: <TwitterIcon /> },
@@ -30,6 +33,9 @@ const SOCIAL_CONFIG: Array<{ field: SocialField, label: string, icon: React.Reac
   { field: 'linkedinLink', label: 'LinkedIn', icon: <LinkedInIcon /> },
   { field: 'youtubeLink', label: 'YouTube', icon: <YouTubeIcon /> },
   { field: 'facebookLink', label: 'Facebook', icon: <FacebookIcon /> },
+  { field: 'whatsappLink', label: 'WhatsApp', icon: <WhatsAppIcon /> },
+  { field: 'telegramLink', label: 'Telegram', icon: <TelegramIcon /> },
+  { field: 'redditLink', label: 'Reddit', icon: <RedditIcon /> },
 ]
 
 const LINK_CLASS = 'text-sm font-medium text-foreground hover:text-muted-foreground transition-colors'

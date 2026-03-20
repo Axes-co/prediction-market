@@ -11,6 +11,9 @@ export const THEME_SITE_SOCIAL_LINK_FIELDS = [
   'tiktokLink',
   'linkedinLink',
   'youtubeLink',
+  'whatsappLink',
+  'telegramLink',
+  'redditLink',
 ] as const
 export type ThemeSiteSocialLinkField = typeof THEME_SITE_SOCIAL_LINK_FIELDS[number]
 
@@ -43,6 +46,9 @@ export interface ThemeSiteSocialLinks {
   tiktokLink: string | null
   linkedinLink: string | null
   youtubeLink: string | null
+  whatsappLink: string | null
+  telegramLink: string | null
+  redditLink: string | null
 }
 
 export interface ThemeSiteIdentity extends ThemeSiteSocialLinks {
@@ -101,6 +107,9 @@ export function createDefaultThemeSiteIdentity(): ThemeSiteIdentity {
     tiktokLink: null,
     linkedinLink: null,
     youtubeLink: null,
+    whatsappLink: null,
+    telegramLink: null,
+    redditLink: null,
     supportUrl: null,
     footerDisclaimer: null,
     pwaIcon192Path: null,
@@ -109,6 +118,18 @@ export function createDefaultThemeSiteIdentity(): ThemeSiteIdentity {
     pwaIcon512Url: DEFAULT_THEME_SITE_PWA_ICON_512_URL,
     appleTouchIconUrl: DEFAULT_THEME_SITE_PWA_ICON_192_URL,
   }
+}
+
+export function extractXHandle(twitterLink: string | null | undefined): string | null {
+  if (!twitterLink) {
+    return null
+  }
+  const match = twitterLink.match(/(?:x\.com|twitter\.com)\/(@?\w+)/i)
+  if (!match) {
+    return null
+  }
+  const handle = match[1].replace(/^@/, '')
+  return handle ? `@${handle}` : null
 }
 
 function normalizeOptionalString(value: string | null | undefined) {

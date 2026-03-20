@@ -7,7 +7,6 @@ import { DialogTitle } from '@radix-ui/react-dialog'
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
 import { useQueryClient } from '@tanstack/react-query'
 import { BanknoteArrowDownIcon } from 'lucide-react'
-import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -18,6 +17,7 @@ import { useTradingOnboarding } from '@/app/[locale]/(platform)/_providers/Tradi
 import EventIconImage from '@/components/EventIconImage'
 import IntentPrefetchLink from '@/components/IntentPrefetchLink'
 import SiteLogoIcon from '@/components/SiteLogoIcon'
+import { SocialShareButtons } from '@/components/SocialShareButtons'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog'
@@ -80,7 +80,6 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
   const { summary, markets } = data
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isSharingOnX, setIsSharingOnX] = useState(false)
   const [hiddenClaimSignature, setHiddenClaimSignature] = useState<string | null>(null)
   const { ensureTradingReady, openTradeRequirements } = useTradingOnboarding()
   const { signMessageAsync } = useSignMessage()
@@ -115,33 +114,24 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
     triggerConfetti('yes')
   }, [isDialogOpen])
 
-  const handleShareOnX = useCallback(() => {
+  const buildShareText = useCallback(
+    (siteTag: string) => [
+      `I just won ${formatCurrency(summary.totalProceeds)} on ${siteTag}!`,
+      '',
+      'Join me and put your money where your mouth is:',
+    ].join('\n'),
+    [summary.totalProceeds],
+  )
+
+  const shareTargetUrl = useMemo(() => {
     if (typeof window === 'undefined') {
-      return
+      return ''
     }
-
-    setIsSharingOnX(true)
-    try {
-      const profileSlug = user?.username?.trim() || user?.proxy_wallet_address?.trim() || ''
-      const shareTargetUrl = profileSlug
-        ? new URL(buildPublicProfilePath(profileSlug) ?? '/', window.location.origin).toString()
-        : window.location.origin
-      const shareText = [
-        `I just won ${formatCurrency(summary.totalProceeds)} on ${siteName}!`,
-        '',
-        'Join me and put your money where your mouth is:',
-      ].join('\n')
-
-      const shareUrl = new URL('https://x.com/intent/post')
-      shareUrl.searchParams.set('text', shareText)
-      shareUrl.searchParams.set('url', shareTargetUrl)
-
-      window.open(shareUrl.toString(), '_blank', 'noopener,noreferrer')
-    }
-    finally {
-      window.setTimeout(() => setIsSharingOnX(false), 200)
-    }
-  }, [siteName, summary.totalProceeds, user?.proxy_wallet_address, user?.username])
+    const profileSlug = user?.username?.trim() || user?.proxy_wallet_address?.trim() || ''
+    return profileSlug
+      ? new URL(buildPublicProfilePath(profileSlug) ?? '/', window.location.origin).toString()
+      : window.location.origin
+  }, [user?.proxy_wallet_address, user?.username])
 
   async function handleClaimAll() {
     if (isSubmitting) {
@@ -467,29 +457,17 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
           })}
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            className="h-10 flex-1"
-            onClick={handleShareOnX}
-            disabled={isSharingOnX}
-          >
-            <Image
-              src="/images/social/x.svg"
-              alt=""
-              width={14}
-              height={14}
-              className="size-3.5 dark:invert"
-              aria-hidden="true"
-            />
-            {isSharingOnX ? 'Opening...' : 'Share'}
-          </Button>
-          <Button className="h-10 flex-1" onClick={handleClaimAll} disabled={isSubmitting || !hasClaimableMarkets}>
-            {isSubmitting
-              ? 'Submitting...'
-              : `Claim ${formatCurrency(summary.totalProceeds)}`}
-          </Button>
-        </div>
+        <SocialShareButtons
+          site={site}
+          buildShareText={buildShareText}
+          shareUrl={shareTargetUrl}
+          className="flex items-center justify-center gap-2"
+        />
+        <Button className="h-10 w-full" onClick={handleClaimAll} disabled={isSubmitting || !hasClaimableMarkets}>
+          {isSubmitting
+            ? 'Submitting...'
+            : `Claim ${formatCurrency(summary.totalProceeds)}`}
+        </Button>
       </DialogContent>
     </Dialog>
   )

@@ -47,6 +47,9 @@ const THEME_SITE_INSTAGRAM_LINK_KEY = 'site_instagram_link'
 const THEME_SITE_TIKTOK_LINK_KEY = 'site_tiktok_link'
 const THEME_SITE_LINKEDIN_LINK_KEY = 'site_linkedin_link'
 const THEME_SITE_YOUTUBE_LINK_KEY = 'site_youtube_link'
+const THEME_SITE_WHATSAPP_LINK_KEY = 'site_whatsapp_link'
+const THEME_SITE_TELEGRAM_LINK_KEY = 'site_telegram_link'
+const THEME_SITE_REDDIT_LINK_KEY = 'site_reddit_link'
 const THEME_SITE_SUPPORT_URL_KEY = 'site_support_url'
 const THEME_SITE_FOOTER_DISCLAIMER_KEY = 'site_footer_disclaimer'
 const GENERAL_PWA_ICON_192_PATH_KEY = 'pwa_icon_192_path'
@@ -102,6 +105,12 @@ interface NormalizedThemeSiteConfig {
   linkedinLinkValue: string
   youtubeLink: string | null
   youtubeLinkValue: string
+  whatsappLink: string | null
+  whatsappLinkValue: string
+  telegramLink: string | null
+  telegramLinkValue: string
+  redditLink: string | null
+  redditLinkValue: string
   supportUrl: string | null
   supportUrlValue: string
   footerDisclaimer: string | null
@@ -145,6 +154,9 @@ export interface ThemeSiteSettingsFormState {
   tiktokLink: string
   linkedinLink: string
   youtubeLink: string
+  whatsappLink: string
+  telegramLink: string
+  redditLink: string
   supportUrl: string
   footerDisclaimer: string
   feeRecipientWallet: string
@@ -288,6 +300,9 @@ function normalizeThemeSiteConfig(params: {
   tiktokLinkValue: string | null | undefined
   linkedinLinkValue: string | null | undefined
   youtubeLinkValue: string | null | undefined
+  whatsappLinkValue: string | null | undefined
+  telegramLinkValue: string | null | undefined
+  redditLinkValue: string | null | undefined
   supportUrlValue: string | null | undefined
   footerDisclaimerValue: string | null | undefined
   feeRecipientWalletValue: string | null | undefined
@@ -308,6 +323,9 @@ function normalizeThemeSiteConfig(params: {
   tiktokLinkErrorLabel: string
   linkedinLinkErrorLabel: string
   youtubeLinkErrorLabel: string
+  whatsappLinkErrorLabel: string
+  telegramLinkErrorLabel: string
+  redditLinkErrorLabel: string
   supportUrlErrorLabel: string
   footerDisclaimerErrorLabel?: string
   feeRecipientWalletErrorLabel: string
@@ -385,6 +403,21 @@ function normalizeThemeSiteConfig(params: {
   const youtubeLinkValidated = validateThemeSiteExternalUrl(params.youtubeLinkValue, params.youtubeLinkErrorLabel)
   if (youtubeLinkValidated.error) {
     return { data: null, error: youtubeLinkValidated.error }
+  }
+
+  const whatsappLinkValidated = validateThemeSiteExternalUrl(params.whatsappLinkValue, params.whatsappLinkErrorLabel)
+  if (whatsappLinkValidated.error) {
+    return { data: null, error: whatsappLinkValidated.error }
+  }
+
+  const telegramLinkValidated = validateThemeSiteExternalUrl(params.telegramLinkValue, params.telegramLinkErrorLabel)
+  if (telegramLinkValidated.error) {
+    return { data: null, error: telegramLinkValidated.error }
+  }
+
+  const redditLinkValidated = validateThemeSiteExternalUrl(params.redditLinkValue, params.redditLinkErrorLabel)
+  if (redditLinkValidated.error) {
+    return { data: null, error: redditLinkValidated.error }
   }
 
   const supportUrlValidated = validateThemeSiteExternalUrl(params.supportUrlValue, params.supportUrlErrorLabel)
@@ -468,6 +501,12 @@ function normalizeThemeSiteConfig(params: {
       linkedinLinkValue: linkedinLinkValidated.value ?? '',
       youtubeLink: youtubeLinkValidated.value,
       youtubeLinkValue: youtubeLinkValidated.value ?? '',
+      whatsappLink: whatsappLinkValidated.value,
+      whatsappLinkValue: whatsappLinkValidated.value ?? '',
+      telegramLink: telegramLinkValidated.value,
+      telegramLinkValue: telegramLinkValidated.value ?? '',
+      redditLink: redditLinkValidated.value,
+      redditLinkValue: redditLinkValidated.value ?? '',
       supportUrl: supportUrlValidated.value,
       supportUrlValue: supportUrlValidated.value ?? '',
       footerDisclaimer: footerDisclaimerValidated.value,
@@ -509,6 +548,9 @@ function buildThemeSiteIdentity(config: NormalizedThemeSiteConfig): ThemeSiteIde
     tiktokLink: config.tiktokLink,
     linkedinLink: config.linkedinLink,
     youtubeLink: config.youtubeLink,
+    whatsappLink: config.whatsappLink,
+    telegramLink: config.telegramLink,
+    redditLink: config.redditLink,
     supportUrl: config.supportUrl,
     footerDisclaimer: config.footerDisclaimer,
     pwaIcon192Path: config.pwaIcon192Path,
@@ -566,6 +608,9 @@ function hasStoredThemeSiteSettings(generalSettings?: SettingsGroup) {
     || generalSettings[THEME_SITE_TIKTOK_LINK_KEY]?.value?.trim()
     || generalSettings[THEME_SITE_LINKEDIN_LINK_KEY]?.value?.trim()
     || generalSettings[THEME_SITE_YOUTUBE_LINK_KEY]?.value?.trim()
+    || generalSettings[THEME_SITE_WHATSAPP_LINK_KEY]?.value?.trim()
+    || generalSettings[THEME_SITE_TELEGRAM_LINK_KEY]?.value?.trim()
+    || generalSettings[THEME_SITE_REDDIT_LINK_KEY]?.value?.trim()
     || generalSettings[THEME_SITE_SUPPORT_URL_KEY]?.value?.trim()
     || generalSettings[GENERAL_PWA_ICON_192_PATH_KEY]?.value?.trim()
     || generalSettings[GENERAL_PWA_ICON_512_PATH_KEY]?.value?.trim()
@@ -621,6 +666,9 @@ export function getThemeSiteSettingsFormState(allSettings?: SettingsMap): ThemeS
     tiktokLinkValue: generalSettings?.[THEME_SITE_TIKTOK_LINK_KEY]?.value ?? defaultSite.tiktokLink,
     linkedinLinkValue: generalSettings?.[THEME_SITE_LINKEDIN_LINK_KEY]?.value ?? defaultSite.linkedinLink,
     youtubeLinkValue: generalSettings?.[THEME_SITE_YOUTUBE_LINK_KEY]?.value ?? defaultSite.youtubeLink,
+    whatsappLinkValue: generalSettings?.[THEME_SITE_WHATSAPP_LINK_KEY]?.value ?? defaultSite.whatsappLink,
+    telegramLinkValue: generalSettings?.[THEME_SITE_TELEGRAM_LINK_KEY]?.value ?? defaultSite.telegramLink,
+    redditLinkValue: generalSettings?.[THEME_SITE_REDDIT_LINK_KEY]?.value ?? defaultSite.redditLink,
     supportUrlValue: generalSettings?.[THEME_SITE_SUPPORT_URL_KEY]?.value ?? defaultSite.supportUrl,
     footerDisclaimerValue: generalSettings?.[THEME_SITE_FOOTER_DISCLAIMER_KEY]?.value ?? defaultSite.footerDisclaimer,
     feeRecipientWalletValue: generalSettings?.[GENERAL_FEE_RECIPIENT_WALLET_KEY]?.value ?? ZERO_ADDRESS,
@@ -639,6 +687,9 @@ export function getThemeSiteSettingsFormState(allSettings?: SettingsMap): ThemeS
     tiktokLinkErrorLabel: 'TikTok link',
     linkedinLinkErrorLabel: 'LinkedIn link',
     youtubeLinkErrorLabel: 'YouTube link',
+    whatsappLinkErrorLabel: 'WhatsApp link',
+    telegramLinkErrorLabel: 'Telegram link',
+    redditLinkErrorLabel: 'Reddit link',
     supportUrlErrorLabel: 'Support URL',
     feeRecipientWalletErrorLabel: 'Fee recipient wallet',
   })
@@ -660,6 +711,9 @@ export function getThemeSiteSettingsFormState(allSettings?: SettingsMap): ThemeS
       tiktokLink: normalized.data.tiktokLinkValue,
       linkedinLink: normalized.data.linkedinLinkValue,
       youtubeLink: normalized.data.youtubeLinkValue,
+      whatsappLink: normalized.data.whatsappLinkValue,
+      telegramLink: normalized.data.telegramLinkValue,
+      redditLink: normalized.data.redditLinkValue,
       supportUrl: normalized.data.supportUrlValue,
       footerDisclaimer: normalized.data.footerDisclaimerValue,
       feeRecipientWallet: isZeroAddress(normalized.data.feeRecipientWalletValue)
@@ -687,6 +741,9 @@ export function getThemeSiteSettingsFormState(allSettings?: SettingsMap): ThemeS
     tiktokLink: defaultSite.tiktokLink ?? '',
     linkedinLink: defaultSite.linkedinLink ?? '',
     youtubeLink: defaultSite.youtubeLink ?? '',
+    whatsappLink: defaultSite.whatsappLink ?? '',
+    telegramLink: defaultSite.telegramLink ?? '',
+    redditLink: defaultSite.redditLink ?? '',
     supportUrl: defaultSite.supportUrl ?? '',
     footerDisclaimer: defaultSite.footerDisclaimer ?? '',
     feeRecipientWallet: '',
@@ -730,6 +787,9 @@ export function validateThemeSiteSettingsInput(params: {
   tiktokLink: string | null | undefined
   linkedinLink: string | null | undefined
   youtubeLink: string | null | undefined
+  whatsappLink: string | null | undefined
+  telegramLink: string | null | undefined
+  redditLink: string | null | undefined
   supportUrl: string | null | undefined
   footerDisclaimer: string | null | undefined
   feeRecipientWallet: string | null | undefined
@@ -752,6 +812,9 @@ export function validateThemeSiteSettingsInput(params: {
     tiktokLinkValue: params.tiktokLink,
     linkedinLinkValue: params.linkedinLink,
     youtubeLinkValue: params.youtubeLink,
+    whatsappLinkValue: params.whatsappLink,
+    telegramLinkValue: params.telegramLink,
+    redditLinkValue: params.redditLink,
     supportUrlValue: params.supportUrl,
     footerDisclaimerValue: params.footerDisclaimer,
     feeRecipientWalletValue: params.feeRecipientWallet,
@@ -772,6 +835,9 @@ export function validateThemeSiteSettingsInput(params: {
     tiktokLinkErrorLabel: 'TikTok link',
     linkedinLinkErrorLabel: 'LinkedIn link',
     youtubeLinkErrorLabel: 'YouTube link',
+    whatsappLinkErrorLabel: 'WhatsApp link',
+    telegramLinkErrorLabel: 'Telegram link',
+    redditLinkErrorLabel: 'Reddit link',
     supportUrlErrorLabel: 'Support URL',
     feeRecipientWalletErrorLabel: 'Fee recipient wallet',
     lifiIntegratorErrorLabel: 'LI.FI integrator',
@@ -825,6 +891,9 @@ export async function loadRuntimeThemeState(): Promise<RuntimeThemeState> {
         tiktokLinkValue: generalSettings?.[THEME_SITE_TIKTOK_LINK_KEY]?.value,
         linkedinLinkValue: generalSettings?.[THEME_SITE_LINKEDIN_LINK_KEY]?.value,
         youtubeLinkValue: generalSettings?.[THEME_SITE_YOUTUBE_LINK_KEY]?.value,
+        whatsappLinkValue: generalSettings?.[THEME_SITE_WHATSAPP_LINK_KEY]?.value,
+        telegramLinkValue: generalSettings?.[THEME_SITE_TELEGRAM_LINK_KEY]?.value,
+        redditLinkValue: generalSettings?.[THEME_SITE_REDDIT_LINK_KEY]?.value,
         supportUrlValue: generalSettings?.[THEME_SITE_SUPPORT_URL_KEY]?.value,
         footerDisclaimerValue: generalSettings?.[THEME_SITE_FOOTER_DISCLAIMER_KEY]?.value,
         feeRecipientWalletValue: generalSettings?.[GENERAL_FEE_RECIPIENT_WALLET_KEY]?.value ?? ZERO_ADDRESS,
@@ -843,6 +912,9 @@ export async function loadRuntimeThemeState(): Promise<RuntimeThemeState> {
         tiktokLinkErrorLabel: 'TikTok link in settings',
         linkedinLinkErrorLabel: 'LinkedIn link in settings',
         youtubeLinkErrorLabel: 'YouTube link in settings',
+        whatsappLinkErrorLabel: 'WhatsApp link in settings',
+        telegramLinkErrorLabel: 'Telegram link in settings',
+        redditLinkErrorLabel: 'Reddit link in settings',
         supportUrlErrorLabel: 'Support URL in settings',
         feeRecipientWalletErrorLabel: 'Fee recipient wallet in settings',
       })
