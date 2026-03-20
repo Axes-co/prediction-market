@@ -56,6 +56,7 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
 import {
   buildAdminSportsDerivedContent,
   buildAdminSportsStepErrors,
@@ -70,6 +71,7 @@ import {
   resolveAdminSportsMarketTypeOption,
 } from '@/lib/admin-sports-market-types'
 import { defaultNetwork } from '@/lib/appkit'
+import { formatDateTimeLocalValue, normalizeDateTimeLocalValue } from '@/lib/datetime-local'
 import { AMOY_CHAIN_ID, IS_TEST_MODE, POLYGON_MAINNET_CHAIN_ID, POLYGON_SCAN_BASE } from '@/lib/network'
 import { cn } from '@/lib/utils'
 import { useUser } from '@/stores/useUser'
@@ -961,6 +963,7 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
   const { address: connectedAddress } = useAppKitAccount()
   const { data: walletClient } = useWalletClient()
   const publicClient = usePublicClient()
+  const { runWithSignaturePrompt } = useSignaturePromptRunner()
   const user = useUser()
   const eoaAddress = useMemo(() => {
     const candidate = connectedAddress ?? user?.address ?? ''
@@ -1046,6 +1049,8 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
   const lastPreSignChecksResultRef = useRef(false)
   const skipNextSignatureResetRef = useRef(false)
   const pendingResumeKeyRef = useRef<string | null>(null)
+  const eventEndDateInputRef = useRef<HTMLInputElement | null>(null)
+  const sportsStartTimeInputRef = useRef<HTMLInputElement | null>(null)
 
   const eventImagePreviewUrl = useMemo(
     () => (eventImageFile ? URL.createObjectURL(eventImageFile) : null),
@@ -1295,12 +1300,13 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
     [],
   )
   const previewEndDate = useMemo(() => {
-    if (!form.endDateIso) {
+    const normalizedEndDate = normalizeDateTimeLocalValue(form.endDateIso)
+    if (!normalizedEndDate) {
       return 'End date not set'
     }
-    const parsed = new Date(form.endDateIso)
+    const parsed = new Date(normalizedEndDate)
     if (Number.isNaN(parsed.getTime())) {
-      return form.endDateIso
+      return normalizedEndDate
     }
     return parsed.toLocaleString()
   }, [form.endDateIso])
@@ -1420,10 +1426,72 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
     return formatSignatureCountdown(authChallengeRemainingSeconds)
   }, [authChallengeRemainingSeconds])
 
+  const readNormalizedDateTimeInputValue = useCallback((input: HTMLInputElement | null, fallbackValue: string) => {
+    const rawInputValue = input?.value?.trim() ?? ''
+    const inputValue = normalizeDateTimeLocalValue(rawInputValue)
+    if (inputValue) {
+      return inputValue
+    }
+
+    const inputDate = input?.valueAsDate
+    if (inputDate instanceof Date && !Number.isNaN(inputDate.getTime())) {
+      return formatDateTimeLocalValue(inputDate)
+    }
+
+    const normalizedFallbackValue = normalizeDateTimeLocalValue(fallbackValue)
+    if (normalizedFallbackValue) {
+      return normalizedFallbackValue
+    }
+
+    return rawInputValue || fallbackValue.trim()
+  }, [])
+
+  const getResolvedDateForms = useCallback(() => {
+    const resolvedEndDateIso = readNormalizedDateTimeInputValue(eventEndDateInputRef.current, form.endDateIso)
+    const resolvedSportsStartTime = readNormalizedDateTimeInputValue(sportsStartTimeInputRef.current, sportsForm.startTime)
+
+    return {
+      resolvedForm: {
+        ...form,
+        endDateIso: resolvedEndDateIso,
+      },
+      resolvedSportsForm: {
+        ...sportsForm,
+        startTime: resolvedSportsStartTime,
+      },
+    }
+  }, [form, readNormalizedDateTimeInputValue, sportsForm])
+
+  const syncResolvedDateInputs = useCallback(() => {
+    const { resolvedForm, resolvedSportsForm } = getResolvedDateForms()
+
+    if (resolvedForm.endDateIso && resolvedForm.endDateIso !== form.endDateIso) {
+      setForm(prev => (prev.endDateIso === resolvedForm.endDateIso
+        ? prev
+        : {
+            ...prev,
+            endDateIso: resolvedForm.endDateIso,
+          }))
+    }
+
+    if (resolvedSportsForm.startTime && resolvedSportsForm.startTime !== sportsForm.startTime) {
+      setSportsForm(prev => (prev.startTime === resolvedSportsForm.startTime
+        ? prev
+        : {
+            ...prev,
+            startTime: resolvedSportsForm.startTime,
+          }))
+    }
+
+    return { resolvedForm, resolvedSportsForm }
+  }, [form.endDateIso, getResolvedDateForms, sportsForm.startTime])
+
   const isStepValid = useCallback((step: number) => {
+    const { resolvedForm, resolvedSportsForm } = getResolvedDateForms()
+
     return buildStepErrors(step, {
-      form,
-      sportsForm,
+      form: resolvedForm,
+      sportsForm: resolvedSportsForm,
       eventImageFile,
       teamLogoFiles,
       slugValidationState,
@@ -1439,10 +1507,9 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
     allowedCreatorCheckState,
     contentCheckState,
     eventImageFile,
-    form,
+    getResolvedDateForms,
     fundingCheckState,
     nativeGasCheckState,
-    sportsForm,
     contentCheckError,
     openRouterCheckState,
     pendingAiIssues.length,
@@ -1731,7 +1798,9 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
         setForm({
           title: typeof parsed.form.title === 'string' ? parsed.form.title : fallback.title,
           slug: typeof parsed.form.slug === 'string' ? parsed.form.slug : fallback.slug,
-          endDateIso: typeof parsed.form.endDateIso === 'string' ? parsed.form.endDateIso : fallback.endDateIso,
+          endDateIso: typeof parsed.form.endDateIso === 'string'
+            ? normalizeDateTimeLocalValue(parsed.form.endDateIso)
+            : fallback.endDateIso,
           mainCategorySlug: typeof parsed.form.mainCategorySlug === 'string' ? parsed.form.mainCategorySlug : fallback.mainCategorySlug,
           categories: Array.isArray(parsed.form.categories)
             ? parsed.form.categories
@@ -1852,7 +1921,9 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
             : fallbackSports.eventVariant,
           sportSlug: typeof parsed.sportsForm.sportSlug === 'string' ? parsed.sportsForm.sportSlug : fallbackSports.sportSlug,
           leagueSlug: typeof parsed.sportsForm.leagueSlug === 'string' ? parsed.sportsForm.leagueSlug : fallbackSports.leagueSlug,
-          startTime: typeof parsed.sportsForm.startTime === 'string' ? parsed.sportsForm.startTime : fallbackSports.startTime,
+          startTime: typeof parsed.sportsForm.startTime === 'string'
+            ? normalizeDateTimeLocalValue(parsed.sportsForm.startTime)
+            : fallbackSports.startTime,
           includeDraw: Boolean(parsed.sportsForm.includeDraw),
           includeBothTeamsToScore: parsed.sportsForm.includeBothTeamsToScore !== false,
           includeSpreads: parsed.sportsForm.includeSpreads !== false,
@@ -2074,6 +2145,13 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
   const handleSportsFieldChange = useCallback(
     <K extends keyof AdminSportsFormState>(field: K, value: AdminSportsFormState[K]) => {
       setSportsForm((prev) => {
+        if (field === 'startTime') {
+          return {
+            ...prev,
+            startTime: normalizeDateTimeLocalValue(typeof value === 'string' ? value : ''),
+          }
+        }
+
         if (field === 'section') {
           if (value === 'props') {
             return {
@@ -2281,6 +2359,14 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
 
   const handleFieldChange = useCallback(
     <K extends keyof FormState>(field: K, value: FormState[K]) => {
+      if (field === 'endDateIso') {
+        setForm(prev => ({
+          ...prev,
+          endDateIso: normalizeDateTimeLocalValue(typeof value === 'string' ? value : ''),
+        }))
+        return
+      }
+
       if (field === 'mainCategorySlug') {
         const nextMainCategorySlug = typeof value === 'string' ? value : ''
         setForm((prev) => {
@@ -2320,6 +2406,14 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
     },
     [],
   )
+
+  const handleEndDateInputValueChange = useCallback((value: string) => {
+    handleFieldChange('endDateIso', value)
+  }, [handleFieldChange])
+
+  const handleSportsStartTimeInputValueChange = useCallback((value: string) => {
+    handleSportsFieldChange('startTime', value)
+  }, [handleSportsFieldChange])
 
   const addCategory = useCallback((category: CategorySuggestion | CategoryItem) => {
     const nextLabel = ('name' in category ? category.name : category.label).trim()
@@ -2473,13 +2567,14 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
   }, [])
 
   const buildAiPayload = useCallback(() => {
-    const normalizedMarketMode = isSportsEvent ? 'multi_multiple' : form.marketMode
+    const { resolvedForm } = getResolvedDateForms()
+    const normalizedMarketMode = isSportsEvent ? 'multi_multiple' : resolvedForm.marketMode
     const normalizedBinaryQuestion = normalizedMarketMode === 'binary'
-      ? form.title
-      : form.binaryQuestion
+      ? resolvedForm.title
+      : resolvedForm.binaryQuestion
     const normalizedOptions = normalizedMarketMode === 'binary'
       ? []
-      : form.options.map(option => ({
+      : resolvedForm.options.map(option => ({
           question: option.question,
           title: option.title,
           shortName: option.shortName,
@@ -2489,37 +2584,39 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
         }))
 
     return {
-      title: form.title,
-      slug: form.slug,
-      endDateIso: form.endDateIso,
-      mainCategorySlug: form.mainCategorySlug,
-      categories: form.categories,
+      title: resolvedForm.title,
+      slug: resolvedForm.slug,
+      endDateIso: resolvedForm.endDateIso,
+      mainCategorySlug: resolvedForm.mainCategorySlug,
+      categories: resolvedForm.categories,
       marketMode: normalizedMarketMode,
       binaryQuestion: normalizedBinaryQuestion,
-      binaryOutcomeYes: form.binaryOutcomeYes,
-      binaryOutcomeNo: form.binaryOutcomeNo,
+      binaryOutcomeYes: resolvedForm.binaryOutcomeYes,
+      binaryOutcomeNo: resolvedForm.binaryOutcomeNo,
       options: normalizedOptions,
       sports: isSportsEvent ? sportsDerivedContent.payload : undefined,
-      resolutionSource: form.resolutionSource,
-      resolutionRules: form.resolutionRules,
+      resolutionSource: resolvedForm.resolutionSource,
+      resolutionRules: resolvedForm.resolutionRules,
     }
-  }, [form, isSportsEvent, sportsDerivedContent.payload])
+  }, [getResolvedDateForms, isSportsEvent, sportsDerivedContent.payload])
 
   const buildPreparePayload = useCallback((): PreparePayloadBody => {
+    const { resolvedForm } = getResolvedDateForms()
+
     if (!eoaAddress) {
       throw new Error('Connect wallet first.')
     }
-    if (!form.marketMode && !isSportsEvent) {
+    if (!resolvedForm.marketMode && !isSportsEvent) {
       throw new Error('Select a market type.')
     }
 
     const mergedCategories = (() => {
       const base: CategoryItem[] = [
         {
-          label: selectedMainCategory?.name || form.mainCategorySlug,
-          slug: form.mainCategorySlug,
+          label: selectedMainCategory?.name || resolvedForm.mainCategorySlug,
+          slug: resolvedForm.mainCategorySlug,
         },
-        ...(isSportsEvent ? sportsDerivedContent.categories : form.categories),
+        ...(isSportsEvent ? sportsDerivedContent.categories : resolvedForm.categories),
       ]
       return Array.from(new Map(
         base
@@ -2542,14 +2639,14 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
     const payload: PreparePayloadBody = {
       chainId: targetChainId,
       creator: eoaAddress,
-      title: form.title.trim(),
-      slug: form.slug.trim(),
-      endDateIso: form.endDateIso,
-      mainCategorySlug: form.mainCategorySlug.trim(),
+      title: resolvedForm.title.trim(),
+      slug: resolvedForm.slug.trim(),
+      endDateIso: resolvedForm.endDateIso,
+      mainCategorySlug: resolvedForm.mainCategorySlug.trim(),
       categories: mergedCategories,
-      marketMode: isSportsEvent ? 'multi_multiple' : (form.marketMode as MarketMode),
-      resolutionSource: form.resolutionSource.trim(),
-      resolutionRules: form.resolutionRules.trim(),
+      marketMode: isSportsEvent ? 'multi_multiple' : (resolvedForm.marketMode as MarketMode),
+      resolutionSource: resolvedForm.resolutionSource.trim(),
+      resolutionRules: resolvedForm.resolutionRules.trim(),
     }
 
     if (isSportsEvent && sportsDerivedContent.payload) {
@@ -2564,14 +2661,14 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
       return payload
     }
 
-    if (form.marketMode === 'binary') {
-      payload.binaryQuestion = form.title.trim()
-      payload.binaryOutcomeYes = form.binaryOutcomeYes.trim()
-      payload.binaryOutcomeNo = form.binaryOutcomeNo.trim()
+    if (resolvedForm.marketMode === 'binary') {
+      payload.binaryQuestion = resolvedForm.title.trim()
+      payload.binaryOutcomeYes = resolvedForm.binaryOutcomeYes.trim()
+      payload.binaryOutcomeNo = resolvedForm.binaryOutcomeNo.trim()
       return payload
     }
 
-    payload.options = form.options.map(option => ({
+    payload.options = resolvedForm.options.map(option => ({
       id: option.id,
       question: option.question.trim(),
       title: option.title.trim(),
@@ -2579,7 +2676,7 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
       slug: option.slug.trim(),
     }))
     return payload
-  }, [eoaAddress, form, isSportsEvent, selectedMainCategory, sportsDerivedContent.categories, sportsDerivedContent.options, sportsDerivedContent.payload, targetChainId])
+  }, [eoaAddress, getResolvedDateForms, isSportsEvent, selectedMainCategory, sportsDerivedContent.categories, sportsDerivedContent.options, sportsDerivedContent.payload, targetChainId])
 
   const runOpenRouterCheck = useCallback(async () => {
     setOpenRouterCheckState('checking')
@@ -3249,7 +3346,7 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
       }
       setAuthChallengeExpiresAtMs(authPayload.expiresAt)
 
-      const authSignature = await activeWalletClient.signTypedData({
+      const authSignature = await runWithSignaturePrompt(() => activeWalletClient.signTypedData({
         account: eoaAddress,
         domain: {
           name: authPayload.domain.name,
@@ -3276,6 +3373,9 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
           expiresAt: BigInt(authPayload.expiresAt),
           chainId: BigInt(authPayload.chainId),
         },
+      }), {
+        title: 'Sign auth challenge',
+        description: 'Open your wallet and approve the signature to continue.',
       })
 
       setIsSigningAuth(false)
@@ -3371,6 +3471,7 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
     isSportsEvent,
     loadPendingSignaturePlan,
     optionImageFiles,
+    runWithSignaturePrompt,
     teamLogoFiles,
     walletClient,
   ])
@@ -3546,7 +3647,10 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
           maxPriorityFeePerGas?: bigint
         }) {
           try {
-            return await send(overrides)
+            return await runWithSignaturePrompt(() => send(overrides), {
+              title: 'Confirm transaction',
+              description: 'Open your wallet and approve the transaction to continue.',
+            })
           }
           catch (sendError) {
             const message = sendError instanceof Error ? sendError.message : String(sendError)
@@ -3560,10 +3664,16 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
               data: tx.data as `0x${string}`,
               value: toHex(BigInt(tx.value || '0')),
             }
-            const rpcHash = await activeWalletClient.request({
-              method: 'eth_sendTransaction',
-              params: [txRequest],
-            }) as unknown
+            const rpcHash = await runWithSignaturePrompt(
+              () => activeWalletClient.request({
+                method: 'eth_sendTransaction',
+                params: [txRequest],
+              }) as Promise<unknown>,
+              {
+                title: 'Confirm transaction',
+                description: 'Open your wallet and approve the transaction to continue.',
+              },
+            )
             if (typeof rpcHash !== 'string' || !rpcHash.startsWith('0x')) {
               throw new Error('Wallet provider returned an invalid transaction hash.')
             }
@@ -3694,6 +3804,7 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
     persistConfirmedTxs,
     preparedSignaturePlan,
     publicClient,
+    runWithSignaturePrompt,
     signatureTxs,
     walletClient,
   ])
@@ -3731,9 +3842,10 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
   }, [])
 
   const validateStep = useCallback((step: number, withToast = true) => {
+    const { resolvedForm, resolvedSportsForm } = syncResolvedDateInputs()
     const errors = buildStepErrors(step, {
-      form,
-      sportsForm,
+      form: resolvedForm,
+      sportsForm: resolvedSportsForm,
       eventImageFile,
       teamLogoFiles,
       slugValidationState,
@@ -3758,7 +3870,6 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
     allowedCreatorCheckState,
     contentCheckState,
     eventImageFile,
-    form,
     fundingCheckState,
     nativeGasCheckState,
     contentCheckError,
@@ -3766,7 +3877,7 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
     pendingAiIssues.length,
     showFirstError,
     slugValidationState,
-    sportsForm,
+    syncResolvedDateInputs,
     teamLogoFiles,
   ])
 
@@ -4196,10 +4307,12 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
                   <div className="space-y-2">
                     <Label htmlFor="event-end-date">End date</Label>
                     <Input
+                      ref={eventEndDateInputRef}
                       id="event-end-date"
                       type="datetime-local"
                       value={form.endDateIso}
-                      onChange={event => handleFieldChange('endDateIso', event.target.value)}
+                      onChange={event => handleEndDateInputValueChange(event.currentTarget.value)}
+                      onInput={event => handleEndDateInputValueChange(event.currentTarget.value)}
                       className="w-full md:max-w-xs"
                     />
                   </div>
@@ -4259,10 +4372,12 @@ export default function AdminCreateEventForm({ sportsSlugCatalog }: AdminCreateE
                             <div className="space-y-2">
                               <Label htmlFor="sports-start-time">Game start time</Label>
                               <Input
+                                ref={sportsStartTimeInputRef}
                                 id="sports-start-time"
                                 type="datetime-local"
                                 value={sportsForm.startTime}
-                                onChange={event => handleSportsFieldChange('startTime', event.target.value)}
+                                onChange={event => handleSportsStartTimeInputValueChange(event.currentTarget.value)}
+                                onInput={event => handleSportsStartTimeInputValueChange(event.currentTarget.value)}
                               />
                             </div>
 
