@@ -1,3 +1,4 @@
+import type { EventTabKey } from '@/app/[locale]/(platform)/event/[slug]/_components/EventTabSelector'
 import type { Event, User } from '@/types'
 import { useMemo, useState } from 'react'
 import EventActivity from '@/app/[locale]/(platform)/event/[slug]/_components/EventActivity'
@@ -12,10 +13,15 @@ import { useLiveCommentsChannel } from '@/app/[locale]/(platform)/event/[slug]/_
 interface EventTabsProps {
   event: Event
   user: User | null
+  initialTab?: EventTabKey
 }
 
-export default function EventTabs({ event, user }: EventTabsProps) {
-  const [activeTab, setActiveTab] = useState('comments')
+export default function EventTabs({
+  event,
+  user,
+  initialTab = 'comments',
+}: EventTabsProps) {
+  const [activeTab, setActiveTab] = useState<EventTabKey>(initialTab)
   const { data: commentMetrics } = useCommentMetrics(event.slug)
   const { status: liveCommentsStatus } = useLiveCommentsChannel({
     eventSlug: event.slug,
