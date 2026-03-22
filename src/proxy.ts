@@ -112,7 +112,7 @@ export default async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!api|trpc|_next|_vercel|.*\\..*).*)',
+    '/((?!api|trpc|_next|_vercel|embed|.*\\..*).*)',
     '/docs.mdx',
     '/docs/:path*.mdx',
     '/:locale/docs.mdx',

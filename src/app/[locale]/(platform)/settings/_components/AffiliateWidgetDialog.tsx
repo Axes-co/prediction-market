@@ -1,11 +1,13 @@
 'use client'
 
-import type { EmbedTheme } from '@/lib/embed-widget'
+import type { EmbedCodeFormat, EmbedToggles } from '@/lib/embed-widget'
+import type { EmbedTheme } from '@/lib/embed-theme'
 import type { Event } from '@/types'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import { useExtracted, useLocale } from 'next-intl'
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import EmbedCodeHighlight from '@/components/embed/EmbedCodeHighlight'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -13,14 +15,8 @@ import { Switch } from '@/components/ui/switch'
 import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 import { fetchAffiliateSettingsFromAPI } from '@/lib/affiliate-data'
 import { maybeShowAffiliateToast } from '@/lib/affiliate-toast'
-import {
-  buildFeatureList,
-  buildIframeCode,
-  buildIframeSrc,
-  buildPreviewSrc,
-  buildWebComponentCode,
-  EMBED_SCRIPT_URL,
-} from '@/lib/embed-widget'
+import { buildEmbedCode, buildEmbedSrc, buildPreviewSrc } from '@/lib/embed-widget'
+import { buildMarketLabel, normalizeBaseUrl } from '@/lib/embed-utils'
 import { cn } from '@/lib/utils'
 import { useUser } from '@/stores/useUser'
 
@@ -45,90 +41,11 @@ interface WidgetMarket {
   label: string
 }
 
-type EmbedType = 'iframe' | 'web-component'
-
 function requireEnv(value: string | undefined, name: string) {
   if (!value || !value.trim()) {
     throw new Error(`${name} is required for embeds.`)
   }
   return value
-}
-
-function normalizeBaseUrl(value: string) {
-  return value.replace(/\/$/, '')
-}
-
-function slugifySiteName(value: string) {
-  const slug = value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-  if (!slug) {
-    throw new Error('Site name must include at least one letter or number.')
-  }
-  return slug
-}
-
-function buildMarketLabel(market: Event['markets'][number]) {
-  return market.short_title?.trim() || market.title || market.slug
-}
-
-function buildAffiliateIframeSrc(
-  baseUrl: string,
-  categorySlug: string,
-  locale: string,
-  theme: EmbedTheme,
-  features: string[],
-  affiliateCode?: string,
-) {
-  if (!categorySlug) {
-    return ''
-  }
-
-  const params = new URLSearchParams({
-    category: categorySlug,
-    theme,
-    rotate: 'true',
-    locale,
-  })
-
-  if (features.length > 0) {
-    params.set('features', features.join(','))
-  }
-  if (affiliateCode?.trim()) {
-    params.set('r', affiliateCode.trim())
-  }
-
-  return `${baseUrl}/market.html?${params.toString()}`
-}
-
-function buildAffiliatePreviewSrc(
-  categorySlug: string,
-  locale: string,
-  theme: EmbedTheme,
-  features: string[],
-  affiliateCode?: string,
-) {
-  if (!categorySlug) {
-    return ''
-  }
-
-  const params = new URLSearchParams({
-    category: categorySlug,
-    theme,
-    rotate: 'true',
-    locale,
-  })
-
-  if (features.length > 0) {
-    params.set('features', features.join(','))
-  }
-  if (affiliateCode?.trim()) {
-    params.set('r', affiliateCode.trim())
-  }
-
-  return `/market.html?${params.toString()}`
 }
 
 async function fetchCategoryMarkets(tag: string, locale: string, signal: AbortSignal): Promise<WidgetMarket[]> {
@@ -161,100 +78,7 @@ async function fetchCategoryMarkets(tag: string, locale: string, signal: AbortSi
 }
 
 const SITE_URL = normalizeBaseUrl(requireEnv(process.env.SITE_URL, 'SITE_URL'))
-const IFRAME_HEIGHT_WITH_CHART = 400
-const IFRAME_HEIGHT_WITH_FILTERS = 440
-const IFRAME_HEIGHT_NO_CHART = 180
 
-const tokenStyles = {
-  tag: 'text-muted-foreground',
-  attr: 'text-red-500',
-  value: 'text-rose-500',
-  punctuation: 'text-muted-foreground',
-}
-
-interface CodeToken {
-  text: string
-  className?: string
-}
-
-type CodeLine = CodeToken[]
-
-function token(text: string, className?: string): CodeToken {
-  return { text, className }
-}
-
-function tagOpenLine(indent: string, tagName: string): CodeLine {
-  return [
-    token(indent),
-    token('<', tokenStyles.tag),
-    token(tagName, tokenStyles.tag),
-  ]
-}
-
-function tagWithAttributeLine(indent: string, tagName: string, attrName: string, attrValue: string, closing: string) {
-  return [
-    token(indent),
-    token('<', tokenStyles.tag),
-    token(tagName, tokenStyles.tag),
-    token(' '),
-    token(attrName, tokenStyles.attr),
-    token('=', tokenStyles.punctuation),
-    token('"', tokenStyles.punctuation),
-    token(attrValue, tokenStyles.value),
-    token('"', tokenStyles.punctuation),
-    token(closing, tokenStyles.tag),
-  ]
-}
-
-function attributeLine(indent: string, name: string, value: string): CodeLine {
-  return [
-    token(indent),
-    token(name, tokenStyles.attr),
-    token('=', tokenStyles.punctuation),
-    token('"', tokenStyles.punctuation),
-    token(value, tokenStyles.value),
-    token('"', tokenStyles.punctuation),
-  ]
-}
-
-function tagCloseLine(indent: string, tagName: string): CodeLine {
-  return [
-    token(indent),
-    token('</', tokenStyles.tag),
-    token(tagName, tokenStyles.tag),
-    token('>', tokenStyles.tag),
-  ]
-}
-
-function tagSelfCloseLine(indent: string): CodeLine {
-  return [
-    token(indent),
-    token('/>', tokenStyles.tag),
-  ]
-}
-
-function tagEndLine(indent: string): CodeLine {
-  return [
-    token(indent),
-    token('>', tokenStyles.tag),
-  ]
-}
-
-function renderCode(lines: CodeLine[]) {
-  return (
-    <pre className="min-w-max font-mono text-xs/5">
-      {lines.map((line, lineIndex) => (
-        <div key={lineIndex} className="whitespace-pre">
-          {line.map((segment, segmentIndex) => (
-            <span key={segmentIndex} className={segment.className}>
-              {segment.text}
-            </span>
-          ))}
-        </div>
-      ))}
-    </pre>
-  )
-}
 
 export default function AffiliateWidgetDialog({
   open,
@@ -268,10 +92,17 @@ export default function AffiliateWidgetDialog({
   const user = useUser()
   const affiliateCode = user?.affiliate_code?.trim() ?? ''
   const [theme, setTheme] = useState<EmbedTheme>('light')
-  const [embedType, setEmbedType] = useState<EmbedType>('iframe')
-  const [showVolume, setShowVolume] = useState(false)
-  const [showChart, setShowChart] = useState(false)
-  const [showTimeRange, setShowTimeRange] = useState(false)
+  const [codeFormat, setCodeFormat] = useState<EmbedCodeFormat>('default')
+  const [width, setWidth] = useState(400)
+  const [height, setHeight] = useState(300)
+  const [toggles, setToggles] = useState<EmbedToggles>({
+    showChart: true,
+    showButtons: true,
+    showVolume: true,
+    showYAxis: true,
+    showGridRows: true,
+    showBorder: false,
+  })
   const [copied, setCopied] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<string>('')
   const [selectedMarketId, setSelectedMarketId] = useState<string>('')
@@ -281,15 +112,6 @@ export default function AffiliateWidgetDialog({
   const [affiliateSharePercent, setAffiliateSharePercent] = useState<number | null>(null)
   const [tradeFeePercent, setTradeFeePercent] = useState<number | null>(null)
 
-  const siteSlug = useMemo(() => {
-    try {
-      return slugifySiteName(site.name)
-    }
-    catch {
-      return 'market'
-    }
-  }, [site.name])
-
   const currentMarkets = useMemo(
     () => marketsByCategory[selectedCategory] ?? [],
     [marketsByCategory, selectedCategory],
@@ -297,8 +119,6 @@ export default function AffiliateWidgetDialog({
   const selectedMarket = eventSlug
     ? { id: eventSlug, slug: eventSlug, label: eventSlug }
     : (currentMarkets.find(market => market.id === selectedMarketId) ?? currentMarkets[0])
-  const embedElementName = `${siteSlug}-market-embed`
-  const embedIframeTitle = `${siteSlug}-market-iframe`
 
   useEffect(() => {
     if (!open) {
@@ -306,10 +126,17 @@ export default function AffiliateWidgetDialog({
     }
 
     setTheme('light')
-    setEmbedType('iframe')
-    setShowVolume(false)
-    setShowChart(false)
-    setShowTimeRange(false)
+    setCodeFormat('default')
+    setWidth(400)
+    setHeight(300)
+    setToggles({
+      showChart: true,
+      showButtons: true,
+      showVolume: true,
+      showYAxis: true,
+      showGridRows: true,
+      showBorder: false,
+    })
     setCopied(false)
     setSelectedCategory(categories[0]?.slug ?? '')
     setSelectedMarketId('')
@@ -317,12 +144,6 @@ export default function AffiliateWidgetDialog({
     setLoadingCategorySlug(null)
     setCategoryLoadFailed(false)
   }, [open, categories])
-
-  useEffect(() => {
-    if (!showChart) {
-      setShowTimeRange(false)
-    }
-  }, [showChart])
 
   useEffect(() => {
     if (!affiliateCode) {
@@ -417,102 +238,35 @@ export default function AffiliateWidgetDialog({
     }
   }, [open, currentMarkets, selectedMarketId])
 
-  const features = useMemo(
-    () => buildFeatureList(showVolume, showChart, showTimeRange),
-    [showVolume, showChart, showTimeRange],
-  )
-  const iframeHeight = showChart
-    ? (showTimeRange ? IFRAME_HEIGHT_WITH_FILTERS : IFRAME_HEIGHT_WITH_CHART)
-    : IFRAME_HEIGHT_NO_CHART
-  const iframeSrc = useMemo(
-    () =>
-      eventSlug
-        ? buildIframeSrc(SITE_URL, eventSlug, theme, features, affiliateCode)
-        : buildAffiliateIframeSrc(
-            SITE_URL,
-            selectedCategory,
-            locale,
-            theme,
-            features,
-            affiliateCode,
-          ),
-    [eventSlug, selectedCategory, locale, theme, features, affiliateCode],
-  )
-  const previewSrc = useMemo(
-    () =>
-      eventSlug
-        ? buildPreviewSrc(eventSlug, theme, features, affiliateCode)
-        : buildAffiliatePreviewSrc(
-            selectedCategory,
-            locale,
-            theme,
-            features,
-            affiliateCode,
-          ),
-    [eventSlug, selectedCategory, locale, theme, features, affiliateCode],
-  )
-  const iframeCode = useMemo(
-    () => buildIframeCode(iframeSrc, iframeHeight, embedIframeTitle),
-    [iframeSrc, iframeHeight, embedIframeTitle],
-  )
-  const webComponentCode = useMemo(
-    () =>
-      buildWebComponentCode(
-        embedElementName,
-        selectedMarket?.slug ?? '',
-        theme,
-        showVolume,
-        showChart,
-        showTimeRange,
-        affiliateCode,
-      ),
-    [embedElementName, selectedMarket?.slug, theme, showVolume, showChart, showTimeRange, affiliateCode],
-  )
-  const activeCode = embedType === 'iframe' ? iframeCode : webComponentCode
-  const canCopy = embedType === 'iframe'
-    ? Boolean(iframeSrc)
-    : Boolean(selectedMarket?.slug)
+  const resolvedSlug = eventSlug ?? selectedMarket?.slug ?? ''
+  const isEvent = Boolean(eventSlug) || (!eventSlug && Boolean(selectedCategory))
 
-  const iframeLines = useMemo<CodeLine[]>(() => ([
-    tagOpenLine('', 'iframe'),
-    attributeLine('\t', 'title', embedIframeTitle),
-    attributeLine('\t', 'src', iframeSrc),
-    attributeLine('\t', 'width', '400'),
-    attributeLine('\t', 'height', String(iframeHeight)),
-    attributeLine('\t', 'frameBorder', '0'),
-    tagSelfCloseLine(''),
-  ]), [embedIframeTitle, iframeSrc, iframeHeight])
-
-  const webComponentLines = useMemo<CodeLine[]>(() => {
-    const lines: CodeLine[] = [
-      tagWithAttributeLine('', 'div', 'id', embedElementName, '>'),
-      tagOpenLine('\t', 'script'),
-      attributeLine('\t\t', 'type', 'module'),
-      attributeLine('\t\t', 'src', EMBED_SCRIPT_URL),
-      tagEndLine('\t'),
-      tagCloseLine('\t', 'script'),
-      tagOpenLine('\t', embedElementName),
-      attributeLine('\t\t', 'market', selectedMarket?.slug ?? ''),
-    ]
-
-    if (showVolume) {
-      lines.push(attributeLine('\t\t', 'volume', 'true'))
-    }
-    if (showChart) {
-      lines.push(attributeLine('\t\t', 'chart', 'true'))
-    }
-    if (showChart && showTimeRange) {
-      lines.push(attributeLine('\t\t', 'filters', 'true'))
-    }
-    if (affiliateCode) {
-      lines.push(attributeLine('\t\t', 'affiliate', affiliateCode))
-    }
-
-    lines.push(attributeLine('\t\t', 'theme', theme))
-    lines.push(tagSelfCloseLine('\t'))
-    lines.push(tagCloseLine('', 'div'))
-    return lines
-  }, [affiliateCode, embedElementName, selectedMarket?.slug, showVolume, showChart, showTimeRange, theme])
+  const embedSrc = useMemo(
+    () => buildEmbedSrc(SITE_URL, resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent),
+    [resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent],
+  )
+  const previewUrl = useMemo(
+    () => buildPreviewSrc(resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent),
+    [resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent],
+  )
+  const eventUrl = `${SITE_URL}/event/${resolvedSlug}`
+  const embedCode = useMemo(
+    () => buildEmbedCode(codeFormat, {
+      src: embedSrc,
+      width,
+      height,
+      title: `${selectedMarket?.label ?? resolvedSlug} — ${site.name} Prediction Market`,
+      slug: resolvedSlug,
+      siteName: site.name,
+      siteUrl: SITE_URL,
+      question: selectedMarket?.label ?? resolvedSlug,
+      yesPercent: 50,
+      noPercent: 50,
+      eventUrl,
+    }),
+    [codeFormat, embedSrc, width, height, resolvedSlug, selectedMarket?.label, site.name, eventUrl],
+  )
+  const canCopy = Boolean(resolvedSlug)
 
   async function handleCopy() {
     if (!canCopy) {
@@ -520,7 +274,7 @@ export default function AffiliateWidgetDialog({
     }
 
     try {
-      await navigator.clipboard.writeText(activeCode)
+      await navigator.clipboard.writeText(embedCode)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
       maybeShowAffiliateToast({
@@ -598,21 +352,33 @@ export default function AffiliateWidgetDialog({
                 <div className="rounded-md border border-border p-3">
                   <div className="flex flex-col gap-3 text-sm font-semibold text-foreground">
                     <label className="flex items-center justify-between gap-4">
-                      <span>{t('Show Volume')}</span>
-                      <Switch checked={showVolume} onCheckedChange={setShowVolume} />
+                      <span>{t('Chart')}</span>
+                      <Switch checked={toggles.showChart} onCheckedChange={v => setToggles(p => ({ ...p, showChart: v }))} />
                     </label>
                     <label className="flex items-center justify-between gap-4">
-                      <span>{t('Show Chart')}</span>
-                      <Switch checked={showChart} onCheckedChange={setShowChart} />
+                      <span>{t('Buy buttons')}</span>
+                      <Switch checked={toggles.showButtons} onCheckedChange={v => setToggles(p => ({ ...p, showButtons: v }))} />
                     </label>
-                    {showChart
-                      ? (
-                          <label className="flex items-center justify-between gap-4">
-                            <span>{t('Show Time Range Selector')}</span>
-                            <Switch checked={showTimeRange} onCheckedChange={setShowTimeRange} />
-                          </label>
-                        )
-                      : null}
+                    <label className="flex items-center justify-between gap-4">
+                      <span>{t('Volume')}</span>
+                      <Switch checked={toggles.showVolume} onCheckedChange={v => setToggles(p => ({ ...p, showVolume: v }))} />
+                    </label>
+                    <label className="flex items-center justify-between gap-4">
+                      <span>{t('Y Axis')}</span>
+                      <Switch checked={toggles.showYAxis} onCheckedChange={v => setToggles(p => ({ ...p, showYAxis: v }))} />
+                    </label>
+                    <label className="flex items-center justify-between gap-4">
+                      <span>{t('Grid rows')}</span>
+                      <Switch checked={toggles.showGridRows} onCheckedChange={v => setToggles(p => ({ ...p, showGridRows: v }))} />
+                    </label>
+                    <label className="flex items-center justify-between gap-4">
+                      <span>{t('Border')}</span>
+                      <Switch checked={toggles.showBorder} onCheckedChange={v => setToggles(p => ({ ...p, showBorder: v }))} />
+                    </label>
+                    <label className="flex items-center justify-between gap-4">
+                      <span>{t('Dark mode')}</span>
+                      <Switch checked={theme === 'dark'} onCheckedChange={v => setTheme(v ? 'dark' : 'light')} />
+                    </label>
                   </div>
                 </div>
               </div>
@@ -621,13 +387,14 @@ export default function AffiliateWidgetDialog({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('EMBED CODE')}</Label>
                   <div className="flex items-center gap-2">
-                    <Select value={embedType} onValueChange={value => setEmbedType(value as EmbedType)}>
+                    <Select value={codeFormat} onValueChange={value => setCodeFormat(value as EmbedCodeFormat)}>
                       <SelectTrigger size="sm">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="iframe">{t('Iframe')}</SelectItem>
-                        <SelectItem value="web-component">{t('Web component')}</SelectItem>
+                        <SelectItem value="default">Default</SelectItem>
+                        <SelectItem value="standard">Standard</SelectItem>
+                        <SelectItem value="minimal">Minimal</SelectItem>
                       </SelectContent>
                     </Select>
                     <Button type="button" size="sm" variant="outline" onClick={handleCopy} disabled={!canCopy}>
@@ -636,20 +403,10 @@ export default function AffiliateWidgetDialog({
                     </Button>
                   </div>
                 </div>
-                <div className="overflow-x-auto rounded-md border border-border bg-muted/70 p-4">
-                  {embedType === 'iframe'
-                    ? (
-                        iframeSrc
-                          ? renderCode(iframeLines)
-                          : <p className="text-sm text-muted-foreground">{t('No market available for this event')}</p>
-                      )
-                    : selectedMarket
-                      ? (
-                          renderCode(webComponentLines)
-                        )
-                      : (
-                          <p className="text-sm text-muted-foreground">{t('No market available for this event')}</p>
-                        )}
+                <div className="overflow-auto rounded-md border border-border bg-muted/70 p-4 max-h-48">
+                  {resolvedSlug
+                    ? <EmbedCodeHighlight code={embedCode} />
+                    : <p className="text-sm text-muted-foreground">{t('No market available for this event')}</p>}
                 </div>
               </div>
             </div>
@@ -658,19 +415,24 @@ export default function AffiliateWidgetDialog({
               <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('PREVIEW')}</Label>
               <div
                 className="relative flex flex-1 items-center justify-center overflow-hidden rounded-md bg-[#f7f7f9] p-2"
-                style={{ minHeight: `${iframeHeight}px` }}
+                style={{ minHeight: `${Math.min(height, 400)}px` }}
               >
                 {isLoadingCategory
                   ? (
                       <p className="text-sm text-muted-foreground">{t('Searching events...')}</p>
                     )
-                  : previewSrc
+                  : previewUrl
                     ? (
                         <iframe
                           title={t('Embed preview')}
-                          src={previewSrc}
-                          style={{ height: `${iframeHeight}px` }}
-                          className="w-100 max-w-full border-0 bg-transparent"
+                          src={previewUrl}
+                          width={Math.min(width, 450)}
+                          height={Math.min(height, 400)}
+                          className="max-w-full border-0 bg-transparent"
+                          style={{
+                            transform: width > 450 ? `scale(${450 / width})` : undefined,
+                            transformOrigin: 'left top',
+                          }}
                         />
                       )
                     : (

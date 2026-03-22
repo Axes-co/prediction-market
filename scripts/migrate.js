@@ -129,10 +129,16 @@ async function applyMigrations(sql, isSupabase) {
       console.log(`ℹ️ Applied compatibility rewrite for ${file} (service_role -> CURRENT_USER)`)
     }
 
-    await sql.begin(async (tx) => {
-      await tx.unsafe(migrationSql, [], { simple: true })
-      await tx`INSERT INTO migrations (version) VALUES (${version})`
-    })
+    await sql`BEGIN`
+    try {
+      await sql.unsafe(migrationSql, [], { simple: true })
+      await sql`INSERT INTO migrations (version) VALUES (${version})`
+      await sql`COMMIT`
+    }
+    catch (err) {
+      await sql`ROLLBACK`
+      throw err
+    }
 
     console.log(`✅ Applied ${file}`)
   }
