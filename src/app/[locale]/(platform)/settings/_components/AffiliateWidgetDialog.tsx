@@ -245,17 +245,17 @@ export default function AffiliateWidgetDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-fit! max-w-fit! p-6 overflow-hidden">
+      <DialogContent className="max-h-[90vh] w-[calc(100%-1rem)] max-w-4xl overflow-y-auto p-3 sm:p-6 lg:w-fit! lg:max-w-fit!">
         <DialogHeader className="flex-row items-center">
           <DialogTitle className="text-xl font-semibold">{t('Embed')}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-col lg:flex-row gap-4 lg:gap-12 min-w-fit min-h-0 w-fit">
+        <div className="flex flex-col lg:flex-row gap-4 lg:gap-12 min-h-0">
           {/* RIGHT — Preview or Code */}
-          <div className="w-fit lg:w-fit lg:order-last lg:h-fit">
+          <div className="w-full lg:w-fit lg:order-last lg:h-fit">
             {view === 'preview'
               ? (
-                  <div className="w-[500px] h-[400px] flex flex-col pb-2 pl-6">
+                  <div className="w-full lg:w-[500px] h-auto lg:h-[400px] flex flex-col pb-2 lg:pl-6">
                     <div className="grid grid-cols-[auto_1fr] grid-rows-[1fr_auto] w-fit h-fit">
                       {/* H dimension */}
                       <div className="flex flex-col items-center gap-2 w-12 justify-center">
@@ -303,7 +303,7 @@ export default function AffiliateWidgetDialog({
                   </div>
                 )
               : (
-                  <div className="w-[500px] h-[400px] flex flex-col">
+                  <div className="w-full lg:w-[500px] h-[300px] lg:h-[400px] flex flex-col">
                     <div className="flex flex-col gap-2 h-full min-h-0">
                       <p className="text-sm text-muted-foreground shrink-0">{t('Copy and paste this code into your website')}</p>
                       <div className="group relative min-w-0 flex-1 overflow-auto rounded-lg bg-muted/50">
@@ -320,7 +320,7 @@ export default function AffiliateWidgetDialog({
           </div>
 
           {/* LEFT — Controls */}
-          <div className="flex flex-col gap-4 w-full lg:w-64 shrink-0 lg:overflow-y-auto min-h-0 h-[400px] lg:max-h-[500px]">
+          <div className="flex flex-col gap-4 w-full lg:w-64 shrink-0 lg:overflow-y-auto min-h-0 lg:h-[400px] lg:max-h-[500px]">
             {view === 'preview'
               ? (
                   <>
