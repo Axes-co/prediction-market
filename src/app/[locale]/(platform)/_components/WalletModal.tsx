@@ -696,7 +696,7 @@ function WalletFundMenu({
                 <span>
                   Use
                   {' '}
-                  <span className="font-semibold text-foreground">/airdrop</span>
+                  <span className="font-semibold text-foreground">/faucet</span>
                 </span>
                 <span className="size-1 rounded-full bg-muted-foreground" />
                 <span>on Discord</span>

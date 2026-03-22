@@ -24,7 +24,7 @@ export default function TestModeBanner({
       {' '}
       {t('Get free Amoy USDC in Discord with')}
       {' '}
-      <span className="font-bold">/airdrop</span>
+      <span className="font-bold">/faucet</span>
     </>
   )
 
