@@ -43,8 +43,6 @@ Start from [`.env.example`](../../.env.example) and fill in the shared
 
 Optionally add your custom domain under **Settings → Domains** after this step.
 
----
-
 ## 6. Finish setup in Admin
 
 1. Log in with a wallet listed in `ADMIN_WALLETS`

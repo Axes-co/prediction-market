@@ -2,6 +2,7 @@ import {
   getAdminSportsMarketTypeDefaultOutcomes,
   resolveAdminSportsMarketTypeOption,
 } from './admin-sports-market-types'
+import { normalizeDateTimeLocalValue } from './datetime-local'
 
 export type AdminSportsSection = 'games' | 'props'
 export type AdminSportsEventVariant = 'standard' | 'more_markets' | 'exact_score' | 'halftime_result' | 'custom'
@@ -215,17 +216,38 @@ function formatLineLabel(value: number) {
 }
 
 function parseStartTime(value: string) {
-  const normalized = value.trim()
+  const normalized = normalizeDateTimeLocalValue(value)
   if (!normalized) {
     return null
   }
 
-  const parsed = new Date(normalized)
-  if (Number.isNaN(parsed.getTime())) {
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
+  if (!match) {
     return null
   }
 
-  return parsed
+  const year = Number.parseInt(match[1], 10)
+  const month = Number.parseInt(match[2], 10)
+  const day = Number.parseInt(match[3], 10)
+  const hours = Number.parseInt(match[4], 10)
+  const minutes = Number.parseInt(match[5], 10)
+
+  const parsed = new Date(year, month - 1, day, hours, minutes, 0, 0)
+  if (
+    Number.isNaN(parsed.getTime())
+    || parsed.getFullYear() !== year
+    || parsed.getMonth() !== month - 1
+    || parsed.getDate() !== day
+    || parsed.getHours() !== hours
+    || parsed.getMinutes() !== minutes
+  ) {
+    return null
+  }
+
+  return {
+    date: parsed,
+    normalized,
+  }
 }
 
 function normalizeLineInput(value: string) {
@@ -271,12 +293,12 @@ function slugifySportsMarketType(value: string) {
 
 function buildEventDateFromStartTime(startTime: string) {
   const parsed = parseStartTime(startTime)
-  return parsed ? parsed.toISOString().slice(0, 10) : ''
+  return parsed ? parsed.normalized.slice(0, 10) : ''
 }
 
 function buildStartTimeIso(startTime: string) {
   const parsed = parseStartTime(startTime)
-  return parsed ? parsed.toISOString() : ''
+  return parsed ? parsed.date.toISOString() : ''
 }
 
 function buildSportVariantSlug(section: AdminSportsSection, eventVariant: AdminSportsEventVariant, options: SportsDerivedOption[]) {
@@ -331,6 +353,44 @@ function createOption(input: Omit<SportsDerivedOption, 'outcomeYes' | 'outcomeNo
   }
 }
 
+function buildMoneylineOptions(form: AdminSportsFormState, eventDate: string): SportsDerivedOption[] {
+  const { homeTeam, awayTeam } = buildTeamPair(form.teams)
+  const homeName = normalizeText(homeTeam?.name ?? '')
+  const awayName = normalizeText(awayTeam?.name ?? '')
+  if (!homeName || !awayName || !eventDate) {
+    return []
+  }
+
+  const options: SportsDerivedOption[] = [
+    createOption({
+      id: 'moneyline-home',
+      question: `Will ${homeName} win on ${eventDate}?`,
+      title: homeName,
+      shortName: homeName,
+      slug: slugify(homeName),
+    }),
+    createOption({
+      id: 'moneyline-away',
+      question: `Will ${awayName} win on ${eventDate}?`,
+      title: awayName,
+      shortName: awayName,
+      slug: slugify(awayName),
+    }),
+  ]
+
+  if (form.includeDraw) {
+    options.splice(1, 0, createOption({
+      id: 'moneyline-draw',
+      question: `Will ${homeName} vs. ${awayName} end in a draw?`,
+      title: 'Draw',
+      shortName: 'Draw',
+      slug: 'draw',
+    }))
+  }
+
+  return options
+}
+
 function buildGameOptions(form: AdminSportsFormState, eventDate: string): SportsDerivedOption[] {
   const { homeTeam, awayTeam } = buildTeamPair(form.teams)
   const homeName = normalizeText(homeTeam?.name ?? '')
@@ -339,8 +399,10 @@ function buildGameOptions(form: AdminSportsFormState, eventDate: string): Sports
     return []
   }
 
+  const moneylineOptions = buildMoneylineOptions(form, eventDate)
+
   if (form.eventVariant === 'more_markets') {
-    const options: SportsDerivedOption[] = []
+    const options: SportsDerivedOption[] = [...moneylineOptions]
 
     if (form.includeBothTeamsToScore) {
       options.push(createOption({
@@ -395,13 +457,16 @@ function buildGameOptions(form: AdminSportsFormState, eventDate: string): Sports
   }
 
   if (form.eventVariant === 'exact_score') {
-    const options = EXACT_SCORE_GRID.map(({ homeScore, awayScore }) => createOption({
-      id: `exact-score-${homeScore}-${awayScore}`,
-      question: `Exact Score: ${homeName} ${homeScore} - ${awayScore} ${awayName}?`,
-      title: `Exact Score: ${homeScore}-${awayScore}`,
-      shortName: `Exact Score: ${homeScore}-${awayScore}`,
-      slug: `exact-score-${homeScore}-${awayScore}`,
-    }))
+    const options = [
+      ...moneylineOptions,
+      ...EXACT_SCORE_GRID.map(({ homeScore, awayScore }) => createOption({
+        id: `exact-score-${homeScore}-${awayScore}`,
+        question: `Exact Score: ${homeName} ${homeScore} - ${awayScore} ${awayName}?`,
+        title: `Exact Score: ${homeScore}-${awayScore}`,
+        shortName: `Exact Score: ${homeScore}-${awayScore}`,
+        slug: `exact-score-${homeScore}-${awayScore}`,
+      })),
+    ]
 
     options.push(createOption({
       id: 'exact-score-any-other',
@@ -416,6 +481,7 @@ function buildGameOptions(form: AdminSportsFormState, eventDate: string): Sports
 
   if (form.eventVariant === 'halftime_result') {
     return [
+      ...moneylineOptions,
       createOption({
         id: 'halftime-result-home',
         question: `${homeName} leading at halftime?`,
@@ -440,34 +506,7 @@ function buildGameOptions(form: AdminSportsFormState, eventDate: string): Sports
     ]
   }
 
-  const options: SportsDerivedOption[] = [
-    createOption({
-      id: 'moneyline-home',
-      question: `Will ${homeName} win on ${eventDate}?`,
-      title: homeName,
-      shortName: homeName,
-      slug: slugify(homeName),
-    }),
-    createOption({
-      id: 'moneyline-away',
-      question: `Will ${awayName} win on ${eventDate}?`,
-      title: awayName,
-      shortName: awayName,
-      slug: slugify(awayName),
-    }),
-  ]
-
-  if (form.includeDraw) {
-    options.splice(1, 0, createOption({
-      id: 'moneyline-draw',
-      question: `Will ${homeName} vs. ${awayName} end in a draw?`,
-      title: 'Draw',
-      shortName: 'Draw',
-      slug: 'draw',
-    }))
-  }
-
-  return options
+  return moneylineOptions
 }
 
 function buildPropLabel(statType: AdminSportsPropStatType) {
@@ -597,7 +636,13 @@ function buildCustomMarketOptions(form: AdminSportsFormState) {
 
 function buildSportsOptions(form: AdminSportsFormState, eventDate: string) {
   if (form.eventVariant === 'custom') {
-    return buildCustomMarketOptions(form)
+    const moneylineOptions = form.section === 'games'
+      ? buildMoneylineOptions(form, eventDate)
+      : []
+    return [
+      ...moneylineOptions,
+      ...buildCustomMarketOptions(form),
+    ]
   }
 
   if (form.section === 'games' && form.eventVariant) {
@@ -682,6 +727,39 @@ function buildSportsCategories(form: AdminSportsFormState, eventVariantSlug: str
   return out
 }
 
+function buildBaseMoneylinePayloadMarkets(args: {
+  optionsById: Map<string, SportsDerivedOption>
+  includeDraw: boolean
+}): AdminSportsPreparePayload['markets'] {
+  const optionIds = args.includeDraw
+    ? ['moneyline-home', 'moneyline-draw', 'moneyline-away']
+    : ['moneyline-home', 'moneyline-away']
+
+  return optionIds.flatMap((optionId, index) => {
+    const option = args.optionsById.get(optionId)
+    if (!option) {
+      return []
+    }
+
+    return [{
+      id: option.id,
+      question: option.question,
+      title: option.title,
+      shortName: option.shortName,
+      slug: option.slug,
+      outcomes: [option.outcomeYes, option.outcomeNo] as [string, string],
+      sportsMarketType: 'moneyline',
+      groupItemTitle: option.title,
+      groupItemThreshold: String(index),
+      iconAssetKey: optionId === 'moneyline-home'
+        ? 'home'
+        : optionId === 'moneyline-away'
+          ? 'away'
+          : undefined,
+    }]
+  })
+}
+
 export function buildAdminSportsDerivedContent(args: {
   baseSlug: string
   sports: AdminSportsFormState
@@ -738,7 +816,13 @@ export function buildAdminSportsDerivedContent(args: {
       : []
 
     const optionsById = new Map(options.map(option => [option.id, option]))
-    const markets = effectiveEventVariant === 'custom'
+    const baseMoneylineMarkets = isGamesSection
+      ? buildBaseMoneylinePayloadMarkets({
+          optionsById,
+          includeDraw: args.sports.includeDraw,
+        })
+      : []
+    const customMarkets = effectiveEventVariant === 'custom'
       ? args.sports.customMarkets.flatMap((market, index) => {
           const option = optionsById.get(market.id)
           const sportsMarketType = normalizeSportsMarketType(market.sportsMarketType)
@@ -757,7 +841,7 @@ export function buildAdminSportsDerivedContent(args: {
             sportsMarketType,
             line: line ?? undefined,
             groupItemTitle: normalizeText(market.groupItemTitle) || option.title,
-            groupItemThreshold: String(index),
+            groupItemThreshold: String(baseMoneylineMarkets.length + index),
             iconAssetKey: args.sports.section === 'games'
               && (market.iconAssetKey === 'home' || market.iconAssetKey === 'away')
               ? market.iconAssetKey
@@ -765,8 +849,11 @@ export function buildAdminSportsDerivedContent(args: {
           }]
         })
       : []
+    const markets = effectiveEventVariant === 'custom'
+      ? [...baseMoneylineMarkets, ...customMarkets]
+      : []
 
-    if (effectiveEventVariant === 'custom' && markets.length === 0) {
+    if (effectiveEventVariant === 'custom' && customMarkets.length === 0) {
       return null
     }
 
