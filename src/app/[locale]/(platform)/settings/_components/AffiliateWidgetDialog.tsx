@@ -70,15 +70,6 @@ const DEFAULT_TOGGLES: EmbedToggles = {
   showBorder: false,
 }
 
-const TOGGLE_KEYS: Array<{ key: keyof EmbedToggles, label: string }> = [
-  { key: 'showChart', label: 'Chart' },
-  { key: 'showButtons', label: 'Buy buttons' },
-  { key: 'showVolume', label: 'Volume' },
-  { key: 'showYAxis', label: 'Y Axis' },
-  { key: 'showGridRows', label: 'Grid rows' },
-  { key: 'showBorder', label: 'Border' },
-]
-
 // ---------------------------------------------------------------------------
 // Dimension input
 // ---------------------------------------------------------------------------

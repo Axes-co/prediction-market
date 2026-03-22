@@ -94,15 +94,6 @@ function WidthDimensionInput({ value, min, max, onChange }: { value: number, min
 // Toggles list
 // ---------------------------------------------------------------------------
 
-const TOGGLE_KEYS: Array<{ key: keyof EmbedToggles, label: string }> = [
-  { key: 'showChart', label: 'Chart' },
-  { key: 'showButtons', label: 'Buy buttons' },
-  { key: 'showVolume', label: 'Volume' },
-  { key: 'showYAxis', label: 'Y Axis' },
-  { key: 'showGridRows', label: 'Grid rows' },
-  { key: 'showBorder', label: 'Border' },
-]
-
 const DEFAULT_TOGGLES: EmbedToggles = {
   showChart: true,
   showButtons: true,
