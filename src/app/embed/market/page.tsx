@@ -143,9 +143,9 @@ async function EmbedMarketContent({
   // Load translated labels for the widget
   const messages = (await import(`@/i18n/messages/${resolvedLocale}.json`)).default as Record<string, string>
   const labels = {
-    viewMarket: messages['0HwRC+'] ?? 'View Market',
-    allTime: messages['YN0CIU'] ?? 'All time',
-    viewOn: messages['IIA3d1'] ?? 'View on',
+    viewMarket: messages['embed.viewMarket'] ?? 'View Market',
+    allTime: messages['embed.allTime'] ?? 'All time',
+    viewOn: messages['embed.viewOn'] ?? 'View on',
   }
 
   // Resolve site identity
