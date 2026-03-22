@@ -56,6 +56,7 @@ export function buildEmbedSrc(
   toggles: Partial<EmbedToggles> = {},
   affiliateCode?: string,
   isEvent?: boolean,
+  locale?: string,
 ) {
   if (!slug) return ''
 
@@ -82,6 +83,7 @@ export function buildEmbedSrc(
   if (resolved.showBorder) params.set('showBorder', 'true')
 
   appendParam(params, 'r', affiliateCode)
+  appendParam(params, 'locale', locale)
 
   return `${baseUrl}/embed/market?${params.toString()}`
 }
@@ -94,9 +96,10 @@ export function buildPreviewSrc(
   toggles: Partial<EmbedToggles> = {},
   affiliateCode?: string,
   isEvent?: boolean,
+  locale?: string,
 ) {
   if (!slug) return ''
-  return buildEmbedSrc('', slug, theme, width, height, toggles, affiliateCode, isEvent)
+  return buildEmbedSrc('', slug, theme, width, height, toggles, affiliateCode, isEvent, locale)
 }
 
 // ---------------------------------------------------------------------------

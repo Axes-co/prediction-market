@@ -4,7 +4,7 @@ import type { EmbedCodeFormat, EmbedToggles } from '@/lib/embed-widget'
 import type { EmbedTheme } from '@/lib/embed-theme'
 import type { Market } from '@/types'
 import { CheckIcon, CopyIcon } from 'lucide-react'
-import { useExtracted } from 'next-intl'
+import { useExtracted, useLocale } from 'next-intl'
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import EmbedCodeHighlight from '@/components/embed/EmbedCodeHighlight'
@@ -70,6 +70,7 @@ export default function EventChartEmbedDialog({
   initialMarketId,
 }: EventChartEmbedDialogProps) {
   const t = useExtracted()
+  const locale = useLocale()
   const site = useSiteIdentity()
   const user = useUser()
   const affiliateCode = user?.affiliate_code?.trim() ?? ''
@@ -180,12 +181,12 @@ export default function EventChartEmbedDialog({
 
   // Build URLs — always use ?market= with the market slug
   const embedSrc = useMemo(
-    () => buildEmbedSrc(SITE_URL, marketSlug, theme, width, height, toggles, affiliateCode),
-    [marketSlug, theme, width, height, toggles, affiliateCode],
+    () => buildEmbedSrc(SITE_URL, marketSlug, theme, width, height, toggles, affiliateCode, false, locale),
+    [marketSlug, theme, width, height, toggles, affiliateCode, locale],
   )
   const previewSrc = useMemo(
-    () => buildPreviewSrc(marketSlug, theme, width, height, toggles, affiliateCode),
-    [marketSlug, theme, width, height, toggles, affiliateCode],
+    () => buildPreviewSrc(marketSlug, theme, width, height, toggles, affiliateCode, false, locale),
+    [marketSlug, theme, width, height, toggles, affiliateCode, locale],
   )
 
   const eventUrl = `${SITE_URL}/event/${marketSlug}`
@@ -245,6 +246,8 @@ export default function EventChartEmbedDialog({
             {/* Left column: controls */}
             <div className="space-y-6">
               {/* Layout switcher: Standard / Banner (visual icons) */}
+              <div className="space-y-3">
+              <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('LAYOUT')}</Label>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -292,6 +295,7 @@ export default function EventChartEmbedDialog({
                     {t('Banner')}
                   </span>
                 </button>
+              </div>
               </div>
 
               {/* Market selector */}
@@ -410,27 +414,35 @@ export default function EventChartEmbedDialog({
             <div className="flex h-full flex-col gap-3">
               <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('PREVIEW')}</Label>
               <div
-                className="flex flex-1 items-center justify-center overflow-hidden rounded-md bg-[#f7f7f9] p-2"
-                style={{ minHeight: `${Math.min(height, 400)}px` }}
+                className="flex flex-1 items-center justify-center overflow-hidden rounded-md bg-[#f7f7f9] p-4"
+                style={{ minHeight: layout === 'banner' ? '120px' : `${Math.min(height, 400)}px` }}
               >
                 {previewSrc
                   ? (
-                      <iframe
-                        title={t('Embed preview')}
-                        src={previewSrc}
-                        width={width}
-                        height={height}
-                        frameBorder={0}
-                        scrolling="no"
-                        className="border-0 bg-transparent"
+                      <div
+                        className="flex items-center justify-center"
                         style={{
-                          display: 'block',
-                          borderRadius: '16px',
-                          overflow: 'hidden',
-                          transform: width > 450 ? `scale(${450 / width})` : undefined,
-                          transformOrigin: 'left top',
+                          width: '100%',
+                          height: layout === 'banner' ? `${height}px` : `${Math.min(height, 380)}px`,
                         }}
-                      />
+                      >
+                        <iframe
+                          title={t('Embed preview')}
+                          src={previewSrc}
+                          width={width}
+                          height={height}
+                          frameBorder={0}
+                          scrolling="no"
+                          className="border-0 bg-transparent"
+                          style={{
+                            display: 'block',
+                            borderRadius: '16px',
+                            overflow: 'hidden',
+                            transform: `scale(${Math.min(1, 450 / width)})`,
+                            transformOrigin: 'center center',
+                          }}
+                        />
+                      </div>
                     )
                   : (
                       <p className="text-sm text-muted-foreground">{t('No market available for this event')}</p>
