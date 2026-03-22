@@ -3,22 +3,27 @@
 import type { EmbedCodeFormat, EmbedToggles } from '@/lib/embed-widget'
 import type { EmbedTheme } from '@/lib/embed-theme'
 import type { Event } from '@/types'
-import { CheckIcon, CopyIcon } from 'lucide-react'
+import { CheckIcon, ChevronLeftIcon, CodeIcon, CopyIcon } from 'lucide-react'
 import { useExtracted, useLocale } from 'next-intl'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import EmbedCodeHighlight from '@/components/embed/EmbedCodeHighlight'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 import { fetchAffiliateSettingsFromAPI } from '@/lib/affiliate-data'
 import { maybeShowAffiliateToast } from '@/lib/affiliate-toast'
-import { DEFAULT_EMBED_HEIGHT, DEFAULT_EMBED_WIDTH } from '@/lib/embed-dimensions'
+import {
+  DEFAULT_EMBED_HEIGHT,
+  DEFAULT_EMBED_WIDTH,
+  MAX_EMBED_HEIGHT,
+  MAX_EMBED_WIDTH,
+  MIN_EMBED_HEIGHT,
+  MIN_EMBED_WIDTH,
+} from '@/lib/embed-dimensions'
 import { buildEmbedCode, buildEmbedSrc, buildPreviewSrc } from '@/lib/embed-widget'
 import { buildMarketLabel, normalizeBaseUrl } from '@/lib/embed-utils'
-import { cn } from '@/lib/utils'
 import { useUser } from '@/stores/useUser'
 
 // ---------------------------------------------------------------------------
@@ -28,14 +33,7 @@ import { useUser } from '@/stores/useUser'
 interface AffiliateWidgetDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  categories: {
-    slug: string
-    name: string
-  }[]
-  /**
-   * When provided, the dialog renders the embed widget for this specific
-   * market and hides the category / market selectors.
-   */
+  categories: { slug: string, name: string }[]
   eventSlug?: string
 }
 
@@ -45,49 +43,72 @@ interface WidgetMarket {
   label: string
 }
 
-type EmbedLayout = 'standard' | 'banner'
-
-const STANDARD_DIMENSIONS = { width: DEFAULT_EMBED_WIDTH, height: DEFAULT_EMBED_HEIGHT }
-const BANNER_DIMENSIONS = { width: 720, height: 80 }
+type DialogView = 'preview' | 'code'
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Constants
 // ---------------------------------------------------------------------------
 
-function requireEnv(value: string | undefined, name: string) {
-  if (!value || !value.trim()) {
-    throw new Error(`${name} is required for embeds.`)
-  }
-  return value
+const PREVIEW_CONTAINER_WIDTH = 380
+const PREVIEW_CONTAINER_HEIGHT = 320
+const DIM_STEP = 10
+
+const SITE_URL = normalizeBaseUrl(
+  (() => {
+    const v = process.env.SITE_URL
+    if (!v?.trim()) throw new Error('SITE_URL is required for embeds.')
+    return v
+  })(),
+)
+
+const DEFAULT_TOGGLES: EmbedToggles = {
+  showChart: true,
+  showButtons: true,
+  showVolume: true,
+  showYAxis: true,
+  showGridRows: true,
+  showBorder: false,
 }
 
-const SITE_URL = normalizeBaseUrl(requireEnv(process.env.SITE_URL, 'SITE_URL'))
+const TOGGLE_KEYS: Array<{ key: keyof EmbedToggles, label: string }> = [
+  { key: 'showChart', label: 'Chart' },
+  { key: 'showButtons', label: 'Buy buttons' },
+  { key: 'showVolume', label: 'Volume' },
+  { key: 'showYAxis', label: 'Y Axis' },
+  { key: 'showGridRows', label: 'Grid rows' },
+  { key: 'showBorder', label: 'Border' },
+]
+
+// ---------------------------------------------------------------------------
+// Dimension input
+// ---------------------------------------------------------------------------
+
+function DimensionInput({
+  value, min, max, onChange,
+}: {
+  value: number, min: number, max: number, onChange: (v: number) => void
+}) {
+  const clamp = useCallback((v: number) => Math.min(max, Math.max(min, v)), [min, max])
+  return (
+    <div className="group/dim relative before:absolute before:inset-[-12px] before:content-['']">
+      <button type="button" className="absolute size-4 flex items-center justify-center bg-background rounded text-muted-foreground text-xs p-0 cursor-pointer opacity-0 pointer-events-none group-hover/dim:opacity-100 group-hover/dim:pointer-events-auto transition-opacity duration-150" onClick={() => onChange(clamp(value + DIM_STEP))}>+</button>
+      <button type="button" className="absolute size-4 flex items-center justify-center bg-background rounded text-muted-foreground text-xs p-0 cursor-pointer opacity-0 pointer-events-none group-hover/dim:opacity-100 group-hover/dim:pointer-events-auto transition-opacity duration-150" style={{ marginTop: '4px' }} onClick={() => onChange(clamp(value - DIM_STEP))}>−</button>
+      <input type="number" min={min} max={max} step={DIM_STEP} value={value} onChange={e => onChange(clamp(Number(e.target.value) || value))} className="rounded-md border border-border bg-transparent relative px-2 py-1.5 text-center text-xs text-muted-foreground focus:outline-none focus:border-primary focus:text-foreground shrink-0 w-16" />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Fetch category markets
+// ---------------------------------------------------------------------------
 
 async function fetchCategoryMarkets(tag: string, locale: string, signal: AbortSignal): Promise<WidgetMarket[]> {
-  const params = new URLSearchParams({
-    tag,
-    status: 'active',
-    offset: '0',
-    locale,
-  })
-
-  const response = await fetch(`/api/events?${params.toString()}`, {
-    method: 'GET',
-    cache: 'no-store',
-    signal,
-  })
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch category events.')
-  }
-
+  const params = new URLSearchParams({ tag, status: 'active', offset: '0', locale })
+  const response = await fetch(`/api/events?${params.toString()}`, { method: 'GET', cache: 'no-store', signal })
+  if (!response.ok) throw new Error('Failed to fetch category events.')
   const events = await response.json() as Event[]
   return events
-    .flatMap(event => event.markets.map(market => ({
-      id: `${event.id}:${market.condition_id}`,
-      slug: market.slug,
-      label: buildMarketLabel(market),
-    })))
+    .flatMap(event => event.markets.map(market => ({ id: `${event.id}:${market.condition_id}`, slug: market.slug, label: buildMarketLabel(market) })))
     .filter(market => Boolean(market.slug))
     .slice(0, 80)
 }
@@ -97,10 +118,7 @@ async function fetchCategoryMarkets(tag: string, locale: string, signal: AbortSi
 // ---------------------------------------------------------------------------
 
 export default function AffiliateWidgetDialog({
-  open,
-  onOpenChange,
-  categories,
-  eventSlug,
+  open, onOpenChange, categories, eventSlug,
 }: AffiliateWidgetDialogProps) {
   const t = useExtracted()
   const locale = useLocale()
@@ -108,52 +126,35 @@ export default function AffiliateWidgetDialog({
   const user = useUser()
   const affiliateCode = user?.affiliate_code?.trim() ?? ''
 
-  const [theme, setTheme] = useState<EmbedTheme>('light')
-  const [layout, setLayout] = useState<EmbedLayout>('standard')
+  const [view, setView] = useState<DialogView>('preview')
+  const [theme, setTheme] = useState<EmbedTheme>('dark')
   const [codeFormat, setCodeFormat] = useState<EmbedCodeFormat>('default')
-  const [width, setWidth] = useState<number>(STANDARD_DIMENSIONS.width)
-  const [height, setHeight] = useState<number>(STANDARD_DIMENSIONS.height)
-  const [toggles, setToggles] = useState<EmbedToggles>({
-    showChart: true,
-    showButtons: true,
-    showVolume: true,
-    showYAxis: true,
-    showGridRows: true,
-    showBorder: false,
-  })
+  const [width, setWidth] = useState(DEFAULT_EMBED_WIDTH)
+  const [height, setHeight] = useState(DEFAULT_EMBED_HEIGHT)
+  const [toggles, setToggles] = useState<EmbedToggles>(DEFAULT_TOGGLES)
   const [copied, setCopied] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<string>('')
-  const [selectedMarketId, setSelectedMarketId] = useState<string>('')
+  const [selectedCategory, setSelectedCategory] = useState('')
+  const [selectedMarketId, setSelectedMarketId] = useState('')
   const [marketsByCategory, setMarketsByCategory] = useState<Record<string, WidgetMarket[]>>({})
   const [loadingCategorySlug, setLoadingCategorySlug] = useState<string | null>(null)
   const [categoryLoadFailed, setCategoryLoadFailed] = useState(false)
   const [affiliateSharePercent, setAffiliateSharePercent] = useState<number | null>(null)
   const [tradeFeePercent, setTradeFeePercent] = useState<number | null>(null)
 
-  const currentMarkets = useMemo(
-    () => marketsByCategory[selectedCategory] ?? [],
-    [marketsByCategory, selectedCategory],
-  )
+  const currentMarkets = useMemo(() => marketsByCategory[selectedCategory] ?? [], [marketsByCategory, selectedCategory])
   const selectedMarket = eventSlug
     ? { id: eventSlug, slug: eventSlug, label: eventSlug }
-    : (currentMarkets.find(market => market.id === selectedMarketId) ?? currentMarkets[0])
+    : (currentMarkets.find(m => m.id === selectedMarketId) ?? currentMarkets[0])
 
-  // Reset state on open
+  // Reset on open
   useEffect(() => {
     if (!open) return
-    setTheme('light')
-    setLayout('standard')
+    setView('preview')
+    setTheme('dark')
     setCodeFormat('default')
-    setWidth(STANDARD_DIMENSIONS.width)
-    setHeight(STANDARD_DIMENSIONS.height)
-    setToggles({
-      showChart: true,
-      showButtons: true,
-      showVolume: true,
-      showYAxis: true,
-      showGridRows: true,
-      showBorder: false,
-    })
+    setWidth(DEFAULT_EMBED_WIDTH)
+    setHeight(DEFAULT_EMBED_HEIGHT)
+    setToggles(DEFAULT_TOGGLES)
     setCopied(false)
     setSelectedCategory(categories[0]?.slug ?? '')
     setSelectedMarketId('')
@@ -162,135 +163,73 @@ export default function AffiliateWidgetDialog({
     setCategoryLoadFailed(false)
   }, [open, categories])
 
-  // Sync dimensions when layout changes
+  // Affiliate settings
   useEffect(() => {
-    const dims = layout === 'banner' ? BANNER_DIMENSIONS : STANDARD_DIMENSIONS
-    setWidth(dims.width)
-    setHeight(dims.height)
-  }, [layout])
-
-  // Load affiliate settings
-  useEffect(() => {
-    if (!affiliateCode) {
-      setAffiliateSharePercent(null)
-      setTradeFeePercent(null)
-      return
-    }
-
-    let isActive = true
+    if (!affiliateCode) { setAffiliateSharePercent(null); setTradeFeePercent(null); return }
+    let active = true
     fetchAffiliateSettingsFromAPI()
-      .then((result) => {
-        if (!isActive) return
-        if (result.success) {
-          const shareParsed = Number.parseFloat(result.data.affiliateSharePercent)
-          const feeParsed = Number.parseFloat(result.data.tradeFeePercent)
-          setAffiliateSharePercent(Number.isFinite(shareParsed) && shareParsed > 0 ? shareParsed : null)
-          setTradeFeePercent(Number.isFinite(feeParsed) && feeParsed > 0 ? feeParsed : null)
-        }
-        else {
-          setAffiliateSharePercent(null)
-          setTradeFeePercent(null)
+      .then((r) => {
+        if (!active) return
+        if (r.success) {
+          const s = Number.parseFloat(r.data.affiliateSharePercent)
+          const f = Number.parseFloat(r.data.tradeFeePercent)
+          setAffiliateSharePercent(Number.isFinite(s) && s > 0 ? s : null)
+          setTradeFeePercent(Number.isFinite(f) && f > 0 ? f : null)
         }
       })
-      .catch(() => {
-        if (isActive) {
-          setAffiliateSharePercent(null)
-          setTradeFeePercent(null)
-        }
-      })
-
-    return () => { isActive = false }
+      .catch(() => { if (active) { setAffiliateSharePercent(null); setTradeFeePercent(null) } })
+    return () => { active = false }
   }, [affiliateCode])
 
   // Fetch markets when category changes
   useEffect(() => {
     if (!open || !selectedCategory || eventSlug) return
     if (marketsByCategory[selectedCategory] !== undefined) return
-
-    const abortController = new AbortController()
-    const categorySlug = selectedCategory
-    setLoadingCategorySlug(categorySlug)
+    const ac = new AbortController()
+    const slug = selectedCategory
+    setLoadingCategorySlug(slug)
     setCategoryLoadFailed(false)
-
-    fetchCategoryMarkets(categorySlug, locale, abortController.signal)
-      .then((markets) => {
-        setMarketsByCategory(previous => ({ ...previous, [categorySlug]: markets }))
-      })
-      .catch((error) => {
-        if (abortController.signal.aborted) return
-        console.error('Failed to fetch affiliate widget markets', error)
+    fetchCategoryMarkets(slug, locale, ac.signal)
+      .then(markets => setMarketsByCategory(prev => ({ ...prev, [slug]: markets })))
+      .catch((err) => {
+        if (ac.signal.aborted) return
+        console.error('Failed to fetch affiliate widget markets', err)
         setCategoryLoadFailed(true)
-        setMarketsByCategory(previous => ({ ...previous, [categorySlug]: [] }))
+        setMarketsByCategory(prev => ({ ...prev, [slug]: [] }))
       })
-      .finally(() => {
-        if (!abortController.signal.aborted) {
-          setLoadingCategorySlug(current => (current === categorySlug ? null : current))
-        }
-      })
-
-    return () => { abortController.abort() }
+      .finally(() => { if (!ac.signal.aborted) setLoadingCategorySlug(c => c === slug ? null : c) })
+    return () => ac.abort()
   }, [open, selectedCategory, locale, marketsByCategory, eventSlug])
 
-  // Sync market selection when markets load
+  // Sync market selection
   useEffect(() => {
     if (!open) return
-    if (currentMarkets.length === 0) {
-      setSelectedMarketId('')
-      return
-    }
-    if (!currentMarkets.some(market => market.id === selectedMarketId)) {
-      setSelectedMarketId(currentMarkets[0].id)
-    }
+    if (currentMarkets.length === 0) { setSelectedMarketId(''); return }
+    if (!currentMarkets.some(m => m.id === selectedMarketId)) setSelectedMarketId(currentMarkets[0].id)
   }, [open, currentMarkets, selectedMarketId])
 
-  // Build URLs
+  // URLs
   const resolvedSlug = eventSlug ?? selectedMarket?.slug ?? ''
   const isEvent = Boolean(eventSlug)
-
-  const embedSrc = useMemo(
-    () => buildEmbedSrc(SITE_URL, resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent, locale),
-    [resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent, locale],
-  )
-  const previewUrl = useMemo(
-    () => buildPreviewSrc(resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent, locale),
-    [resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent, locale],
-  )
+  const embedSrc = useMemo(() => buildEmbedSrc(SITE_URL, resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent, locale), [resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent, locale])
+  const previewUrl = useMemo(() => buildPreviewSrc(resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent, locale), [resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent, locale])
   const eventUrl = `${SITE_URL}/event/${resolvedSlug}`
-  const embedCode = useMemo(
-    () => buildEmbedCode(codeFormat, {
-      src: embedSrc,
-      width,
-      height,
-      title: `${selectedMarket?.label ?? resolvedSlug} — ${site.name} Prediction Market`,
-      slug: resolvedSlug,
-      siteName: site.name,
-      siteUrl: SITE_URL,
-      question: selectedMarket?.label ?? resolvedSlug,
-      yesPercent: 50,
-      noPercent: 50,
-      eventUrl,
-    }),
-    [codeFormat, embedSrc, width, height, resolvedSlug, selectedMarket?.label, site.name, eventUrl],
-  )
-  const canCopy = Boolean(resolvedSlug)
+  const embedCode = useMemo(() => buildEmbedCode(codeFormat, {
+    src: embedSrc, width, height,
+    title: `${selectedMarket?.label ?? resolvedSlug} — ${site.name} Prediction Market`,
+    slug: resolvedSlug, siteName: site.name, siteUrl: SITE_URL,
+    question: selectedMarket?.label ?? resolvedSlug, yesPercent: 50, noPercent: 50, eventUrl,
+  }), [codeFormat, embedSrc, width, height, resolvedSlug, selectedMarket?.label, site.name, eventUrl])
 
   async function handleCopy() {
-    if (!canCopy) return
+    if (!resolvedSlug) return
     try {
       await navigator.clipboard.writeText(embedCode)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
-      maybeShowAffiliateToast({
-        affiliateCode,
-        affiliateSharePercent,
-        tradeFeePercent,
-        siteName: site.name,
-        context: 'embed',
-      })
+      maybeShowAffiliateToast({ affiliateCode, affiliateSharePercent, tradeFeePercent, siteName: site.name, context: 'embed' })
     }
-    catch (error) {
-      console.error(error)
-    }
+    catch (e) { console.error(e) }
   }
 
   function updateToggle(key: keyof EmbedToggles, value: boolean) {
@@ -299,225 +238,178 @@ export default function AffiliateWidgetDialog({
 
   const isLoadingCategory = Boolean(loadingCategorySlug && loadingCategorySlug === selectedCategory)
   const showMarketSelector = !eventSlug && currentMarkets.length > 0
+  const previewScale = Math.min(1, PREVIEW_CONTAINER_WIDTH / width)
+  const scaledHeight = height * previewScale
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className={cn(
-          'max-h-[90vh] w-[calc(100%-1rem)] max-w-4xl overflow-y-auto p-3',
-          'sm:w-full sm:max-w-4xl sm:p-8',
-        )}
-      >
-        <div className="space-y-4 sm:space-y-6">
-          <DialogHeader>
-            <DialogTitle className="text-center text-2xl font-bold">{t('Embed')}</DialogTitle>
-          </DialogHeader>
+      <DialogContent className="w-fit! max-w-fit! p-6 overflow-hidden">
+        <DialogHeader className="flex-row items-center">
+          <DialogTitle className="text-xl font-semibold">{t('Embed')}</DialogTitle>
+        </DialogHeader>
 
-          <div className="grid items-stretch gap-4 sm:gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            {/* Left column: controls */}
-            <div className="space-y-6">
-              {/* Layout switcher */}
-              <div className="space-y-3">
-                <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('LAYOUT')}</Label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className={cn(
-                      'flex flex-col items-center gap-1 flex-1 p-2.5 rounded-lg border-2 transition-colors',
-                      layout === 'standard'
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border bg-background hover:border-muted-foreground/40',
-                    )}
-                    onClick={() => setLayout('standard')}
-                  >
-                    <div className={cn(
-                      'w-10 h-10 rounded border-[1.5px] flex flex-col p-1.5 gap-0.5',
-                      layout === 'standard' ? 'border-primary' : 'border-border',
-                    )}>
-                      <div className={cn('w-full h-1 rounded-sm', layout === 'standard' ? 'bg-primary' : 'bg-muted-foreground/30')} />
-                      <div className={cn('w-[70%] h-0.5 rounded-sm', layout === 'standard' ? 'bg-primary/40' : 'bg-muted-foreground/20')} />
-                      <div className={cn('flex-1 w-full rounded-sm', layout === 'standard' ? 'bg-primary/20' : 'bg-muted-foreground/10')} />
-                    </div>
-                    <span className={cn('text-[11px] font-medium', layout === 'standard' ? 'text-primary' : 'text-muted-foreground')}>
-                      {t('Standard')}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      'flex flex-col items-center gap-1 flex-1 p-2.5 rounded-lg border-2 transition-colors',
-                      layout === 'banner'
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border bg-background hover:border-muted-foreground/40',
-                    )}
-                    onClick={() => setLayout('banner')}
-                  >
-                    <div className={cn(
-                      'w-16 h-[26px] rounded border-[1.5px] flex items-center p-1 gap-1',
-                      layout === 'banner' ? 'border-primary' : 'border-border',
-                    )}>
-                      <div className={cn('w-3 h-full rounded-sm', layout === 'banner' ? 'bg-primary/30' : 'bg-muted-foreground/20')} />
-                      <div className="flex flex-col gap-0.5 flex-1">
-                        <div className={cn('w-full h-0.5 rounded-sm', layout === 'banner' ? 'bg-primary/50' : 'bg-muted-foreground/30')} />
-                        <div className={cn('w-[60%] h-0.5 rounded-sm', layout === 'banner' ? 'bg-primary/30' : 'bg-muted-foreground/20')} />
+        <div className="flex flex-col lg:flex-row gap-4 lg:gap-12 min-w-fit min-h-0 w-fit">
+          {/* RIGHT — Preview or Code */}
+          <div className="w-fit lg:w-fit lg:order-last lg:h-fit">
+            {view === 'preview'
+              ? (
+                  <div className="w-[500px] h-[400px] flex flex-col pb-2 pl-6">
+                    <div className="grid grid-cols-[auto_1fr] grid-rows-[1fr_auto] w-fit h-fit">
+                      {/* H dimension */}
+                      <div className="flex flex-col items-center gap-2 w-12 justify-center">
+                        <div className="flex flex-col items-center gap-2 transition-[height] duration-150" style={{ height: `${scaledHeight}px` }}>
+                          <span className="flex-1 w-px bg-muted-foreground/20" />
+                          <div className="relative">
+                            <span className="text-xs text-muted-foreground font-semibold leading-none absolute -left-4 top-1/2 -translate-y-1/2">H</span>
+                            <DimensionInput value={height} min={MIN_EMBED_HEIGHT} max={MAX_EMBED_HEIGHT} onChange={setHeight} />
+                          </div>
+                          <span className="flex-1 w-px bg-muted-foreground/20" />
+                        </div>
+                      </div>
+
+                      {/* Preview iframe */}
+                      <div className="flex items-center justify-center" style={{ width: `${PREVIEW_CONTAINER_WIDTH}px`, height: `${PREVIEW_CONTAINER_HEIGHT}px` }}>
+                        {isLoadingCategory
+                          ? <p className="text-sm text-muted-foreground">{t('Searching events...')}</p>
+                          : previewUrl
+                            ? (
+                                <div style={{ width: `${PREVIEW_CONTAINER_WIDTH}px`, height: `${scaledHeight}px` }}>
+                                  <iframe title={t('Embed preview')} src={previewUrl} width={width} height={height} frameBorder={0} scrolling="no" style={{ border: 'none', display: 'block', borderRadius: '16px', overflow: 'hidden', transform: `scale(${previewScale})`, transformOrigin: 'left top' }} />
+                                </div>
+                              )
+                            : (
+                                <p className="px-4 text-center text-sm text-muted-foreground">
+                                  {categoryLoadFailed ? t('Unable to load widgets for this category. Please try again later.') : t('No market available for this event')}
+                                </p>
+                              )}
+                      </div>
+
+                      <div />
+
+                      {/* W dimension */}
+                      <div className="flex items-center justify-center h-8">
+                        <div className="flex items-center gap-2 transition-[width] duration-150" style={{ width: `${PREVIEW_CONTAINER_WIDTH}px` }}>
+                          <span className="flex-1 h-px bg-muted-foreground/20" />
+                          <div className="relative">
+                            <span className="text-xs text-muted-foreground font-semibold leading-none absolute -bottom-4 left-1/2 -translate-x-1/2">W</span>
+                            <DimensionInput value={width} min={MIN_EMBED_WIDTH} max={MAX_EMBED_WIDTH} onChange={setWidth} />
+                          </div>
+                          <span className="flex-1 h-px bg-muted-foreground/20" />
+                        </div>
                       </div>
                     </div>
-                    <span className={cn('text-[11px] font-medium', layout === 'banner' ? 'text-primary' : 'text-muted-foreground')}>
-                      {t('Banner')}
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Category selector */}
-              {!eventSlug && (
-                <div className="space-y-3">
-                  <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('Categories')}</Label>
-                  <Select value={selectedCategory} onValueChange={setSelectedCategory} disabled={categories.length === 0}>
-                    <SelectTrigger className="w-full bg-transparent text-sm hover:bg-transparent dark:bg-transparent dark:hover:bg-transparent">
-                      <SelectValue placeholder={t('Categories')} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map(category => (
-                        <SelectItem key={category.slug} value={category.slug}>
-                          {category.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {/* Market selector — shown when category has loaded markets */}
-              {showMarketSelector && (
-                <div className="space-y-3">
-                  <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('MARKET')}</Label>
-                  <Select value={selectedMarketId} onValueChange={setSelectedMarketId}>
-                    <SelectTrigger className="w-full bg-transparent text-sm hover:bg-transparent dark:bg-transparent dark:hover:bg-transparent">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {currentMarkets.map(market => (
-                        <SelectItem key={market.id} value={market.id}>{market.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {/* Options */}
-              <div className="space-y-3">
-                <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('OPTIONS')}</Label>
-                <div className="rounded-md border border-border p-3">
-                  <div className="flex flex-col gap-3 text-sm font-semibold text-foreground">
-                    <label className="flex items-center justify-between gap-4">
-                      <span>{t('Chart')}</span>
-                      <Switch checked={toggles.showChart} onCheckedChange={v => updateToggle('showChart', v)} />
-                    </label>
-                    <label className="flex items-center justify-between gap-4">
-                      <span>{t('Buy buttons')}</span>
-                      <Switch checked={toggles.showButtons} onCheckedChange={v => updateToggle('showButtons', v)} />
-                    </label>
-                    <label className="flex items-center justify-between gap-4">
-                      <span>{t('Volume')}</span>
-                      <Switch checked={toggles.showVolume} onCheckedChange={v => updateToggle('showVolume', v)} />
-                    </label>
-                    <label className="flex items-center justify-between gap-4">
-                      <span>{t('Y Axis')}</span>
-                      <Switch checked={toggles.showYAxis} onCheckedChange={v => updateToggle('showYAxis', v)} />
-                    </label>
-                    <label className="flex items-center justify-between gap-4">
-                      <span>{t('Grid rows')}</span>
-                      <Switch checked={toggles.showGridRows} onCheckedChange={v => updateToggle('showGridRows', v)} />
-                    </label>
-                    <label className="flex items-center justify-between gap-4">
-                      <span>{t('Border')}</span>
-                      <Switch checked={toggles.showBorder} onCheckedChange={v => updateToggle('showBorder', v)} />
-                    </label>
-                    <label className="flex items-center justify-between gap-4">
-                      <span>{t('Dark mode')}</span>
-                      <Switch checked={theme === 'dark'} onCheckedChange={v => setTheme(v ? 'dark' : 'light')} />
-                    </label>
                   </div>
-                </div>
-              </div>
-
-              {/* Code output */}
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('EMBED CODE')}</Label>
-                  <div className="flex items-center gap-2">
-                    <Select value={codeFormat} onValueChange={value => setCodeFormat(value as EmbedCodeFormat)}>
-                      <SelectTrigger size="sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="default">Default</SelectItem>
-                        <SelectItem value="standard">Standard</SelectItem>
-                        <SelectItem value="minimal">Minimal</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button type="button" size="sm" variant="outline" onClick={handleCopy} disabled={!canCopy}>
-                      {copied ? <CheckIcon /> : <CopyIcon />}
-                      {t('Copy')}
-                    </Button>
-                  </div>
-                </div>
-                <div className="overflow-auto rounded-md border border-border bg-muted/70 p-4 max-h-48">
-                  {resolvedSlug
-                    ? <EmbedCodeHighlight code={embedCode} />
-                    : <p className="text-sm text-muted-foreground">{t('No market available for this event')}</p>}
-                </div>
-              </div>
-            </div>
-
-            {/* Right column: preview */}
-            <div className="flex h-full flex-col gap-3">
-              <Label className="text-xs font-semibold tracking-wide text-muted-foreground">{t('PREVIEW')}</Label>
-              <div
-                className="flex flex-1 items-center justify-center overflow-hidden rounded-md bg-[#f7f7f9] p-4"
-                style={{ minHeight: layout === 'banner' ? '120px' : `${Math.min(height, 400)}px` }}
-              >
-                {isLoadingCategory
-                  ? (
-                      <p className="text-sm text-muted-foreground">{t('Searching events...')}</p>
-                    )
-                  : previewUrl
-                    ? (
-                        <div
-                          className="flex items-center justify-center"
-                          style={{
-                            width: '100%',
-                            height: layout === 'banner' ? `${height}px` : `${Math.min(height, 380)}px`,
-                          }}
-                        >
-                          <iframe
-                            title={t('Embed preview')}
-                            src={previewUrl}
-                            width={width}
-                            height={height}
-                            frameBorder={0}
-                            scrolling="no"
-                            className="border-0 bg-transparent"
-                            style={{
-                              display: 'block',
-                              borderRadius: '16px',
-                              overflow: 'hidden',
-                              transform: `scale(${Math.min(1, 450 / width)})`,
-                              transformOrigin: 'center center',
-                            }}
-                          />
+                )
+              : (
+                  <div className="w-[500px] h-[400px] flex flex-col">
+                    <div className="flex flex-col gap-2 h-full min-h-0">
+                      <p className="text-sm text-muted-foreground shrink-0">{t('Copy and paste this code into your website')}</p>
+                      <div className="group relative min-w-0 flex-1 overflow-auto rounded-lg bg-muted/50">
+                        <div className="p-3 pt-7 text-[0.7rem] leading-relaxed">
+                          <EmbedCodeHighlight code={embedCode} />
                         </div>
-                      )
-                    : (
-                        <p className="px-4 text-center text-sm text-muted-foreground">
-                          {categoryLoadFailed
-                            ? t('Unable to load widgets for this category. Please try again later.')
-                            : t('No market available for this event')}
-                        </p>
-                      )}
-              </div>
-            </div>
+                        <button type="button" className="absolute top-1 right-1 p-1.5 cursor-pointer text-muted-foreground hover:text-foreground" onClick={handleCopy}>
+                          {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+          </div>
+
+          {/* LEFT — Controls */}
+          <div className="flex flex-col gap-4 w-full lg:w-64 shrink-0 lg:overflow-y-auto min-h-0 h-[400px] lg:max-h-[500px]">
+            {view === 'preview'
+              ? (
+                  <>
+                    {/* Category selector */}
+                    {!eventSlug && (
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <span className="text-sm text-foreground shrink-0">{t('Category')}</span>
+                        <div className="min-w-0">
+                          <Select value={selectedCategory} onValueChange={setSelectedCategory} disabled={categories.length === 0}>
+                            <SelectTrigger className="max-w-full overflow-hidden justify-between gap-2 h-9 px-4">
+                              <SelectValue placeholder={t('Categories')} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {categories.map(c => <SelectItem key={c.slug} value={c.slug}>{c.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Market selector */}
+                    {showMarketSelector && (
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <span className="text-sm text-foreground shrink-0">{t('Market')}</span>
+                        <div className="min-w-0">
+                          <Select value={selectedMarketId} onValueChange={setSelectedMarketId}>
+                            <SelectTrigger className="max-w-full overflow-hidden justify-between gap-2 h-9 px-4">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {currentMarkets.map(m => <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Divider */}
+                    {(!eventSlug || showMarketSelector) && <div className="border-t border-border" />}
+
+                    {/* Toggles */}
+                    <div className="flex flex-col gap-2">
+                      {TOGGLE_KEYS.map(({ key, label }) => (
+                        <div key={key} className="flex items-center justify-between">
+                          <span className="text-sm text-foreground">{t(label)}</span>
+                          <Switch checked={toggles[key]} onCheckedChange={v => updateToggle(key, v)} />
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-foreground">{t('Dark mode')}</span>
+                        <Switch checked={theme === 'dark'} onCheckedChange={v => setTheme(v ? 'dark' : 'light')} />
+                      </div>
+                    </div>
+
+                    <div className="flex-1" />
+
+                    <Button className="w-full" onClick={() => setView('code')}>
+                      <CodeIcon className="size-4" />
+                      {t('View Code')}
+                    </Button>
+                  </>
+                )
+              : (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm text-foreground shrink-0">{t('Code style')}</span>
+                      <Select value={codeFormat} onValueChange={v => setCodeFormat(v as EmbedCodeFormat)}>
+                        <SelectTrigger className="justify-between gap-2 h-9 px-4">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="default">Default</SelectItem>
+                          <SelectItem value="minimal">Minimal</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex-1" />
+
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" onClick={() => setView('preview')}>
+                        <ChevronLeftIcon className="size-3" />
+                        {t('Back')}
+                      </Button>
+                      <Button className="flex-1" onClick={handleCopy}>
+                        {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
+                        {t('Copy')}
+                      </Button>
+                    </div>
+                  </>
+                )}
           </div>
         </div>
       </DialogContent>
