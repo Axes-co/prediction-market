@@ -4,6 +4,7 @@ import type { EmbedChartData } from '@/lib/embed-chart'
 import type { ReactNode } from 'react'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import {
+  CHART_DOT_RADIUS,
   CHART_PADDING,
   PRICE_LABEL_FONT_SIZE,
   PRICE_LABEL_STROKE_WIDTH,
@@ -25,18 +26,25 @@ interface ParsedPoint {
   y: number
 }
 
+interface CursorState {
+  /** SVG X coordinate on the line */
+  svgX: number
+  /** SVG Y coordinate on the line (interpolated) */
+  svgY: number
+  /** Percentage value at this point */
+  percent: number
+  /** CSS X position relative to container */
+  cssX: number
+  /** CSS Y position relative to container */
+  cssY: number
+}
+
 // ---------------------------------------------------------------------------
-// Path parsing (done once, memoized)
+// Path parsing (memoized)
 // ---------------------------------------------------------------------------
 
-/**
- * Parses an SVG path `d` attribute containing M and L commands into
- * an array of {x, y} points.  Handles both `M4.0,321.3` and `M 4.0,321.3`
- * and ` L20.0,321.3` formats.
- */
 function parseSvgPath(pathD: string): ParsedPoint[] {
   if (!pathD) return []
-
   const points: ParsedPoint[] = []
   const regex = /[ML]\s*([\d.]+)\s*,\s*([\d.]+)/g
   let match: RegExpExecArray | null
@@ -50,10 +58,6 @@ function parseSvgPath(pathD: string): ParsedPoint[] {
   return points
 }
 
-/**
- * Given a sorted array of points and an X coordinate, interpolate the Y
- * value using binary search + linear interpolation.
- */
 function interpolateY(points: ParsedPoint[], targetX: number): number {
   if (points.length === 0) return 0
   if (targetX <= points[0].x) return points[0].y
@@ -78,7 +82,6 @@ function yToPercent(y: number, viewBoxHeight: number): number {
   const plotBottom = viewBoxHeight - CHART_PADDING.bottom
   const plotHeight = plotBottom - plotTop
   if (plotHeight <= 0) return 0
-
   const normalized = (plotBottom - y) / plotHeight
   return Math.round(Math.min(100, Math.max(0, normalized * 100)))
 }
@@ -90,9 +93,11 @@ function yToPercent(y: number, viewBoxHeight: number): number {
 /**
  * Adds interactive crosshair tracking to the embed chart.
  *
- * On mouse hover the static price label fades out and a dynamic label
- * follows the cursor, showing the interpolated percentage at that
- * position on the chart line.
+ * On hover:
+ * - A colored dot snaps to the interpolated position on the chart line
+ * - A pulsing ring animates around the dot (matching Polymarket)
+ * - The percentage label follows the dot
+ * - The static end-of-line label hides
  */
 export default function EmbedChartCrosshair({
   chart,
@@ -101,12 +106,10 @@ export default function EmbedChartCrosshair({
   staticLabel,
 }: EmbedChartCrosshairProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [cursorX, setCursorX] = useState<number | null>(null)
-  const [cursorPercent, setCursorPercent] = useState(0)
+  const [cursor, setCursor] = useState<CursorState | null>(null)
 
   const primaryLine = chart.lines[0] ?? null
 
-  // Parse the path once and memoize
   const parsedPoints = useMemo(
     () => primaryLine ? parseSvgPath(primaryLine.pathD) : [],
     [primaryLine],
@@ -118,24 +121,28 @@ export default function EmbedChartCrosshair({
 
     const rect = container.getBoundingClientRect()
     const relativeX = e.clientX - rect.left
+    const relativeY = e.clientY - rect.top
     const widthRatio = relativeX / rect.width
+    const heightRatio = rect.height > 0 ? 1 / rect.height : 0
 
-    // Map CSS position to SVG viewBox X coordinate
+    // Map CSS position to SVG viewBox coordinates
     const plotWidth = chart.viewBoxWidth - CHART_PADDING.left - CHART_PADDING.right
     const svgX = CHART_PADDING.left + widthRatio * plotWidth
 
-    const interpolatedY = interpolateY(parsedPoints, svgX)
-    const percent = yToPercent(interpolatedY, chart.viewBoxHeight)
+    const svgY = interpolateY(parsedPoints, svgX)
+    const percent = yToPercent(svgY, chart.viewBoxHeight)
 
-    setCursorX(relativeX)
-    setCursorPercent(percent)
+    // Convert SVG Y back to CSS Y for the label positioning
+    const cssY = (svgY / chart.viewBoxHeight) * rect.height
+
+    setCursor({ svgX, svgY, percent, cssX: relativeX, cssY })
   }, [chart.viewBoxWidth, chart.viewBoxHeight, parsedPoints])
 
   const handleMouseLeave = useCallback(() => {
-    setCursorX(null)
+    setCursor(null)
   }, [])
 
-  const isHovering = cursorX !== null
+  const isHovering = cursor !== null
 
   return (
     <div
@@ -144,16 +151,53 @@ export default function EmbedChartCrosshair({
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
+      {/* SVG chart (server-rendered) */}
       {svgChart}
 
-      {/* Static price label — fades out on hover */}
+      {/* Overlay SVG for the tracking dot — positioned exactly over the chart */}
+      {isHovering && primaryLine && (
+        <svg
+          className="absolute inset-0 w-full h-full pointer-events-none"
+          preserveAspectRatio="none"
+          viewBox={`0 0 ${chart.viewBoxWidth} ${chart.viewBoxHeight}`}
+          style={{ width: '100%', height: '100%', display: 'block' }}
+        >
+          {/* Solid dot on the line */}
+          <circle
+            cx={cursor.svgX}
+            cy={cursor.svgY}
+            r={CHART_DOT_RADIUS}
+            fill={primaryLine.color}
+            opacity={1}
+          />
+          {/* Pulsing ring around the dot */}
+          <circle
+            cx={cursor.svgX}
+            cy={cursor.svgY}
+            r={CHART_DOT_RADIUS}
+            fill={primaryLine.color}
+            opacity={0.3}
+            style={{
+              transformOrigin: '50% 50%',
+              transformBox: 'fill-box' as const,
+              transform: 'scale(2.5)',
+            }}
+          />
+        </svg>
+      )}
+
+      {/* Static price label — hidden on hover */}
       {staticLabel && !isHovering && staticLabel}
 
-      {/* Dynamic crosshair label — follows mouse */}
+      {/* Dynamic percentage label — follows the dot position */}
       {isHovering && primaryLine && (
         <div
-          className="absolute top-1 pointer-events-none z-10"
-          style={{ left: `${cursorX}px`, transform: 'translateX(-50%)' }}
+          className="absolute pointer-events-none z-10"
+          style={{
+            left: `${cursor.cssX}px`,
+            top: `${Math.max(4, cursor.cssY - 28)}px`,
+            transform: 'translateX(-50%)',
+          }}
         >
           <span
             className="font-semibold leading-none whitespace-nowrap"
@@ -164,7 +208,7 @@ export default function EmbedChartCrosshair({
               paintOrder: 'stroke',
             }}
           >
-            {cursorPercent}%
+            {cursor.percent}%
           </span>
         </div>
       )}
