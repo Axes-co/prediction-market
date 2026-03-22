@@ -27,20 +27,15 @@ interface ParsedPoint {
 }
 
 interface CursorState {
-  /** SVG X coordinate on the line */
   svgX: number
-  /** SVG Y coordinate on the line (interpolated) */
   svgY: number
-  /** Percentage value at this point */
   percent: number
-  /** CSS X position relative to container */
   cssX: number
-  /** CSS Y position relative to container */
   cssY: number
 }
 
 // ---------------------------------------------------------------------------
-// Path parsing (memoized)
+// Path parsing & interpolation
 // ---------------------------------------------------------------------------
 
 function parseSvgPath(pathD: string): ParsedPoint[] {
@@ -90,15 +85,6 @@ function yToPercent(y: number, viewBoxHeight: number): number {
 // Component
 // ---------------------------------------------------------------------------
 
-/**
- * Adds interactive crosshair tracking to the embed chart.
- *
- * On hover:
- * - A colored dot snaps to the interpolated position on the chart line
- * - A pulsing ring animates around the dot (matching Polymarket)
- * - The percentage label follows the dot
- * - The static end-of-line label hides
- */
 export default function EmbedChartCrosshair({
   chart,
   strokeBg,
@@ -121,21 +107,19 @@ export default function EmbedChartCrosshair({
 
     const rect = container.getBoundingClientRect()
     const relativeX = e.clientX - rect.left
-    const relativeY = e.clientY - rect.top
-    const widthRatio = relativeX / rect.width
-    const heightRatio = rect.height > 0 ? 1 / rect.height : 0
 
-    // Map CSS position to SVG viewBox coordinates
-    const plotWidth = chart.viewBoxWidth - CHART_PADDING.left - CHART_PADDING.right
-    const svgX = CHART_PADDING.left + widthRatio * plotWidth
+    // The SVG uses preserveAspectRatio="none", so the entire viewBox
+    // stretches to fill the container. CSS X maps linearly to SVG X.
+    const svgX = (relativeX / rect.width) * chart.viewBoxWidth
 
     const svgY = interpolateY(parsedPoints, svgX)
     const percent = yToPercent(svgY, chart.viewBoxHeight)
 
-    // Convert SVG Y back to CSS Y for the label positioning
+    // Convert SVG coords back to CSS coords for label positioning
+    const cssX = relativeX
     const cssY = (svgY / chart.viewBoxHeight) * rect.height
 
-    setCursor({ svgX, svgY, percent, cssX: relativeX, cssY })
+    setCursor({ svgX, svgY, percent, cssX, cssY })
   }, [chart.viewBoxWidth, chart.viewBoxHeight, parsedPoints])
 
   const handleMouseLeave = useCallback(() => {
@@ -151,10 +135,9 @@ export default function EmbedChartCrosshair({
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
-      {/* SVG chart (server-rendered) */}
       {svgChart}
 
-      {/* Overlay SVG for the tracking dot — positioned exactly over the chart */}
+      {/* Overlay SVG — tracking dot that follows the chart line */}
       {isHovering && primaryLine && (
         <svg
           className="absolute inset-0 w-full h-full pointer-events-none"
@@ -162,15 +145,12 @@ export default function EmbedChartCrosshair({
           viewBox={`0 0 ${chart.viewBoxWidth} ${chart.viewBoxHeight}`}
           style={{ width: '100%', height: '100%', display: 'block' }}
         >
-          {/* Solid dot on the line */}
           <circle
             cx={cursor.svgX}
             cy={cursor.svgY}
             r={CHART_DOT_RADIUS}
             fill={primaryLine.color}
-            opacity={1}
           />
-          {/* Pulsing ring around the dot */}
           <circle
             cx={cursor.svgX}
             cy={cursor.svgY}
@@ -189,13 +169,13 @@ export default function EmbedChartCrosshair({
       {/* Static price label — hidden on hover */}
       {staticLabel && !isHovering && staticLabel}
 
-      {/* Dynamic percentage label — follows the dot position */}
+      {/* Dynamic percentage label — positioned above the dot */}
       {isHovering && primaryLine && (
         <div
           className="absolute pointer-events-none z-10"
           style={{
             left: `${cursor.cssX}px`,
-            top: `${Math.max(4, cursor.cssY - 28)}px`,
+            top: `${Math.max(0, cursor.cssY - 28)}px`,
             transform: 'translateX(-50%)',
           }}
         >

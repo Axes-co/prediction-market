@@ -1,8 +1,10 @@
 import type { Metadata } from 'next'
 import type { EmbedOutcome } from '@/components/embed/MarketEmbedCard'
 import type { EmbedTheme } from '@/lib/embed-theme'
+import type { SupportedLocale } from '@/i18n/locales'
 import { Suspense } from 'react'
 import { eq } from 'drizzle-orm'
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from '@/i18n/locales'
 import MarketEmbedCard from '@/components/embed/MarketEmbedCard'
 import { OUTCOME_INDEX } from '@/lib/constants'
 import { EventRepository } from '@/lib/db/queries/event'
@@ -67,7 +69,7 @@ export const metadata: Metadata = {
 // Data resolution
 // ---------------------------------------------------------------------------
 
-async function resolveMarketBySlug(slug: string) {
+async function resolveMarketBySlug(slug: string, locale: SupportedLocale) {
   const marketRecord = await db.query.markets.findFirst({
     where: eq(marketsTable.slug, slug),
     with: { event: { columns: { slug: true } } },
@@ -75,7 +77,7 @@ async function resolveMarketBySlug(slug: string) {
 
   if (!marketRecord?.event?.slug) return null
 
-  const { data: event } = await EventRepository.getEventBySlug(marketRecord.event.slug)
+  const { data: event } = await EventRepository.getEventBySlug(marketRecord.event.slug, '', locale)
   if (!event) return null
 
   const market = event.markets.find(m => m.slug === slug)
@@ -84,8 +86,8 @@ async function resolveMarketBySlug(slug: string) {
   return { market, event }
 }
 
-async function resolveEventBySlug(slug: string) {
-  const { data: event } = await EventRepository.getEventBySlug(slug)
+async function resolveEventBySlug(slug: string, locale: SupportedLocale) {
+  const { data: event } = await EventRepository.getEventBySlug(slug, '', locale)
   return event ?? null
 }
 
@@ -133,6 +135,10 @@ async function EmbedMarketContent({
   const showGridRows = parseBoolParam(params.showGridRows, true)
   const showBorder = parseBoolParam(params.showBorder, false)
   const affiliateCode = params.r?.trim() ?? ''
+  const embedLocale = params.locale?.trim() ?? ''
+  const resolvedLocale: SupportedLocale = SUPPORTED_LOCALES.includes(embedLocale as SupportedLocale)
+    ? embedLocale as SupportedLocale
+    : DEFAULT_LOCALE
 
   // Resolve site identity
   const runtimeTheme = await loadRuntimeThemeState()
@@ -145,14 +151,14 @@ async function EmbedMarketContent({
   let event = null
 
   if (marketSlug) {
-    const result = await resolveMarketBySlug(marketSlug)
+    const result = await resolveMarketBySlug(marketSlug, resolvedLocale)
     if (result) {
       market = result.market
       event = result.event
     }
   }
   else if (eventSlug) {
-    const resolvedEvent = await resolveEventBySlug(eventSlug)
+    const resolvedEvent = await resolveEventBySlug(eventSlug, resolvedLocale)
     if (resolvedEvent && resolvedEvent.markets.length > 0) {
       event = resolvedEvent
       market = resolvedEvent.markets.find(m => m.is_active) ?? resolvedEvent.markets[0]
@@ -267,30 +273,13 @@ async function EmbedMarketContent({
 // Page component
 // ---------------------------------------------------------------------------
 
-function EmbedLoadingFallback() {
-  return (
-    <div
-      className="flex items-center justify-center rounded-2xl text-sm animate-pulse"
-      style={{
-        width: '400px',
-        height: '300px',
-        backgroundColor: '#171717',
-        color: '#737373',
-        fontFamily: 'var(--font-sans), system-ui, sans-serif',
-      }}
-    >
-      Loading...
-    </div>
-  )
-}
-
 export default function EmbedMarketPage({
   searchParams,
 }: {
   searchParams: Promise<EmbedSearchParams>
 }) {
   return (
-    <Suspense fallback={<EmbedLoadingFallback />}>
+    <Suspense>
       <EmbedMarketContent searchParams={searchParams} />
     </Suspense>
   )
