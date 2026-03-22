@@ -214,7 +214,8 @@ export default function AffiliateWidgetDialog({
   const isEvent = Boolean(eventSlug)
   const embedSrc = useMemo(() => buildEmbedSrc(SITE_URL, resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent, locale), [resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent, locale])
   const previewUrl = useMemo(() => buildPreviewSrc(resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent, locale), [resolvedSlug, theme, width, height, toggles, affiliateCode, isEvent, locale])
-  const eventUrl = `${SITE_URL}/event/${resolvedSlug}`
+  const localePath = locale && locale !== 'en' ? `/${locale}` : ''
+  const eventUrl = `${SITE_URL}${localePath}/event/${resolvedSlug}`
   const embedCode = useMemo(() => buildEmbedCode(codeFormat, {
     src: embedSrc, width, height,
     title: `${selectedMarket?.label ?? resolvedSlug} — ${site.name} Prediction Market`,

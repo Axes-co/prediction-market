@@ -195,7 +195,8 @@ export default function EventChartEmbedDialog({
     () => buildPreviewSrc(marketSlug, theme, width, height, toggles, affiliateCode, false, locale),
     [marketSlug, theme, width, height, toggles, affiliateCode, locale],
   )
-  const eventUrl = `${SITE_URL}/event/${marketSlug}`
+  const localePath = locale && locale !== 'en' ? `/${locale}` : ''
+  const eventUrl = `${SITE_URL}${localePath}/event/${marketSlug}`
   const embedCode = useMemo(() => buildEmbedCode(codeFormat, {
     src: embedSrc, width, height,
     title: `${marketQuestion} — ${site.name} Prediction Market`,
