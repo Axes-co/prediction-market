@@ -55,6 +55,20 @@ export interface MarketEmbedCardProps {
   showBorder?: boolean
   /** When set, renders a countdown in the header (for scheduled events) */
   startTime?: string | null
+  /** Translated UI labels for the widget */
+  labels?: EmbedLabels
+}
+
+export interface EmbedLabels {
+  viewMarket: string
+  allTime: string
+  viewOn: string
+}
+
+const DEFAULT_LABELS: EmbedLabels = {
+  viewMarket: 'View Market',
+  allTime: 'All time',
+  viewOn: 'View on',
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +130,7 @@ function PriceLabel({ lines, strokeBg }: { lines: EmbedChartData['lines'], strok
   )
 }
 
-function VolumeRow({ volume, marketUrl, color }: { volume: number, marketUrl: string, color: string }) {
+function VolumeRow({ volume, marketUrl, color, allTimeLabel }: { volume: number, marketUrl: string, color: string, allTimeLabel: string }) {
   return (
     <div className="flex items-center justify-between">
       <span className="text-xs font-medium" style={{ color }}>
@@ -131,7 +145,7 @@ function VolumeRow({ volume, marketUrl, color }: { volume: number, marketUrl: st
         rel="noopener noreferrer"
         target="_blank"
       >
-        <span>All time</span>
+        <span>{allTimeLabel}</span>
         <svg className="w-3 h-3" fill="none" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg">
           <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
         </svg>
@@ -170,7 +184,7 @@ function MultiOutcomeRows({ outcomes, fg }: { outcomes: EmbedOutcome[], fg: stri
 // ---------------------------------------------------------------------------
 
 function ChartSection({
-  chart, theme, showYAxis, showGridRows, showVolume, volume, marketUrl, palette, multiOutcome,
+  chart, theme, showYAxis, showGridRows, showVolume, volume, marketUrl, palette, multiOutcome, allTimeLabel,
 }: {
   chart: EmbedChartData
   theme: EmbedTheme
@@ -181,6 +195,7 @@ function ChartSection({
   marketUrl: string
   palette: ReturnType<typeof resolveEmbedPalette>
   multiOutcome: boolean
+  allTimeLabel: string
 }) {
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -193,7 +208,7 @@ function ChartSection({
             ? <PriceLabel lines={chart.lines} strokeBg={palette.priceStrokeBg} />
             : undefined}
         />
-        {showVolume && <VolumeRow volume={volume} marketUrl={marketUrl} color={palette.muted} />}
+        {showVolume && <VolumeRow volume={volume} marketUrl={marketUrl} color={palette.muted} allTimeLabel={allTimeLabel} />}
       </div>
     </div>
   )
@@ -204,8 +219,9 @@ function ChartSection({
 // ---------------------------------------------------------------------------
 
 function BannerLayout(props: MarketEmbedCardProps) {
-  const { title, iconUrl, marketUrl, siteName, logoSvg, outcomes, chart, volume, theme, width, height, showChart, showButtons, showVolume } = props
+  const { title, iconUrl, marketUrl, siteName, logoSvg, outcomes, chart, volume, theme, width, height, showChart, showButtons, showVolume, labels: rawLabels } = props
   const palette = resolveEmbedPalette(theme)
+  const labels = rawLabels ?? DEFAULT_LABELS
 
   const outcomeButtons = outcomes.map(o => ({ ...o, marketUrl }))
 
@@ -244,8 +260,8 @@ function BannerLayout(props: MarketEmbedCardProps) {
                 <span>·</span>
               </>
             )}
-            <span>View on</span>
-            <EmbedHeader siteName={siteName} logoSvg={logoSvg} marketUrl={marketUrl} theme={theme} inline />
+            <span>{labels.viewOn}</span>
+            <EmbedHeader siteName={siteName} logoSvg={logoSvg} marketUrl={marketUrl} theme={theme} inline viewMarketLabel={labels.viewMarket} />
           </div>
         </div>
 
@@ -282,9 +298,11 @@ function CardLayout(props: MarketEmbedCardProps) {
     outcomes, chart, volume, theme,
     width, height, startTime,
     showChart, showButtons, showVolume, showYAxis, showGridRows,
+    labels: rawLabels,
   } = props
 
   const palette = resolveEmbedPalette(theme)
+  const labels = rawLabels ?? DEFAULT_LABELS
   const multiOutcome = isMultiOutcomeMarket(outcomes)
   const hasStartTime = Boolean(startTime)
   const padding = multiOutcome ? CARD_PADDING_MULTI_OUTCOME : CARD_PADDING
@@ -323,10 +341,10 @@ function CardLayout(props: MarketEmbedCardProps) {
               >
                 <CountdownLabel startTime={startTime!} color={palette.muted} />
               </a>
-              <EmbedHeader siteName={siteName} logoSvg={logoSvg} marketUrl={marketUrl} theme={theme} />
+              <EmbedHeader siteName={siteName} logoSvg={logoSvg} marketUrl={marketUrl} theme={theme} viewMarketLabel={labels.viewMarket} />
             </div>
           )
-        : <EmbedHeader siteName={siteName} logoSvg={logoSvg} marketUrl={marketUrl} theme={theme} />}
+        : <EmbedHeader siteName={siteName} logoSvg={logoSvg} marketUrl={marketUrl} theme={theme} viewMarketLabel={labels.viewMarket} />}
 
       <div className="flex flex-col gap-2 flex-1 min-h-0">
         {/* Market info — outcome rows for multi-outcome, image+title for binary */}
@@ -363,10 +381,11 @@ function CardLayout(props: MarketEmbedCardProps) {
                 marketUrl={marketUrl}
                 palette={palette}
                 multiOutcome={multiOutcome}
+                allTimeLabel={labels.allTime}
               />
             )
           : showVolume !== false
-            ? <VolumeRow volume={volume} marketUrl={marketUrl} color={palette.muted} />
+            ? <VolumeRow volume={volume} marketUrl={marketUrl} color={palette.muted} allTimeLabel={labels.allTime} />
             : null}
 
         {/* Outcome buttons */}

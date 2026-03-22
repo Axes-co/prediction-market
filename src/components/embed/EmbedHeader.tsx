@@ -8,6 +8,8 @@ interface EmbedHeaderProps {
   theme: EmbedTheme
   /** When true, renders compact inline layout for banner mode */
   inline?: boolean
+  /** Translated label for "View Market" link */
+  viewMarketLabel?: string
 }
 
 function ChevronRight({ className, color }: { className?: string, color: string }) {
@@ -24,6 +26,7 @@ export default function EmbedHeader({
   marketUrl,
   theme,
   inline = false,
+  viewMarketLabel = 'View Market',
 }: EmbedHeaderProps) {
   const palette = resolveEmbedPalette(theme)
 
@@ -72,7 +75,7 @@ export default function EmbedHeader({
         rel="noopener"
         target="_blank"
       >
-        <span>View Market</span>
+        <span>{viewMarketLabel}</span>
         <ChevronRight className="w-3 h-3 transition-transform group-hover:translate-x-0.5" color={palette.muted} />
       </a>
     </div>

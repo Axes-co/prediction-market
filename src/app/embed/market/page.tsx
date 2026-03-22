@@ -140,6 +140,14 @@ async function EmbedMarketContent({
     ? embedLocale as SupportedLocale
     : DEFAULT_LOCALE
 
+  // Load translated labels for the widget
+  const messages = (await import(`@/i18n/messages/${resolvedLocale}.json`)).default as Record<string, string>
+  const labels = {
+    viewMarket: messages['0HwRC+'] ?? 'View Market',
+    allTime: messages['YN0CIU'] ?? 'All time',
+    viewOn: messages['IIA3d1'] ?? 'View on',
+  }
+
   // Resolve site identity
   const runtimeTheme = await loadRuntimeThemeState()
   const siteName = runtimeTheme.site.name || 'Kuest'
@@ -265,6 +273,7 @@ async function EmbedMarketContent({
       showGridRows={showGridRows}
       showBorder={showBorder}
       startTime={event.sports_start_time ?? event.start_date ?? null}
+      labels={labels}
     />
   )
 }
