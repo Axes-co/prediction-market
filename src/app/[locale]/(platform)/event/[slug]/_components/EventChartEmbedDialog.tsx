@@ -78,8 +78,8 @@ export default function EventChartEmbedDialog({
   const [layout, setLayout] = useState<EmbedLayout>('standard')
   const [codeFormat, setCodeFormat] = useState<EmbedCodeFormat>('default')
   const [selectedMarketId, setSelectedMarketId] = useState<string>('')
-  const [width, setWidth] = useState(STANDARD_DIMENSIONS.width)
-  const [height, setHeight] = useState(STANDARD_DIMENSIONS.height)
+  const [width, setWidth] = useState<number>(STANDARD_DIMENSIONS.width)
+  const [height, setHeight] = useState<number>(STANDARD_DIMENSIONS.height)
   const [toggles, setToggles] = useState<EmbedToggles>({
     showChart: true,
     showButtons: true,
