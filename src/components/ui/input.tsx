@@ -2,10 +2,19 @@ import * as React from 'react'
 
 import { cn } from '@/lib/utils'
 
-function Input({ className, type, ...props }: React.ComponentProps<'input'>) {
+function Input({ className, defaultValue, type, value, ...props }: React.ComponentProps<'input'>) {
+  const datetimeLocalValue = typeof value === 'string'
+    ? value
+    : typeof defaultValue === 'string'
+      ? defaultValue
+      : ''
+  const isEmptyDateTimeLocal = type === 'datetime-local' && datetimeLocalValue.length === 0
+
   return (
     <input
+      defaultValue={defaultValue}
       type={type}
+      value={value}
       data-slot="input"
       className={cn(
         `
@@ -19,6 +28,11 @@ function Input({ className, type, ...props }: React.ComponentProps<'input'>) {
         `,
         'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50',
         'aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40',
+        isEmptyDateTimeLocal && `
+          text-muted-foreground
+          [&::-webkit-date-and-time-value]:text-muted-foreground [&::-webkit-date-and-time-value]:opacity-100
+          [&::-webkit-datetime-edit]:text-muted-foreground [&::-webkit-datetime-edit]:opacity-80
+        `,
         className,
       )}
       {...props}
