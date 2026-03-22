@@ -83,17 +83,27 @@ const TOGGLE_KEYS: Array<{ key: keyof EmbedToggles, label: string }> = [
 // Dimension input
 // ---------------------------------------------------------------------------
 
-function DimensionInput({
-  value, min, max, onChange,
-}: {
-  value: number, min: number, max: number, onChange: (v: number) => void
-}) {
+const DIM_BTN_BASE = 'absolute size-4 flex items-center justify-center bg-background rounded text-muted-foreground text-xs p-0 cursor-pointer opacity-0 pointer-events-none group-hover/dim:opacity-100 group-hover/dim:pointer-events-auto group-focus-within/dim:opacity-100 group-focus-within/dim:pointer-events-auto transition-opacity duration-150 before:absolute before:inset-[-6px] before:content-[""]'
+const DIM_INPUT_CLASS = 'rounded-md border border-border bg-transparent relative px-2 py-1.5 text-center text-xs text-muted-foreground focus:outline-none focus:border-primary focus:text-foreground shrink-0'
+
+function HeightDimensionInput({ value, min, max, onChange }: { value: number, min: number, max: number, onChange: (v: number) => void }) {
   const clamp = useCallback((v: number) => Math.min(max, Math.max(min, v)), [min, max])
   return (
     <div className="group/dim relative before:absolute before:inset-[-12px] before:content-['']">
-      <button type="button" className="absolute size-4 flex items-center justify-center bg-background rounded text-muted-foreground text-xs p-0 cursor-pointer opacity-0 pointer-events-none group-hover/dim:opacity-100 group-hover/dim:pointer-events-auto transition-opacity duration-150" onClick={() => onChange(clamp(value + DIM_STEP))}>+</button>
-      <button type="button" className="absolute size-4 flex items-center justify-center bg-background rounded text-muted-foreground text-xs p-0 cursor-pointer opacity-0 pointer-events-none group-hover/dim:opacity-100 group-hover/dim:pointer-events-auto transition-opacity duration-150" style={{ marginTop: '4px' }} onClick={() => onChange(clamp(value - DIM_STEP))}>−</button>
-      <input type="number" min={min} max={max} step={DIM_STEP} value={value} onChange={e => onChange(clamp(Number(e.target.value) || value))} className="rounded-md border border-border bg-transparent relative px-2 py-1.5 text-center text-xs text-muted-foreground focus:outline-none focus:border-primary focus:text-foreground shrink-0 w-16" />
+      <button type="button" className={`${DIM_BTN_BASE} left-1/2 -translate-x-1/2 bottom-full mb-1`} onClick={() => onChange(clamp(value + DIM_STEP))}>+</button>
+      <button type="button" className={`${DIM_BTN_BASE} left-1/2 -translate-x-1/2 top-full mt-1`} onClick={() => onChange(clamp(value - DIM_STEP))}>−</button>
+      <input type="number" min={min} max={max} step={DIM_STEP} value={value} onChange={e => onChange(clamp(Number(e.target.value) || value))} className={DIM_INPUT_CLASS} />
+    </div>
+  )
+}
+
+function WidthDimensionInput({ value, min, max, onChange }: { value: number, min: number, max: number, onChange: (v: number) => void }) {
+  const clamp = useCallback((v: number) => Math.min(max, Math.max(min, v)), [min, max])
+  return (
+    <div className="group/dim relative before:absolute before:inset-[-12px] before:content-['']">
+      <button type="button" className={`${DIM_BTN_BASE} top-1/2 -translate-y-1/2 right-full mr-1`} onClick={() => onChange(clamp(value - DIM_STEP))}>−</button>
+      <button type="button" className={`${DIM_BTN_BASE} top-1/2 -translate-y-1/2 left-full ml-1`} onClick={() => onChange(clamp(value + DIM_STEP))}>+</button>
+      <input type="number" min={min} max={max} step={DIM_STEP} value={value} onChange={e => onChange(clamp(Number(e.target.value) || value))} className={DIM_INPUT_CLASS} />
     </div>
   )
 }
@@ -261,7 +271,7 @@ export default function AffiliateWidgetDialog({
                           <span className="flex-1 w-px bg-muted-foreground/20" />
                           <div className="relative">
                             <span className="text-xs text-muted-foreground font-semibold leading-none absolute -left-4 top-1/2 -translate-y-1/2">H</span>
-                            <DimensionInput value={height} min={MIN_EMBED_HEIGHT} max={MAX_EMBED_HEIGHT} onChange={setHeight} />
+                            <HeightDimensionInput value={height} min={MIN_EMBED_HEIGHT} max={MAX_EMBED_HEIGHT} onChange={setHeight} />
                           </div>
                           <span className="flex-1 w-px bg-muted-foreground/20" />
                         </div>
@@ -292,7 +302,7 @@ export default function AffiliateWidgetDialog({
                           <span className="flex-1 h-px bg-muted-foreground/20" />
                           <div className="relative">
                             <span className="text-xs text-muted-foreground font-semibold leading-none absolute -bottom-4 left-1/2 -translate-x-1/2">W</span>
-                            <DimensionInput value={width} min={MIN_EMBED_WIDTH} max={MAX_EMBED_WIDTH} onChange={setWidth} />
+                            <WidthDimensionInput value={width} min={MIN_EMBED_WIDTH} max={MAX_EMBED_WIDTH} onChange={setWidth} />
                           </div>
                           <span className="flex-1 h-px bg-muted-foreground/20" />
                         </div>
