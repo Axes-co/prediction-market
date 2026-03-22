@@ -64,13 +64,19 @@ export function normalizeBaseUrl(value: string): string {
   return value.replace(/\/$/, '')
 }
 
-export function buildEventPath(event: {
-  slug: string
-  sports_sport_slug?: string | null
-}): string {
-  return event.sports_sport_slug
+export function buildEventPath(
+  event: { slug: string, sports_sport_slug?: string | null },
+  locale?: string,
+): string {
+  const basePath = event.sports_sport_slug
     ? `/sports/${event.sports_sport_slug}/${event.slug}`
     : `/event/${event.slug}`
+
+  // Prefix with locale for non-default languages (matches next-intl localePrefix: 'as-needed')
+  if (locale && locale !== 'en') {
+    return `/${locale}${basePath}`
+  }
+  return basePath
 }
 
 export function buildMarketUrl(

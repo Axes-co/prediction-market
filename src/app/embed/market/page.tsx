@@ -200,7 +200,7 @@ async function EmbedMarketContent({
     : outcomes.map(o => ({ ...o, iconUrl: null, color: undefined }))
 
   // Build market URL with UTM
-  const eventPath = buildEventPath(event)
+  const eventPath = buildEventPath(event, resolvedLocale)
   const marketUrl = buildMarketUrl(siteUrl, eventPath, 'market', affiliateCode)
 
   // Fetch price history and build chart
