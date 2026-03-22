@@ -1,6 +1,6 @@
 'use client'
 
-import type { EmbedChartData } from '@/lib/embed-chart'
+import type { EmbedChartData, EmbedChartLine } from '@/lib/embed-chart'
 import type { ReactNode } from 'react'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import {
@@ -26,12 +26,16 @@ interface ParsedPoint {
   y: number
 }
 
-interface CursorState {
-  svgX: number
+interface LineCursorState {
   svgY: number
   percent: number
+  color: string
+}
+
+interface CursorState {
+  svgX: number
   cssX: number
-  cssY: number
+  lines: LineCursorState[]
 }
 
 // ---------------------------------------------------------------------------
@@ -94,39 +98,42 @@ export default function EmbedChartCrosshair({
   const containerRef = useRef<HTMLDivElement>(null)
   const [cursor, setCursor] = useState<CursorState | null>(null)
 
-  const primaryLine = chart.lines[0] ?? null
-
-  const parsedPoints = useMemo(
-    () => primaryLine ? parseSvgPath(primaryLine.pathD) : [],
-    [primaryLine],
+  // Parse ALL chart lines once and memoize
+  const parsedLines = useMemo(
+    () => chart.lines.map(line => ({
+      key: line.key,
+      color: line.color,
+      points: parseSvgPath(line.pathD),
+    })),
+    [chart.lines],
   )
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const container = containerRef.current
-    if (!container || parsedPoints.length === 0) return
+    if (!container || parsedLines.length === 0) return
 
     const rect = container.getBoundingClientRect()
     const relativeX = e.clientX - rect.left
-
-    // The SVG uses preserveAspectRatio="none", so the entire viewBox
-    // stretches to fill the container. CSS X maps linearly to SVG X.
     const svgX = (relativeX / rect.width) * chart.viewBoxWidth
 
-    const svgY = interpolateY(parsedPoints, svgX)
-    const percent = yToPercent(svgY, chart.viewBoxHeight)
+    // Interpolate Y position on every line at this X coordinate
+    const lines: LineCursorState[] = parsedLines
+      .filter(line => line.points.length > 0)
+      .map(line => ({
+        svgY: interpolateY(line.points, svgX),
+        percent: yToPercent(interpolateY(line.points, svgX), chart.viewBoxHeight),
+        color: line.color,
+      }))
 
-    // Convert SVG coords back to CSS coords for label positioning
-    const cssX = relativeX
-    const cssY = (svgY / chart.viewBoxHeight) * rect.height
-
-    setCursor({ svgX, svgY, percent, cssX, cssY })
-  }, [chart.viewBoxWidth, chart.viewBoxHeight, parsedPoints])
+    setCursor({ svgX, cssX: relativeX, lines })
+  }, [chart.viewBoxWidth, chart.viewBoxHeight, parsedLines])
 
   const handleMouseLeave = useCallback(() => {
     setCursor(null)
   }, [])
 
   const isHovering = cursor !== null
+  const primaryLine = cursor?.lines[0] ?? null
 
   return (
     <div
@@ -137,45 +144,40 @@ export default function EmbedChartCrosshair({
     >
       {svgChart}
 
-      {/* Overlay SVG — tracking dot that follows the chart line */}
-      {isHovering && primaryLine && (
+      {/* Overlay SVG — tracking dots on ALL chart lines */}
+      {isHovering && cursor.lines.length > 0 && (
         <svg
           className="absolute inset-0 w-full h-full pointer-events-none"
           preserveAspectRatio="none"
           viewBox={`0 0 ${chart.viewBoxWidth} ${chart.viewBoxHeight}`}
           style={{ width: '100%', height: '100%', display: 'block' }}
         >
-          <circle
-            cx={cursor.svgX}
-            cy={cursor.svgY}
-            r={CHART_DOT_RADIUS}
-            fill={primaryLine.color}
-          />
-          <circle
-            cx={cursor.svgX}
-            cy={cursor.svgY}
-            r={CHART_DOT_RADIUS}
-            fill={primaryLine.color}
-            opacity={0.3}
-            style={{
-              transformOrigin: '50% 50%',
-              transformBox: 'fill-box' as const,
-              transform: 'scale(2.5)',
-            }}
-          />
+          {cursor.lines.map((line, i) => (
+            <g key={i}>
+              <circle cx={cursor.svgX} cy={line.svgY} r={CHART_DOT_RADIUS} fill={line.color} />
+              <circle
+                cx={cursor.svgX}
+                cy={line.svgY}
+                r={CHART_DOT_RADIUS}
+                fill={line.color}
+                opacity={0.3}
+                style={{ transformOrigin: '50% 50%', transformBox: 'fill-box' as const, transform: 'scale(2.5)' }}
+              />
+            </g>
+          ))}
         </svg>
       )}
 
       {/* Static price label — hidden on hover */}
       {staticLabel && !isHovering && staticLabel}
 
-      {/* Dynamic percentage label — positioned above the dot */}
+      {/* Dynamic percentage label — shows primary line value above its dot */}
       {isHovering && primaryLine && (
         <div
           className="absolute pointer-events-none z-10"
           style={{
             left: `${cursor.cssX}px`,
-            top: `${Math.max(0, cursor.cssY - 28)}px`,
+            top: `${Math.max(0, (primaryLine.svgY / chart.viewBoxHeight) * (containerRef.current?.getBoundingClientRect().height ?? 0) - 28)}px`,
             transform: 'translateX(-50%)',
           }}
         >
@@ -188,7 +190,7 @@ export default function EmbedChartCrosshair({
               paintOrder: 'stroke',
             }}
           >
-            {cursor.percent}%
+            {primaryLine.percent}%
           </span>
         </div>
       )}
