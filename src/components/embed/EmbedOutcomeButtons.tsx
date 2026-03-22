@@ -64,7 +64,7 @@ export default function EmbedOutcomeButtons({
           return (
             <a
               key={outcome.outcomeIndex}
-              className="group flex-1 flex items-center justify-center rounded-lg text-white text-sm no-underline gap-1 transition-colors"
+              className="group flex-1 flex items-center justify-center rounded-lg text-white text-sm no-underline gap-1 transition-all hover:brightness-125"
               style={{
                 backgroundColor: `color-mix(in srgb, ${outcome.color} 80%, transparent)`,
                 height: stacked ? undefined : '40px',
