@@ -3,7 +3,7 @@
 import type { Event } from '@/types'
 import { CodeXmlIcon } from 'lucide-react'
 import { useState } from 'react'
-import AffiliateWidgetDialog from '@/app/[locale]/(platform)/settings/_components/AffiliateWidgetDialog'
+import EventChartEmbedDialog from '@/app/[locale]/(platform)/event/[slug]/_components/EventChartEmbedDialog'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useUser } from '@/stores/useUser'
@@ -44,11 +44,11 @@ export default function EventEmbedWidget({ event }: EventEmbedWidgetProps) {
         <CodeXmlIcon />
       </Button>
 
-      <AffiliateWidgetDialog
+      <EventChartEmbedDialog
         open={isDialogOpen}
         onOpenChange={setIsDialogOpen}
-        categories={[]}
-        eventSlug={event.slug}
+        markets={event.markets}
+        initialMarketId={market.condition_id}
       />
     </>
   )
