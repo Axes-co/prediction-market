@@ -234,63 +234,54 @@ export default function EventChartEmbedDialog({
           <div className="w-full lg:w-fit lg:order-last lg:h-fit">
             {view === 'preview'
               ? (
-                  /* ---- PREVIEW VIEW ---- */
-                  <div className="w-full lg:w-[500px] h-auto lg:h-[400px] flex flex-col pb-2 lg:pl-6">
-                    <div className="grid grid-cols-[auto_1fr] grid-rows-[1fr_auto] w-fit h-fit">
-                      {/* H dimension control (left of preview) */}
-                      <div className="flex flex-col items-center gap-2 w-12 justify-center">
-                        <div className="flex flex-col items-center gap-2 transition-[height] duration-150" style={{ height: `${scaledHeight}px` }}>
-                          <span className="flex-1 w-px bg-muted-foreground/20" />
-                          <div className="relative">
-                            <span className="text-xs text-muted-foreground font-semibold leading-none absolute -left-4 top-1/2 -translate-y-1/2">H</span>
-                            <HeightDimensionInput value={height} min={MIN_EMBED_HEIGHT} max={MAX_EMBED_HEIGHT} onChange={setHeight} />
+                  <>
+                    {/* Desktop: full preview with H/W dimension controls */}
+                    <div className="hidden lg:flex w-[500px] h-[400px] flex-col pb-2 pl-6">
+                      <div className="grid grid-cols-[auto_1fr] grid-rows-[1fr_auto] w-fit h-fit">
+                        <div className="flex flex-col items-center gap-2 w-12 justify-center">
+                          <div className="flex flex-col items-center gap-2 transition-[height] duration-150" style={{ height: `${scaledHeight}px` }}>
+                            <span className="flex-1 w-px bg-muted-foreground/20" />
+                            <div className="relative">
+                              <span className="text-xs text-muted-foreground font-semibold leading-none absolute -left-4 top-1/2 -translate-y-1/2">H</span>
+                              <HeightDimensionInput value={height} min={MIN_EMBED_HEIGHT} max={MAX_EMBED_HEIGHT} onChange={setHeight} />
+                            </div>
+                            <span className="flex-1 w-px bg-muted-foreground/20" />
                           </div>
-                          <span className="flex-1 w-px bg-muted-foreground/20" />
                         </div>
-                      </div>
-
-                      {/* Iframe preview */}
-                      <div className="flex items-center justify-center" style={{ width: `${PREVIEW_CONTAINER_WIDTH}px`, height: `${PREVIEW_CONTAINER_HEIGHT}px` }}>
-                        {previewSrc
-                          ? (
-                              <div style={{ width: `${PREVIEW_CONTAINER_WIDTH}px`, height: `${scaledHeight}px` }}>
-                                <iframe
-                                  title={t('Embed preview')}
-                                  src={previewSrc}
-                                  width={width}
-                                  height={height}
-                                  frameBorder={0}
-                                  scrolling="no"
-                                  style={{
-                                    border: 'none',
-                                    display: 'block',
-                                    borderRadius: '16px',
-                                    overflow: 'hidden',
-                                    transform: `scale(${previewScale})`,
-                                    transformOrigin: 'left top',
-                                  }}
-                                />
-                              </div>
-                            )
-                          : <p className="text-sm text-muted-foreground">{t('No market available for this event')}</p>}
-                      </div>
-
-                      {/* Empty cell (grid) */}
-                      <div />
-
-                      {/* W dimension control (below preview) */}
-                      <div className="flex items-center justify-center h-8">
-                        <div className="flex items-center gap-2 transition-[width] duration-150" style={{ width: `${PREVIEW_CONTAINER_WIDTH}px` }}>
-                          <span className="flex-1 h-px bg-muted-foreground/20" />
-                          <div className="relative">
-                            <span className="text-xs text-muted-foreground font-semibold leading-none absolute -bottom-4 left-1/2 -translate-x-1/2">W</span>
-                            <WidthDimensionInput value={width} min={MIN_EMBED_WIDTH} max={MAX_EMBED_WIDTH} onChange={setWidth} />
+                        <div className="flex items-center justify-center" style={{ width: `${PREVIEW_CONTAINER_WIDTH}px`, height: `${PREVIEW_CONTAINER_HEIGHT}px` }}>
+                          {previewSrc
+                            ? (
+                                <div style={{ width: `${PREVIEW_CONTAINER_WIDTH}px`, height: `${scaledHeight}px` }}>
+                                  <iframe title={t('Embed preview')} src={previewSrc} width={width} height={height} frameBorder={0} scrolling="no" style={{ border: 'none', display: 'block', borderRadius: '16px', overflow: 'hidden', transform: `scale(${previewScale})`, transformOrigin: 'left top' }} />
+                                </div>
+                              )
+                            : <p className="text-sm text-muted-foreground">{t('No market available for this event')}</p>}
+                        </div>
+                        <div />
+                        <div className="flex items-center justify-center h-8">
+                          <div className="flex items-center gap-2 transition-[width] duration-150" style={{ width: `${PREVIEW_CONTAINER_WIDTH}px` }}>
+                            <span className="flex-1 h-px bg-muted-foreground/20" />
+                            <div className="relative">
+                              <span className="text-xs text-muted-foreground font-semibold leading-none absolute -bottom-4 left-1/2 -translate-x-1/2">W</span>
+                              <WidthDimensionInput value={width} min={MIN_EMBED_WIDTH} max={MAX_EMBED_WIDTH} onChange={setWidth} />
+                            </div>
+                            <span className="flex-1 h-px bg-muted-foreground/20" />
                           </div>
-                          <span className="flex-1 h-px bg-muted-foreground/20" />
                         </div>
                       </div>
                     </div>
-                  </div>
+
+                    {/* Mobile: simple scaled preview */}
+                    <div className="lg:hidden w-full overflow-hidden rounded-2xl">
+                      {previewSrc
+                        ? (
+                            <div style={{ height: `${height * Math.min(1, 320 / width)}px` }}>
+                              <iframe title={t('Embed preview')} src={previewSrc} width={width} height={height} frameBorder={0} scrolling="no" style={{ border: 'none', display: 'block', borderRadius: '16px', overflow: 'hidden', transform: `scale(${Math.min(1, 320 / width)})`, transformOrigin: 'left top' }} />
+                            </div>
+                          )
+                        : <p className="px-4 py-8 text-center text-sm text-muted-foreground">{t('No market available for this event')}</p>}
+                    </div>
+                  </>
                 )
               : (
                   /* ---- CODE VIEW ---- */
