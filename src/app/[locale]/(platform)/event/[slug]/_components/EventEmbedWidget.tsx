@@ -48,7 +48,7 @@ export default function EventEmbedWidget({ event }: EventEmbedWidgetProps) {
         open={isDialogOpen}
         onOpenChange={setIsDialogOpen}
         categories={[]}
-        eventSlug={market.slug}
+        eventSlug={event.slug}
       />
     </>
   )
