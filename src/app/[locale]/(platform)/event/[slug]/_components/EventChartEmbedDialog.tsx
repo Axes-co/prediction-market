@@ -347,12 +347,30 @@ export default function EventChartEmbedDialog({
 
                     {/* Toggles */}
                     <div className="flex flex-col gap-2">
-                      {TOGGLE_KEYS.map(({ key, label }) => (
-                        <div key={key} className="flex items-center justify-between">
-                          <span className="text-sm text-foreground">{t(label)}</span>
-                          <Switch checked={toggles[key]} onCheckedChange={v => updateToggle(key, v)} />
-                        </div>
-                      ))}
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-foreground">{t('Chart')}</span>
+                        <Switch checked={toggles.showChart} onCheckedChange={v => updateToggle('showChart', v)} />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-foreground">{t('Buy buttons')}</span>
+                        <Switch checked={toggles.showButtons} onCheckedChange={v => updateToggle('showButtons', v)} />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-foreground">{t('Volume')}</span>
+                        <Switch checked={toggles.showVolume} onCheckedChange={v => updateToggle('showVolume', v)} />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-foreground">{t('Y Axis')}</span>
+                        <Switch checked={toggles.showYAxis} onCheckedChange={v => updateToggle('showYAxis', v)} />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-foreground">{t('Grid rows')}</span>
+                        <Switch checked={toggles.showGridRows} onCheckedChange={v => updateToggle('showGridRows', v)} />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-foreground">{t('Border')}</span>
+                        <Switch checked={toggles.showBorder} onCheckedChange={v => updateToggle('showBorder', v)} />
+                      </div>
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-foreground">{t('Dark mode')}</span>
                         <Switch checked={theme === 'dark'} onCheckedChange={v => setTheme(v ? 'dark' : 'light')} />
