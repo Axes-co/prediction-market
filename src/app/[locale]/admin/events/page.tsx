@@ -1,6 +1,5 @@
 import type { SupportedLocale } from '@/i18n/locales'
 import { getExtracted, setRequestLocale } from 'next-intl/server'
-import { Suspense } from 'react'
 import AdminEventsTable from '@/app/[locale]/admin/events/_components/AdminEventsTable'
 import { TagRepository } from '@/lib/db/queries/tag'
 import { loadAutoDeployNewEventsEnabled } from '@/lib/event-sync-settings'
@@ -28,12 +27,10 @@ export default async function AdminEventsPage({ params }: PageProps<'/[locale]/a
         </p>
       </div>
       <div className="min-w-0">
-        <Suspense fallback={<div className="min-h-64 rounded-xl border bg-background" />}>
-          <AdminEventsTable
-            initialAutoDeployNewEventsEnabled={autoDeployNewEventsEnabled}
-            mainCategoryOptions={mainCategoryOptions}
-          />
-        </Suspense>
+        <AdminEventsTable
+          initialAutoDeployNewEventsEnabled={autoDeployNewEventsEnabled}
+          mainCategoryOptions={mainCategoryOptions}
+        />
       </div>
     </section>
   )

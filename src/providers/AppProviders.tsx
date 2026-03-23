@@ -44,25 +44,21 @@ export function AppProviders({ children, disableAppKit }: AppProvidersProps) {
     </div>
   )
 
-  const providersContent = (
-    <ThemeProvider attribute="class">
-      <QueryClientProvider client={queryClient}>
-        {shouldLoadAppKit
-          ? (
-              <AppKitProvider>
-                {content}
-              </AppKitProvider>
-            )
-          : (
-              content
-            )}
-      </QueryClientProvider>
-    </ThemeProvider>
-  )
-
   return (
     <ProgressIndicatorProvider>
-      {providersContent}
+      <ThemeProvider attribute="class">
+        <QueryClientProvider client={queryClient}>
+          {shouldLoadAppKit
+            ? (
+                <AppKitProvider>
+                  {content}
+                </AppKitProvider>
+              )
+            : (
+                content
+              )}
+        </QueryClientProvider>
+      </ThemeProvider>
     </ProgressIndicatorProvider>
   )
 }
