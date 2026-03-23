@@ -10,6 +10,7 @@ import {
   CHART_PADDING,
 } from '@/lib/embed-dimensions'
 import { clampPrice } from '@/lib/embed-utils'
+import { cacheKeys, cacheTTL, withCache } from '@/lib/redis'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,10 +59,40 @@ interface PriceHistoryResponse {
 }
 
 function resolveFidelityForSpan(spanSeconds: number): number {
-  if (spanSeconds <= 2 * 24 * 3600) return 5
-  if (spanSeconds <= 7 * 24 * 3600) return 30
-  if (spanSeconds <= 30 * 24 * 3600) return 180
+  if (spanSeconds <= 2 * 24 * 3600) {
+    return 5
+  }
+  if (spanSeconds <= 7 * 24 * 3600) {
+    return 30
+  }
+  if (spanSeconds <= 30 * 24 * 3600) {
+    return 180
+  }
   return 720
+}
+
+async function fetchPriceHistoryFromClob(
+  clobUrl: string,
+  tokenId: string,
+  fidelity: number,
+  startTs: number,
+  endTs: number,
+): Promise<EmbedPricePoint[]> {
+  const url = new URL(`${clobUrl}/prices-history`)
+  url.searchParams.set('market', tokenId)
+  url.searchParams.set('fidelity', fidelity.toString())
+  url.searchParams.set('startTs', startTs.toString())
+  url.searchParams.set('endTs', endTs.toString())
+
+  const response = await fetch(url.toString(), { next: { revalidate: 60 } })
+  if (!response.ok) {
+    return []
+  }
+
+  const payload = (await response.json()) as PriceHistoryResponse
+  return (payload.history ?? [])
+    .map(point => ({ t: Number(point.t), p: Number(point.p) }))
+    .filter(point => Number.isFinite(point.t) && Number.isFinite(point.p))
 }
 
 export async function fetchEmbedPriceHistory(
@@ -92,21 +123,11 @@ export async function fetchEmbedPriceHistory(
     const ageSeconds = Math.max(0, nowSeconds - createdSeconds)
     const fidelity = resolveFidelityForSpan(ageSeconds)
 
-    const url = new URL(`${clobUrl}/prices-history`)
-    url.searchParams.set('market', tokenId)
-    url.searchParams.set('fidelity', fidelity.toString())
-    url.searchParams.set('startTs', createdSeconds.toString())
-    url.searchParams.set('endTs', nowSeconds.toString())
-
-    const response = await fetch(url.toString(), { next: { revalidate: 60 } })
-    if (!response.ok) {
-      return []
-    }
-
-    const payload = (await response.json()) as PriceHistoryResponse
-    return (payload.history ?? [])
-      .map(point => ({ t: Number(point.t), p: Number(point.p) }))
-      .filter(point => Number.isFinite(point.t) && Number.isFinite(point.p))
+    return withCache(
+      cacheKeys.priceHistory(tokenId, fidelity),
+      () => fetchPriceHistoryFromClob(clobUrl, tokenId, fidelity, createdSeconds, nowSeconds),
+      cacheTTL.priceHistory,
+    )
   }
   catch {
     return []
@@ -154,8 +175,12 @@ export function buildEmbedChart(
   for (const series of seriesList) {
     for (const point of series.points) {
       const clamped = clampPrice(point.p)
-      if (clamped < globalMin) globalMin = clamped
-      if (clamped > globalMax) globalMax = clamped
+      if (clamped < globalMin) {
+        globalMin = clamped
+      }
+      if (clamped > globalMax) {
+        globalMax = clamped
+      }
     }
   }
 

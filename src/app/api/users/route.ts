@@ -1,11 +1,17 @@
 import type { PublicProfile, User } from '@/types'
 import { NextResponse } from 'next/server'
+import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { UserRepository } from '@/lib/db/queries/user'
 import { getPublicAssetUrl } from '@/lib/storage'
 import { getUserPublicAddress } from '@/lib/user-address'
 
 export async function GET(request: Request) {
+  const rateLimited = await checkRateLimit(request)
+  if (rateLimited) {
+    return rateLimited
+  }
+
   const { searchParams } = new URL(request.url)
   const query = searchParams.get('search')
 
@@ -36,7 +42,7 @@ export async function GET(request: Request) {
       }
     })
 
-    return NextResponse.json(profiles)
+    return withCacheHeaders(NextResponse.json(profiles), 'short')
   }
   catch (error) {
     console.error('API Error:', error)

@@ -340,10 +340,13 @@ async function run() {
     return
   }
 
+  const requiresSsl = connectionString.includes('sslmode=require')
+    || connectionString.includes('neon.tech')
   const sql = postgres(connectionString, {
     max: 1,
     connect_timeout: 30,
     idle_timeout: 5,
+    ...(requiresSsl ? { ssl: 'require' } : {}),
   })
   let reserved = null
   let lockAcquired = false

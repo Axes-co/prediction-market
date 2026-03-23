@@ -1,11 +1,16 @@
 import { NextResponse } from 'next/server'
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from '@/i18n/locales'
+import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { EventRepository } from '@/lib/db/queries/event'
 import { UserRepository } from '@/lib/db/queries/user'
 import { listHomeEventsPage } from '@/lib/home-events-page'
 
 export async function GET(request: Request) {
+  const rateLimited = await checkRateLimit(request)
+  if (rateLimited) {
+    return rateLimited
+  }
   const { searchParams } = new URL(request.url)
   const tag = searchParams.get('tag') || 'trending'
   const mainTag = searchParams.get('mainTag') || ''
@@ -70,7 +75,7 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: DEFAULT_ERROR_MESSAGE }, { status: 500 })
       }
 
-      return NextResponse.json(events)
+      return withCacheHeaders(NextResponse.json(events), 'short')
     }
 
     const { data: events, error } = await EventRepository.listEvents({
@@ -91,7 +96,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: DEFAULT_ERROR_MESSAGE }, { status: 500 })
     }
 
-    return NextResponse.json(events)
+    return withCacheHeaders(NextResponse.json(events), 'short')
   }
   catch (error) {
     console.error('API Error:', error)

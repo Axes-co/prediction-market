@@ -1,13 +1,19 @@
 import { getChains } from '@lifi/sdk'
 import { NextResponse } from 'next/server'
+import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
 import { ensureLiFiServerConfig } from '@/lib/lifi'
 
-export async function GET() {
+export async function GET(request: Request) {
+  const rateLimited = await checkRateLimit(request)
+  if (rateLimited) {
+    return rateLimited
+  }
+
   await ensureLiFiServerConfig()
 
   try {
     const chains = await getChains()
-    return NextResponse.json({ chains })
+    return withCacheHeaders(NextResponse.json({ chains }), 'long')
   }
   catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to fetch LI.FI chains.'

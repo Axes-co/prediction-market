@@ -1,5 +1,6 @@
 import { getTokens } from '@lifi/sdk'
 import { NextResponse } from 'next/server'
+import { checkRateLimit } from '@/lib/api-utils'
 import { ensureLiFiServerConfig } from '@/lib/lifi'
 
 interface TokensRequestBody {
@@ -7,6 +8,11 @@ interface TokensRequestBody {
 }
 
 export async function POST(request: Request) {
+  const rateLimited = await checkRateLimit(request, 'trading')
+  if (rateLimited) {
+    return rateLimited
+  }
+
   await ensureLiFiServerConfig()
 
   let body: TokensRequestBody = {}

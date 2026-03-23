@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { checkRateLimit } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { ZERO_ADDRESS } from '@/lib/contracts'
 import { SettingsRepository } from '@/lib/db/queries/settings'
@@ -14,7 +15,12 @@ function getFeeRecipientAddress(settings?: Record<string, Record<string, { value
     : ZERO_ADDRESS
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const rateLimited = await checkRateLimit(request)
+  if (rateLimited) {
+    return rateLimited
+  }
+
   try {
     const { data: settings } = await SettingsRepository.getSettings()
     const referrerAddress = getFeeRecipientAddress(settings ?? undefined)

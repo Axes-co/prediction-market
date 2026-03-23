@@ -1,5 +1,6 @@
 import type { ClobOrderType, UserOpenOrder } from '@/types'
 import { NextResponse } from 'next/server'
+import { checkRateLimit } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE, MICRO_UNIT } from '@/lib/constants'
 import { EventRepository } from '@/lib/db/queries/event'
 import { UserRepository } from '@/lib/db/queries/user'
@@ -30,6 +31,11 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ slug: string }> },
 ) {
+  const rateLimited = await checkRateLimit(request)
+  if (rateLimited) {
+    return rateLimited
+  }
+
   try {
     const user = await UserRepository.getCurrentUser()
     const { slug } = await params

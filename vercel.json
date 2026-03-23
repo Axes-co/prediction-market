@@ -1,4 +1,22 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run db:push && next build"
+  "buildCommand": "npm run db:push && next build",
+  "crons": [
+    {
+      "path": "/api/sync/events",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/sync/volume",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/sync/resolution",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/sync/translations",
+      "schedule": "0 */6 * * *"
+    }
+  ]
 }

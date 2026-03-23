@@ -1,3 +1,5 @@
+import { cacheKeys, cacheTTL, withCache } from '@/lib/redis'
+
 const DATA_API_URL = process.env.DATA_URL!
 
 interface DataApiHolder {
@@ -72,19 +74,11 @@ function mapHolder(holder: DataApiHolder, outcomeHint: 'yes' | 'no' | null) {
   }
 }
 
-export async function fetchTopHoldersFromDataApi(
+async function fetchTopHoldersFromApi(
   conditionId: string,
-  limit = 50,
+  limit: number,
   options?: { yesToken?: string, noToken?: string },
 ): Promise<TopHoldersResult> {
-  if (!conditionId) {
-    throw new Error('conditionId is required')
-  }
-
-  if (!DATA_API_URL) {
-    throw new Error('DATA_URL environment variable is not configured.')
-  }
-
   const params = new URLSearchParams({
     market: conditionId,
     limit: String(Math.min(Math.max(limit, 1), 500)),
@@ -150,6 +144,26 @@ export async function fetchTopHoldersFromDataApi(
   })
 
   return { yesHolders, noHolders }
+}
+
+export async function fetchTopHoldersFromDataApi(
+  conditionId: string,
+  limit = 50,
+  options?: { yesToken?: string, noToken?: string },
+): Promise<TopHoldersResult> {
+  if (!conditionId) {
+    throw new Error('conditionId is required')
+  }
+
+  if (!DATA_API_URL) {
+    throw new Error('DATA_URL environment variable is not configured.')
+  }
+
+  return withCache(
+    cacheKeys.holders(conditionId, limit),
+    () => fetchTopHoldersFromApi(conditionId, limit, options),
+    cacheTTL.holders,
+  )
 }
 
 export async function fetchTopHolders(

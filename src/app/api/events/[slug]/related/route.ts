@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server'
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from '@/i18n/locales'
+import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { EventRepository } from '@/lib/db/queries/event'
 
 export async function GET(request: Request, { params }: { params: Promise<{ slug: string }> }) {
+  const rateLimited = await checkRateLimit(request)
+  if (rateLimited) {
+    return rateLimited
+  }
+
   const { slug } = await params
   const { searchParams } = new URL(request.url)
   const tagSlug = searchParams.get('tag') ?? undefined
@@ -21,7 +27,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
       return NextResponse.json({ error: DEFAULT_ERROR_MESSAGE }, { status: 500 })
     }
 
-    return NextResponse.json(events)
+    return withCacheHeaders(NextResponse.json(events), 'short')
   }
   catch (error) {
     console.error('API Error:', error)

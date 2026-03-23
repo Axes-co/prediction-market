@@ -1,3 +1,5 @@
+import { cacheKeys, cacheTTL, withCache } from '@/lib/redis'
+
 export interface FeeReceiverTotal {
   exchange: string
   receiver: string
@@ -28,16 +30,14 @@ function normalizeAddress(value: string) {
   return value.trim().toLowerCase()
 }
 
-export async function fetchFeeReceiverTotals({
-  endpoint,
-  address,
-  exchange,
-  tokenId,
+async function fetchFeeReceiverTotalsFromApi(
+  endpoint: string,
+  address: string,
+  exchange?: string,
+  tokenId?: string,
   limit = 100,
   offset = 0,
-}: FeeReceiverTotalsParams): Promise<FeeReceiverTotal[]> {
-  assertDataApiUrl()
-
+): Promise<FeeReceiverTotal[]> {
   const params = new URLSearchParams()
   params.set('address', normalizeAddress(address))
   if (exchange) {
@@ -62,6 +62,23 @@ export async function fetchFeeReceiverTotals({
   }
 
   return response.json() as Promise<FeeReceiverTotal[]>
+}
+
+export async function fetchFeeReceiverTotals({
+  endpoint,
+  address,
+  exchange,
+  tokenId,
+  limit = 100,
+  offset = 0,
+}: FeeReceiverTotalsParams): Promise<FeeReceiverTotal[]> {
+  assertDataApiUrl()
+
+  return withCache(
+    cacheKeys.feeReceiverTotals(normalizeAddress(address), endpoint, offset),
+    () => fetchFeeReceiverTotalsFromApi(endpoint, address, exchange, tokenId, limit, offset),
+    cacheTTL.feeReceiverTotals,
+  )
 }
 
 export function sumFeeTotals(totals: FeeReceiverTotal[]): bigint {

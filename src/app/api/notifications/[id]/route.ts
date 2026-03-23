@@ -1,13 +1,19 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
+import { checkRateLimit } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { NotificationRepository } from '@/lib/db/queries/notification'
 import { UserRepository } from '@/lib/db/queries/user'
 
 export async function DELETE(
-  _: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const rateLimited = await checkRateLimit(request)
+  if (rateLimited) {
+    return rateLimited
+  }
+
   try {
     const user = await UserRepository.getCurrentUser()
 

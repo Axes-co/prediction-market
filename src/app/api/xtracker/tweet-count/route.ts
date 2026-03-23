@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
 
 const XTRACKER_API_BASE_URL = 'https://xtracker.polymarket.com/api'
 const XTRACKER_PLATFORM = 'X'
@@ -265,6 +266,11 @@ function resolveCountFromStatsUsers(
 }
 
 export async function GET(request: Request) {
+  const rateLimited = await checkRateLimit(request)
+  if (rateLimited) {
+    return rateLimited
+  }
+
   const { searchParams } = new URL(request.url)
   const seriesSlug = searchParams.get('seriesSlug')?.trim() ?? null
   const eventSlug = searchParams.get('eventSlug')?.trim() ?? null
@@ -317,7 +323,7 @@ export async function GET(request: Request) {
       return Math.min(current, entry.endMs)
     }, null)
 
-    return NextResponse.json({
+    return withCacheHeaders(NextResponse.json({
       data: {
         totalCount,
         handles: selectedTrackings.map(entry => entry.handle),
@@ -329,7 +335,7 @@ export async function GET(request: Request) {
           return Math.min(current, entry.startMs)
         }, null),
       },
-    })
+    }), 'medium')
   }
   catch (error) {
     console.error('Failed to fetch XTracker tweet count.', error)

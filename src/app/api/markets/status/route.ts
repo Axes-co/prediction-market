@@ -1,5 +1,6 @@
 import { inArray } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
+import { checkRateLimit } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { markets } from '@/lib/db/schema/events/tables'
 import { db } from '@/lib/drizzle'
@@ -35,6 +36,11 @@ function resolveConditionIds(input: unknown) {
 }
 
 export async function POST(request: Request) {
+  const rateLimited = await checkRateLimit(request)
+  if (rateLimited) {
+    return rateLimited
+  }
+
   try {
     const body = await request.json().catch(() => null)
     const conditionIds = resolveConditionIds(body?.conditionIds)

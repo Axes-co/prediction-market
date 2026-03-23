@@ -5,37 +5,49 @@ import { cacheTags } from '@/lib/cache-tags'
 import { settings } from '@/lib/db/schema/settings/tables'
 import { runQuery } from '@/lib/db/utils/run-query'
 import { db } from '@/lib/drizzle'
+import { cacheKeys, cacheTTL, invalidateCache, withCache } from '@/lib/redis'
+
+type SettingsByGroup = Record<string, Record<string, { value: string, updated_at: string }>>
+
+async function fetchSettingsFromDb(): Promise<QueryResult<SettingsByGroup>> {
+  try {
+    const data = await db.select({
+      group: settings.group,
+      key: settings.key,
+      value: settings.value,
+      updated_at: settings.updated_at,
+    }).from(settings)
+
+    const settingsByGroup: SettingsByGroup = {}
+
+    for (const setting of data) {
+      settingsByGroup[setting.group] ??= {}
+      settingsByGroup[setting.group][setting.key] = {
+        value: setting.value,
+        updated_at: setting.updated_at.toISOString(),
+      }
+    }
+
+    return { data: settingsByGroup, error: null }
+  }
+  catch (error) {
+    console.error('Failed to fetch settings:', error)
+    return { data: null, error: 'Failed to fetch settings.' }
+  }
+}
 
 export const SettingsRepository = {
-  async getSettings(): Promise<QueryResult<Record<string, Record<string, { value: string, updated_at: string }>>>> {
+  async getSettings(): Promise<QueryResult<SettingsByGroup>> {
     'use cache'
     cacheTag(cacheTags.settings)
 
     return runQuery(async () => {
-      try {
-        const data = await db.select({
-          group: settings.group,
-          key: settings.key,
-          value: settings.value,
-          updated_at: settings.updated_at,
-        }).from(settings)
-
-        const settingsByGroup: Record<string, Record<string, { value: string, updated_at: string }>> = {}
-
-        for (const setting of data) {
-          settingsByGroup[setting.group] ??= {}
-          settingsByGroup[setting.group][setting.key] = {
-            value: setting.value,
-            updated_at: setting.updated_at.toISOString(),
-          }
-        }
-
-        return { data: settingsByGroup, error: null }
-      }
-      catch (error) {
-        console.error('Failed to fetch settings:', error)
-        return { data: null, error: 'Failed to fetch settings.' }
-      }
+      return withCache(
+        cacheKeys.settings,
+        fetchSettingsFromDb,
+        cacheTTL.settings,
+        result => result.data !== null,
+      )
     })
   },
 
@@ -59,7 +71,9 @@ export const SettingsRepository = {
           updated_at: settings.updated_at,
         })
 
+      // Invalidate both Next.js cache and Redis cache
       updateTag(cacheTags.settings)
+      await invalidateCache(cacheKeys.settings)
 
       return { data, error: null }
     })

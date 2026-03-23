@@ -1,3 +1,4 @@
+import { cacheKeys, cacheTTL, withCache } from '@/lib/redis'
 import { normalizeAddress } from '@/lib/wallet'
 
 export interface ProfileLinkStats {
@@ -8,33 +9,6 @@ export interface ProfileLinkStats {
 
 const DATA_API_URL = process.env.DATA_URL!
 const LEADERBOARD_API_URL = DATA_API_URL.endsWith('/v1') ? DATA_API_URL : `${DATA_API_URL}/v1`
-
-const CACHE_TTL_MS = 5 * 60 * 1000
-const CACHE_MAX_ENTRIES = 200
-
-interface CacheEntry {
-  value?: ProfileLinkStats | null
-  promise?: Promise<ProfileLinkStats | null>
-  expiresAt: number
-}
-
-const statsCache = new Map<string, CacheEntry>()
-
-function pruneCache(now: number) {
-  for (const [key, entry] of statsCache.entries()) {
-    if (entry.expiresAt <= now) {
-      statsCache.delete(key)
-    }
-  }
-
-  while (statsCache.size > CACHE_MAX_ENTRIES) {
-    const oldestKey = statsCache.keys().next().value
-    if (!oldestKey) {
-      break
-    }
-    statsCache.delete(oldestKey)
-  }
-}
 
 function toNumber(value: unknown): number | null {
   if (typeof value === 'number') {
@@ -140,6 +114,57 @@ async function fetchJson(url: string, signal?: AbortSignal) {
   return await response.json()
 }
 
+async function fetchProfileLinkStatsFromApi(
+  address: string,
+  signal?: AbortSignal,
+): Promise<ProfileLinkStats | null> {
+  try {
+    const valueUrl = `${DATA_API_URL}/value?user=${encodeURIComponent(address)}`
+    const volumeUrl = `${DATA_API_URL}/volume?user=${encodeURIComponent(address)}`
+    const leaderboardParams = new URLSearchParams({
+      user: address,
+      timePeriod: 'all',
+      orderBy: 'PNL',
+      category: 'overall',
+      limit: '1',
+      offset: '0',
+    })
+    const leaderboardUrl = `${LEADERBOARD_API_URL}/leaderboard?${leaderboardParams.toString()}`
+
+    const [
+      valueResult,
+      volumeResult,
+      leaderboardResult,
+    ] = await Promise.allSettled([
+      fetchJson(valueUrl, signal),
+      fetchJson(volumeUrl, signal),
+      fetchJson(leaderboardUrl, signal),
+    ])
+
+    const volume = volumeResult.status === 'fulfilled'
+      ? parseVolume(volumeResult.value)
+      : null
+
+    const positionsValue = valueResult.status === 'fulfilled'
+      ? parsePortfolioValue(valueResult.value)
+      : 0
+
+    const leaderboardPnl = leaderboardResult.status === 'fulfilled'
+      ? parseLeaderboardPnl(leaderboardResult.value)
+      : null
+
+    return {
+      profitLoss: leaderboardPnl ?? 0,
+      volume,
+      positionsValue,
+    }
+  }
+  catch (error) {
+    console.error('Failed to fetch profile link stats', error)
+    return null
+  }
+}
+
 export async function fetchProfileLinkStats(
   userAddress?: string | null,
   signal?: AbortSignal,
@@ -153,76 +178,9 @@ export async function fetchProfileLinkStats(
     return null
   }
 
-  const cacheKey = address.toLowerCase()
-  const now = Date.now()
-  pruneCache(now)
-  const cached = statsCache.get(cacheKey)
-  if (cached) {
-    if (cached.expiresAt <= now) {
-      statsCache.delete(cacheKey)
-    }
-    else if (cached.promise) {
-      return await cached.promise
-    }
-    else if ('value' in cached) {
-      return cached.value ?? null
-    }
-  }
-
-  const request = (async () => {
-    try {
-      const valueUrl = `${DATA_API_URL}/value?user=${encodeURIComponent(address)}`
-      const volumeUrl = `${DATA_API_URL}/volume?user=${encodeURIComponent(address)}`
-      const leaderboardParams = new URLSearchParams({
-        user: address,
-        timePeriod: 'all',
-        orderBy: 'PNL',
-        category: 'overall',
-        limit: '1',
-        offset: '0',
-      })
-      const leaderboardUrl = `${LEADERBOARD_API_URL}/leaderboard?${leaderboardParams.toString()}`
-
-      const [
-        valueResult,
-        volumeResult,
-        leaderboardResult,
-      ] = await Promise.allSettled([
-        fetchJson(valueUrl, signal),
-        fetchJson(volumeUrl, signal),
-        fetchJson(leaderboardUrl, signal),
-      ])
-
-      const volume = volumeResult.status === 'fulfilled'
-        ? parseVolume(volumeResult.value)
-        : null
-
-      const positionsValue = valueResult.status === 'fulfilled'
-        ? parsePortfolioValue(valueResult.value)
-        : 0
-
-      const leaderboardPnl = leaderboardResult.status === 'fulfilled'
-        ? parseLeaderboardPnl(leaderboardResult.value)
-        : null
-
-      return {
-        profitLoss: leaderboardPnl ?? 0,
-        volume,
-        positionsValue,
-      }
-    }
-    catch (error) {
-      console.error('Failed to fetch profile link stats', error)
-      return null
-    }
-  })()
-
-  statsCache.set(cacheKey, { promise: request, expiresAt: now + CACHE_TTL_MS })
-  const result = await request
-  if (signal?.aborted) {
-    statsCache.delete(cacheKey)
-    return null
-  }
-  statsCache.set(cacheKey, { value: result, expiresAt: Date.now() + CACHE_TTL_MS })
-  return result
+  return withCache(
+    cacheKeys.profileStats(address.toLowerCase()),
+    () => fetchProfileLinkStatsFromApi(address, signal),
+    cacheTTL.profileStats,
+  )
 }

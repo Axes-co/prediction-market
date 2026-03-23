@@ -16,10 +16,12 @@ function createDb(): DrizzleDb {
     throw new Error('POSTGRES_URL is not set. Configure the database env vars to enable DB features.')
   }
 
+  const requiresSsl = url.includes('sslmode=require') || url.includes('neon.tech')
   const client = globalForDb.client ?? postgres(url, {
     prepare: false,
     connect_timeout: 10,
     idle_timeout: 20,
+    ...(requiresSsl ? { ssl: 'require' } : {}),
   })
   globalForDb.client = client
 

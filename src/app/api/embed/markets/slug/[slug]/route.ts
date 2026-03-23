@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
 import { buildEmbedMarket, withEmbedCors } from '@/app/api/embed/_utils'
+import { cacheControl, checkRateLimit } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { EventRepository } from '@/lib/db/queries/event'
 import { markets } from '@/lib/db/schema/events/tables'
@@ -10,7 +11,12 @@ export async function OPTIONS() {
   return withEmbedCors(new NextResponse(null, { status: 204 }))
 }
 
-export async function GET(_: Request, { params }: { params: Promise<{ slug: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ slug: string }> }) {
+  const rateLimited = await checkRateLimit(request)
+  if (rateLimited) {
+    return rateLimited
+  }
+
   try {
     const { slug } = await params
     const marketRecord = await db.query.markets.findFirst({
@@ -38,7 +44,9 @@ export async function GET(_: Request, { params }: { params: Promise<{ slug: stri
       return withEmbedCors(NextResponse.json({ error: 'Market not found' }, { status: 404 }))
     }
 
-    return withEmbedCors(NextResponse.json(buildEmbedMarket(market, event)))
+    const response = withEmbedCors(NextResponse.json(buildEmbedMarket(market, event)))
+    response.headers.set('Cache-Control', cacheControl.long)
+    return response
   }
   catch (error) {
     console.error('Embed market API error:', error)

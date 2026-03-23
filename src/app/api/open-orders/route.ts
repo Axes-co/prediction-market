@@ -1,6 +1,7 @@
 import type { ClobOrderType, UserOpenOrder } from '@/types'
 import { inArray } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
+import { checkRateLimit } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE, MICRO_UNIT } from '@/lib/constants'
 import { UserRepository } from '@/lib/db/queries/user'
 import { markets } from '@/lib/db/schema/events/tables'
@@ -31,6 +32,11 @@ interface ClobOpenOrder {
 }
 
 export async function GET(request: Request) {
+  const rateLimited = await checkRateLimit(request)
+  if (rateLimited) {
+    return rateLimited
+  }
+
   try {
     const user = await UserRepository.getCurrentUser()
     if (!user) {

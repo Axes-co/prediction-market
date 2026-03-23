@@ -1,6 +1,7 @@
 import type { ActivityOrder } from '@/types'
 import { NextResponse } from 'next/server'
 import { filterActivitiesByMinAmount } from '@/lib/activity/filter'
+import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE, MICRO_UNIT } from '@/lib/constants'
 import { EVENT_ACTIVITY_PAGE_SIZE } from '@/lib/data-api/trades'
 import { mapDataApiActivityToActivityOrder } from '@/lib/data-api/user'
@@ -46,6 +47,11 @@ function normalizeAvatarUrl(image: string | null | undefined) {
 }
 
 export async function GET(request: Request) {
+  const rateLimited = await checkRateLimit(request)
+  if (rateLimited) {
+    return rateLimited
+  }
+
   const { searchParams } = new URL(request.url)
   const market = searchParams.get('market')
   const parsedLimit = Number.parseInt(searchParams.get('limit') || `${EVENT_ACTIVITY_PAGE_SIZE}`, 10)
@@ -150,7 +156,7 @@ export async function GET(request: Request) {
       }
     })
 
-    return NextResponse.json(hydrated)
+    return withCacheHeaders(NextResponse.json(hydrated), 'realtime')
   }
   catch (error) {
     console.error('Failed to load event activity', error)
