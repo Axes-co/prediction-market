@@ -8,6 +8,7 @@ import { generateMarketContext } from '@/lib/ai/market-context'
 import { loadMarketContextSettings } from '@/lib/ai/market-context-config'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { EventRepository } from '@/lib/db/queries/event'
+import { withCache } from '@/lib/redis'
 
 const GenerateMarketContextSchema = z.object({
   slug: z.string(),
@@ -15,6 +16,12 @@ const GenerateMarketContextSchema = z.object({
 })
 
 type GenerateMarketContextInput = z.infer<typeof GenerateMarketContextSchema>
+
+const MARKET_CONTEXT_CACHE_TTL = 3600 // 1 hour
+
+function buildMarketContextCacheKey(slug: string, conditionId: string, locale: string): string {
+  return `ai:market-context:${slug}:${conditionId}:${locale}`
+}
 
 export async function generateMarketContextAction(input: GenerateMarketContextInput) {
   const settings = await loadMarketContextSettings()
@@ -47,7 +54,13 @@ export async function generateMarketContextAction(input: GenerateMarketContextIn
       return { error: 'No markets available for this event.' }
     }
 
-    const context = await generateMarketContext(event, market, settings, locale)
+    const cacheKey = buildMarketContextCacheKey(slug, market.condition_id, resolvedLocale)
+    const context = await withCache(
+      cacheKey,
+      () => generateMarketContext(event, market, settings, locale),
+      MARKET_CONTEXT_CACHE_TTL,
+    )
+
     return { context }
   }
   catch (error) {
