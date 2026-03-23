@@ -45,6 +45,7 @@ interface PageMetadataOptions {
   description: string
   path: string
   locale: SupportedLocale
+  siteName?: string
   noindex?: boolean
   ogImageUrl?: string
 }
@@ -52,12 +53,16 @@ interface PageMetadataOptions {
 /**
  * Build complete page metadata with hreflang, canonical, OG tags, and Twitter cards.
  * Use this for all public-facing pages that need full SEO.
+ *
+ * The `siteName` parameter is optional — when omitted, the OG siteName is
+ * inherited from the root layout's openGraph.siteName (set from admin settings).
  */
 export function buildPageMetadata({
   title,
   description,
   path,
   locale,
+  siteName,
   noindex = false,
   ogImageUrl,
 }: PageMetadataOptions): Metadata {
@@ -73,7 +78,7 @@ export function buildPageMetadata({
       title,
       description,
       url: canonicalUrl,
-      siteName: 'Axes',
+      ...(siteName ? { siteName } : {}),
       ...(ogImageUrl
         ? {
             images: [{

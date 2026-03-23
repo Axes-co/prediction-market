@@ -2,7 +2,7 @@
 
 import type { Metadata } from 'next'
 import type { SupportedLocale } from '@/i18n/locales'
-import { setRequestLocale } from 'next-intl/server'
+import { getExtracted, setRequestLocale } from 'next-intl/server'
 import { notFound } from 'next/navigation'
 import SportsGamesCenter from '@/app/[locale]/(platform)/sports/_components/SportsGamesCenter'
 import { buildSportsGamesCards } from '@/app/[locale]/(platform)/sports/_utils/sports-games-data'
@@ -18,9 +18,12 @@ export async function generateMetadata({
   params: Promise<{ locale: string, sport: string }>
 }): Promise<Metadata> {
   const { locale, sport } = await params
+  setRequestLocale(locale)
+  const t = await getExtracted()
+
   return buildPageMetadata({
-    title: 'Sports Games',
-    description: 'Browse upcoming and live sports games. Trade on match outcomes and game results.',
+    title: t('Sports Games'),
+    description: t('Browse upcoming and live sports games. Trade on match outcomes and game results.'),
     path: `/sports/${sport}/games`,
     locale: locale as SupportedLocale,
   })

@@ -2,16 +2,19 @@
 
 import type { Metadata } from 'next'
 import type { SupportedLocale } from '@/i18n/locales'
-import { setRequestLocale } from 'next-intl/server'
+import { getExtracted, setRequestLocale } from 'next-intl/server'
 import LeaderboardClient from '@/app/[locale]/(platform)/leaderboard/_components/LeaderboardClient'
 import { CATEGORY_OPTIONS, ORDER_OPTIONS, parseLeaderboardFilters, PERIOD_OPTIONS } from '@/app/[locale]/(platform)/leaderboard/_utils/leaderboardFilters'
 import { buildPageMetadata } from '@/lib/seo'
 
 export async function generateMetadata({ params }: PageProps<'/[locale]/leaderboard/[[...filters]]'>): Promise<Metadata> {
   const { locale } = await params
+  setRequestLocale(locale)
+  const t = await getExtracted()
+
   return buildPageMetadata({
-    title: 'Leaderboard',
-    description: 'See the top traders on Axes. Track profit and loss rankings across all prediction markets.',
+    title: t('Leaderboard'),
+    description: t('See the top traders on Axes. Track profit and loss rankings across all prediction markets.'),
     path: '/leaderboard',
     locale: locale as SupportedLocale,
   })

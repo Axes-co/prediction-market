@@ -2,7 +2,7 @@
 
 import type { Metadata } from 'next'
 import type { SupportedLocale } from '@/i18n/locales'
-import { setRequestLocale } from 'next-intl/server'
+import { getExtracted, setRequestLocale } from 'next-intl/server'
 import { cacheTag } from 'next/cache'
 import MentionsList from '@/app/[locale]/(platform)/mentions/_components/MentionsList'
 import { cacheTags } from '@/lib/cache-tags'
@@ -11,9 +11,12 @@ import { buildPageMetadata } from '@/lib/seo'
 
 export async function generateMetadata({ params }: PageProps<'/[locale]/mentions'>): Promise<Metadata> {
   const { locale } = await params
+  setRequestLocale(locale)
+  const t = await getExtracted()
+
   return buildPageMetadata({
-    title: 'Mentions',
-    description: 'Explore trending prediction markets and events being discussed right now.',
+    title: t('Mentions'),
+    description: t('Explore trending prediction markets and events being discussed right now.'),
     path: '/mentions',
     locale: locale as SupportedLocale,
   })

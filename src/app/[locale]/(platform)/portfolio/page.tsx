@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import type { SupportedLocale } from '@/i18n/locales'
-import { setRequestLocale } from 'next-intl/server'
+import { getExtracted, setRequestLocale } from 'next-intl/server'
 import { connection } from 'next/server'
 import PendingDepositBanner from '@/app/[locale]/(platform)/portfolio/_components/PendingDepositBanner'
 import PortfolioMarketsWonCard from '@/app/[locale]/(platform)/portfolio/_components/PortfolioMarketsWonCard'
@@ -13,9 +13,12 @@ import { buildPageMetadata } from '@/lib/seo'
 
 export async function generateMetadata({ params }: PageProps<'/[locale]/portfolio'>): Promise<Metadata> {
   const { locale } = await params
+  setRequestLocale(locale)
+  const t = await getExtracted()
+
   return buildPageMetadata({
-    title: 'Portfolio',
-    description: 'View your open positions, trading history, and portfolio performance.',
+    title: t('Portfolio'),
+    description: t('View your open positions, trading history, and portfolio performance.'),
     path: '/portfolio',
     locale: locale as SupportedLocale,
     noindex: true,
