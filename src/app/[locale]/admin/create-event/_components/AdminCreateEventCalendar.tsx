@@ -159,7 +159,9 @@ export default function AdminCreateEventCalendar() {
   const [isSearchingCopy, setIsSearchingCopy] = useState(false)
   const latestCopySearchRequestIdRef = useRef(0)
   const [newEventDialogOpen, setNewEventDialogOpen] = useState(false)
+  const [recurringWalletSetupDialogOpen, setRecurringWalletSetupDialogOpen] = useState(false)
   const [selectedStartAt, setSelectedStartAt] = useState('')
+  const [serverSignerAvailability, setServerSignerAvailability] = useState<'loading' | 'available' | 'missing' | 'error'>('loading')
 
   useEffect(() => {
     setSelectedStartAt(buildDefaultStartAt(readCurrentTimeMs()))
@@ -206,6 +208,44 @@ export default function AdminCreateEventCalendar() {
     }
 
     void loadDrafts()
+  }, [])
+
+  useEffect(() => {
+    let isActive = true
+
+    void (async () => {
+      try {
+        setServerSignerAvailability('loading')
+        const response = await fetch('/admin/api/event-creations/signers', {
+          method: 'GET',
+          cache: 'no-store',
+        })
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}))
+          throw new Error(typeof payload?.error === 'string' ? payload.error : 'Could not load server wallets.')
+        }
+
+        const payload = await response.json().catch(() => null) as { data?: Array<{ address: string }> } | null
+        if (!isActive) {
+          return
+        }
+
+        setServerSignerAvailability(Array.isArray(payload?.data) && payload.data.length > 0 ? 'available' : 'missing')
+      }
+      catch (error) {
+        if (!isActive) {
+          return
+        }
+
+        console.error('Failed to load event creation signers', error)
+        setServerSignerAvailability('error')
+        toast.error(error instanceof Error ? error.message : 'Could not load server wallets.')
+      }
+    })()
+
+    return () => {
+      isActive = false
+    }
   }, [])
 
   useEffect(() => {
@@ -345,7 +385,26 @@ export default function AdminCreateEventCalendar() {
     setNewEventDialogOpen(true)
   }
 
+  function handleBlockedRecurringAccess() {
+    if (serverSignerAvailability === 'loading') {
+      toast.message('Checking server wallets...')
+      return
+    }
+
+    if (serverSignerAvailability === 'error') {
+      toast.error('Could not verify EVENT_CREATION_SIGNER_PRIVATE_KEYS right now.')
+      return
+    }
+
+    setRecurringWalletSetupDialogOpen(true)
+  }
+
   function openServerDraft(draftId: string, mode: CreationMode, startAt?: string | null) {
+    if (mode === 'recurring' && serverSignerAvailability !== 'available') {
+      handleBlockedRecurringAccess()
+      return
+    }
+
     const params = new URLSearchParams({
       draftId,
       mode,
@@ -357,6 +416,11 @@ export default function AdminCreateEventCalendar() {
   }
 
   async function createDraftAndOpen(mode: CreationMode, startAt?: string, sourceEventId?: string) {
+    if (mode === 'recurring' && serverSignerAvailability !== 'available') {
+      handleBlockedRecurringAccess()
+      return
+    }
+
     try {
       setIsCreatingDraft(true)
       const normalizedStartAt = normalizeDateTimeLocalValue(startAt || selectedStartAt)
@@ -552,8 +616,15 @@ export default function AdminCreateEventCalendar() {
               type="button"
               variant="outline"
               className="h-auto justify-start py-3"
-              disabled={isCreatingDraft}
-              onClick={() => void createDraftAndOpen('recurring')}
+              disabled={isCreatingDraft || serverSignerAvailability === 'loading'}
+              onClick={() => {
+                if (serverSignerAvailability === 'missing') {
+                  handleBlockedRecurringAccess()
+                  return
+                }
+
+                void createDraftAndOpen('recurring')
+              }}
             >
               <span className="text-left">
                 <span className="block font-medium">Recurring event</span>
@@ -566,6 +637,30 @@ export default function AdminCreateEventCalendar() {
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setNewEventDialogOpen(false)}>
               Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={recurringWalletSetupDialogOpen} onOpenChange={setRecurringWalletSetupDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Server Wallet Required</DialogTitle>
+            <DialogDescription>
+              Recurring events require adding the creator wallet private key to
+              {' '}
+              <code>EVENT_CREATION_SIGNER_PRIVATE_KEYS</code>
+              {' '}
+              in Vercel Environment Variables or your project&apos;s
+              {' '}
+              <code>.env</code>
+              {' '}
+              before you can create or edit recurring drafts.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setRecurringWalletSetupDialogOpen(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -675,7 +770,10 @@ export default function AdminCreateEventCalendar() {
                                 />
                               )
                             : (
-                                <div className="flex size-14 items-center justify-center rounded-lg border text-muted-foreground">
+                                <div className="
+                                  flex size-14 items-center justify-center rounded-lg border text-muted-foreground
+                                "
+                                >
                                   <ImageIcon className="size-5" />
                                 </div>
                               )}

@@ -61,6 +61,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
+import { Link } from '@/i18n/navigation'
 import {
   buildAdminSportsDerivedContent,
   buildAdminSportsStepErrors,
@@ -272,6 +273,7 @@ interface AdminCreateEventFormProps {
   initialSlug?: string
   initialEndDateIso?: string
   shouldLoadSavedDraft?: boolean
+  hasConfiguredServerSigners?: boolean
   serverDraftPayload?: Record<string, unknown> | null
   serverAssetPayload?: EventCreationAssetPayload | null
 }
@@ -1118,6 +1120,7 @@ export default function AdminCreateEventForm({
   initialSlug = '',
   initialEndDateIso = '',
   shouldLoadSavedDraft = true,
+  hasConfiguredServerSigners = true,
   serverDraftPayload = null,
   serverAssetPayload = null,
 }: AdminCreateEventFormProps) {
@@ -1543,6 +1546,7 @@ export default function AdminCreateEventForm({
 
     return slugify(rawSlug || baseTemplate)
   }, [creationMode, recurringResolvedTitle, scheduleOccurrenceDate, slugTemplate, titleTemplate])
+  const recurringRequiresServerWalletSetup = creationMode === 'recurring' && !hasConfiguredServerSigners
 
   const stepLabels = useMemo(
     () => ['Event', 'Market Structure', 'Resolution', 'Pre-sign', 'Sign & Create'],
@@ -5082,6 +5086,13 @@ export default function AdminCreateEventForm({
                         ? 'Example: BTC above $120k on {{date}}?'
                         : 'Example: Will the U.S. Senate pass the budget by March 31, 2026?'}
                     />
+                    {creationMode === 'recurring' && recurringResolvedTitle && (
+                      <p className="text-xs text-muted-foreground">
+                        Preview:
+                        {' '}
+                        {recurringResolvedTitle}
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -6281,6 +6292,37 @@ export default function AdminCreateEventForm({
             >
               {isAddingCreatorWallet && <Loader2Icon className="mr-2 size-4 animate-spin" />}
               Add wallet
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={recurringRequiresServerWalletSetup} onOpenChange={() => {}}>
+        <DialogContent
+          showCloseButton={false}
+          onEscapeKeyDown={event => event.preventDefault()}
+          onInteractOutside={event => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Server Wallet Required</DialogTitle>
+            <DialogDescription>
+              Recurring events require adding the creator wallet private key to
+              {' '}
+              <code>EVENT_CREATION_SIGNER_PRIVATE_KEYS</code>
+              {' '}
+              in Vercel Environment Variables or your project&apos;s
+              {' '}
+              <code>.env</code>
+              {' '}
+              before you can create or edit recurring drafts.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" asChild>
+              <Link href="/admin/create-event">
+                <ArrowLeftIcon className="size-4" />
+                Back to calendar
+              </Link>
             </Button>
           </DialogFooter>
         </DialogContent>

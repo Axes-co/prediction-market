@@ -10,6 +10,7 @@ import { normalizeDateTimeLocalValue } from '@/lib/datetime-local'
 import { EventCreationRepository } from '@/lib/db/queries/event-creations'
 import { SportsMenuRepository } from '@/lib/db/queries/sports-menu'
 import { UserRepository } from '@/lib/db/queries/user'
+import { loadEventCreationSignersFromEnv } from '@/lib/event-creation-signers'
 
 type CreationMode = 'single' | 'recurring'
 
@@ -52,16 +53,18 @@ async function AdminCreateEventNewContent({
         userId: currentUser.id,
       })
     : { data: null, error: null }
+  const hasConfiguredServerSigners = loadEventCreationSignersFromEnv().length > 0
+  const effectiveMode = draftResult.data?.creationMode ?? mode
   const initialTitle = draftResult.data?.title ?? ''
   const initialSlug = draftResult.data?.slug ?? ''
   const initialEndDateIso = normalizeDateTimeLocalValue(
     draftResult.data?.endDate ?? startAtValue,
   )
 
-  const title = mode === 'recurring' ? 'Create Recurring Event' : 'Create Event'
+  const title = effectiveMode === 'recurring' ? 'Create Recurring Event' : 'Create Event'
   const description = shouldLoadSavedDraft
     ? 'Resuming the current browser draft.'
-    : mode === 'recurring'
+    : effectiveMode === 'recurring'
       ? 'Build the base market draft that will power a recurring schedule.'
       : 'Create a one-off event with the existing guided form.'
 
@@ -83,7 +86,8 @@ async function AdminCreateEventNewContent({
       <div className="min-w-0">
         <AdminCreateEventForm
           sportsSlugCatalog={sportsSlugCatalog}
-          creationMode={mode}
+          creationMode={effectiveMode}
+          hasConfiguredServerSigners={hasConfiguredServerSigners}
           initialDraftRecord={draftResult.data ?? null}
           draftId={draftId || null}
           initialTitle={initialTitle}
