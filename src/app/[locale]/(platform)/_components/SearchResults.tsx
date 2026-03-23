@@ -7,6 +7,8 @@ import ProfileLink from '@/components/ProfileLink'
 import { resolveEventPagePath } from '@/lib/events-routing'
 import { SearchTabs } from './SearchTabs'
 
+type SearchResultsVariant = 'dropdown' | 'fullscreen'
+
 interface SearchResultsProps {
   results: SearchResultItems
   isLoading: SearchLoadingStates
@@ -14,6 +16,12 @@ interface SearchResultsProps {
   query: string
   onResultClick: () => void
   onTabChange: (tab: 'events' | 'profiles') => void
+  variant?: SearchResultsVariant
+}
+
+const variantStyles: Record<SearchResultsVariant, string> = {
+  dropdown: 'absolute inset-x-0 top-full z-50 mt-0 w-full rounded-lg rounded-t-none border border-t-0 bg-background shadow-lg',
+  fullscreen: 'w-full bg-background',
 }
 
 export function SearchResults({
@@ -23,18 +31,17 @@ export function SearchResults({
   query,
   onResultClick,
   onTabChange,
+  variant = 'dropdown',
 }: SearchResultsProps) {
   const t = useExtracted()
   const { events, profiles } = results
+  const containerClass = variantStyles[variant]
 
   const showTabs = query.length >= 2
 
   if ((isLoading.events && isLoading.profiles) && events.length === 0 && profiles.length === 0) {
     return (
-      <div className={`
-        absolute inset-x-0 top-full z-50 mt-0 w-full rounded-lg rounded-t-none border border-t-0 bg-background shadow-lg
-      `}
-      >
+      <div className={containerClass}>
         {showTabs && (
           <SearchTabs
             activeTab={activeTab}
@@ -59,9 +66,7 @@ export function SearchResults({
   return (
     <div
       data-testid="search-results"
-      className={`
-        absolute inset-x-0 top-full z-50 mt-0 rounded-lg rounded-t-none border border-t-0 bg-background shadow-lg
-      `}
+      className={containerClass}
     >
       {showTabs && (
         <SearchTabs
