@@ -19,7 +19,7 @@ function buildSyncCronSql({
   siteUrl,
   cronSecret,
 }) {
-  const endpointUrl = `${siteUrl}/${endpointPath}`
+  const endpointUrl = new URL(endpointPath, `${siteUrl}/`).toString()
   const escapedJobName = escapeSqlLiteral(jobName)
   const escapedSchedule = escapeSqlLiteral(schedule)
   const escapedEndpointUrl = escapeSqlLiteral(endpointUrl)
