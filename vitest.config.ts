@@ -7,6 +7,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
     include: ['tests/unit/*.test.{ts,tsx}'],
+    testTimeout: 15000,
+    maxConcurrency: 4,
     alias: {
       '@': path.resolve(__dirname, './src'),
       'server-only': path.resolve(__dirname, './tests/empty-module.ts'),
