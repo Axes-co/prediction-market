@@ -7,9 +7,16 @@ import SportsGamesCenter from '@/app/[locale]/(platform)/sports/_components/Spor
 import { buildSportsGamesCards } from '@/app/[locale]/(platform)/sports/_utils/sports-games-data'
 import { EventRepository } from '@/lib/db/queries/event'
 import { SportsMenuRepository } from '@/lib/db/queries/sports-menu'
+import { buildPageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
-  title: 'Sports Live',
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
+  const { locale } = await params
+  return buildPageMetadata({
+    title: 'Sports Live',
+    description: 'Watch and trade on live sports events in real-time.',
+    path: '/sports/live',
+    locale: locale as SupportedLocale,
+  })
 }
 
 export default async function SportsLivePage({ params }: { params: Promise<{ locale: string }> }) {

@@ -16,8 +16,11 @@ import { cacheTags } from '@/lib/cache-tags'
 import { openSauceOne } from '@/lib/fonts'
 import { IS_TEST_MODE } from '@/lib/network'
 import { resolvePwaThemeColors } from '@/lib/pwa-colors'
+import siteUrlUtils from '@/lib/site-url'
 import { loadRuntimeThemeState } from '@/lib/theme-settings'
 import SiteIdentityProvider from '@/providers/SiteIdentityProvider'
+
+const { resolveSiteUrl } = siteUrlUtils
 
 export async function generateViewport(): Promise<Viewport> {
   const runtimeTheme = await loadRuntimeThemeState()
@@ -34,8 +37,10 @@ export async function generateViewport(): Promise<Viewport> {
 export async function generateMetadata(): Promise<Metadata> {
   const runtimeTheme = await loadRuntimeThemeState()
   const site = runtimeTheme.site
+  const siteUrl = resolveSiteUrl(process.env)
 
   return {
+    metadataBase: new URL(siteUrl),
     title: {
       template: `%s | ${site.name}`,
       default: `${site.name} | ${site.description}`,
@@ -56,6 +61,29 @@ export async function generateMetadata(): Promise<Metadata> {
       ],
       apple: [{ url: site.appleTouchIconUrl, sizes: '180x180', type: 'image/png' }],
       shortcut: [site.pwaIcon192Url],
+    },
+    openGraph: {
+      type: 'website',
+      siteName: site.name,
+      title: `${site.name} | ${site.description}`,
+      description: site.description,
+      url: siteUrl,
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `${site.name} | ${site.description}`,
+      description: site.description,
+    },
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: {
+        'index': true,
+        'follow': true,
+        'max-image-preview': 'large',
+        'max-snippet': -1,
+        'max-video-preview': -1,
+      },
     },
   }
 }

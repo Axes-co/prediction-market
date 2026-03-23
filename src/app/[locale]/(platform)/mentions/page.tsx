@@ -7,9 +7,16 @@ import { cacheTag } from 'next/cache'
 import MentionsList from '@/app/[locale]/(platform)/mentions/_components/MentionsList'
 import { cacheTags } from '@/lib/cache-tags'
 import { EventRepository } from '@/lib/db/queries/event'
+import { buildPageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
-  title: 'Mentions',
+export async function generateMetadata({ params }: PageProps<'/[locale]/mentions'>): Promise<Metadata> {
+  const { locale } = await params
+  return buildPageMetadata({
+    title: 'Mentions',
+    description: 'Explore trending prediction markets and events being discussed right now.',
+    path: '/mentions',
+    locale: locale as SupportedLocale,
+  })
 }
 
 export default async function MentionsPage({ params }: PageProps<'/[locale]/mentions'>) {

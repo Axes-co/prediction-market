@@ -9,10 +9,21 @@ import { buildSportsGamesCards } from '@/app/[locale]/(platform)/sports/_utils/s
 import { mergeUniqueEventsById } from '@/app/[locale]/(platform)/sports/_utils/sports-games-utils'
 import { EventRepository } from '@/lib/db/queries/event'
 import { SportsMenuRepository } from '@/lib/db/queries/sports-menu'
+import { buildPageMetadata } from '@/lib/seo'
 import { STATIC_PARAMS_PLACEHOLDER } from '@/lib/static-params'
 
-export const metadata: Metadata = {
-  title: 'Sports Games',
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string, sport: string, week: string }>
+}): Promise<Metadata> {
+  const { locale, sport, week } = await params
+  return buildPageMetadata({
+    title: 'Sports Games',
+    description: 'Sports games for the week. Trade on upcoming match outcomes.',
+    path: `/sports/${sport}/games/week/${week}`,
+    locale: locale as SupportedLocale,
+  })
 }
 
 export async function generateStaticParams() {

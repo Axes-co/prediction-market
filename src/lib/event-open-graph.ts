@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import type { SupportedLocale } from '@/i18n/locales'
 import { notFound } from 'next/navigation'
 import { loadEventPageShellData } from '@/lib/event-page-data'
+import { buildHreflangAlternates } from '@/lib/seo'
 import siteUrlUtils from '@/lib/site-url'
 import 'server-only'
 
@@ -53,9 +54,14 @@ export async function buildEventPageMetadata({
   const description = buildEventMetaDescription(resolvedTitle, siteName)
   const imageUrl = buildEventOgImageUrl({ eventSlug, locale, marketSlug })
 
+  const eventPath = marketSlug
+    ? `/event/${eventSlug}/${marketSlug}`
+    : `/event/${eventSlug}`
+
   return {
     title: resolvedTitle,
     description,
+    alternates: buildHreflangAlternates(eventPath, locale),
     openGraph: {
       type: 'website',
       title: resolvedTitle,
