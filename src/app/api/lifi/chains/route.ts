@@ -1,14 +1,9 @@
 import { getChains } from '@lifi/sdk'
 import { NextResponse } from 'next/server'
-import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
+import { withCacheHeaders } from '@/lib/api-utils'
 import { ensureLiFiServerConfig } from '@/lib/lifi'
 
-export async function GET(request: Request) {
-  const rateLimited = await checkRateLimit(request)
-  if (rateLimited) {
-    return rateLimited
-  }
-
+export async function GET(_request: Request) {
   await ensureLiFiServerConfig()
 
   try {

@@ -1,13 +1,8 @@
 import { NextResponse } from 'next/server'
 import { loadEnabledLocales } from '@/i18n/locale-settings'
-import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
+import { withCacheHeaders } from '@/lib/api-utils'
 
-export async function GET(request: Request) {
-  const rateLimited = await checkRateLimit(request)
-  if (rateLimited) {
-    return rateLimited
-  }
-
+export async function GET(_request: Request) {
   try {
     const locales = await loadEnabledLocales()
     return withCacheHeaders(NextResponse.json({ locales }), 'medium')

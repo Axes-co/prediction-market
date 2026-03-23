@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
+import { withCacheHeaders } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { EventRepository } from '@/lib/db/queries/event'
 
@@ -11,11 +11,6 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  const rateLimited = await checkRateLimit(request)
-  if (rateLimited) {
-    return rateLimited
-  }
-
   const { slug } = await params
   const { searchParams } = new URL(request.url)
   const conditionId = searchParams.get('conditionId')?.trim()

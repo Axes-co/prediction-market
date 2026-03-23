@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
+import { withCacheHeaders } from '@/lib/api-utils'
 
 const XTRACKER_API_BASE_URL = 'https://xtracker.polymarket.com/api'
 const XTRACKER_PLATFORM = 'X'
@@ -266,11 +266,6 @@ function resolveCountFromStatsUsers(
 }
 
 export async function GET(request: Request) {
-  const rateLimited = await checkRateLimit(request)
-  if (rateLimited) {
-    return rateLimited
-  }
-
   const { searchParams } = new URL(request.url)
   const seriesSlug = searchParams.get('seriesSlug')?.trim() ?? null
   const eventSlug = searchParams.get('eventSlug')?.trim() ?? null

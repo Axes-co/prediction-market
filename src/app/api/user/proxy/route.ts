@@ -1,17 +1,11 @@
 import { eq } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
-import { checkRateLimit } from '@/lib/api-utils'
 import { UserRepository } from '@/lib/db/queries/user'
 import { users } from '@/lib/db/schema/auth/tables'
 import { db } from '@/lib/drizzle'
 import { isProxyWalletDeployed } from '@/lib/safe-proxy'
 
-export async function GET(request: Request) {
-  const rateLimited = await checkRateLimit(request)
-  if (rateLimited) {
-    return rateLimited
-  }
-
+export async function GET(_request: Request) {
   const user = await UserRepository.getCurrentUser({ disableCookieCache: true })
 
   if (!user) {

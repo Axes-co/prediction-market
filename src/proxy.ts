@@ -3,6 +3,7 @@ import { isMarkdownPreferred, rewritePath } from 'fumadocs-core/negotiation'
 import createMiddleware from 'next-intl/middleware'
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
+import { applyRateLimit } from '@/lib/rate-limit'
 import { routing } from './i18n/routing'
 
 const intlMiddleware = createMiddleware(routing)
@@ -55,6 +56,15 @@ function withLocale(pathname: string, locale: Locale | null) {
 
 export default async function proxy(request: NextRequest) {
   const url = new URL(request.url)
+
+  if (url.pathname.startsWith('/api/')) {
+    const rateLimited = await applyRateLimit(request)
+    if (rateLimited) {
+      return rateLimited
+    }
+    return NextResponse.next()
+  }
+
   const markdownPath = rewriteMarkdownExtensionWithLocale(url.pathname) || rewriteMarkdownExtensionDefaultLocale(url.pathname)
 
   if (markdownPath) {
@@ -112,6 +122,7 @@ export default async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
+    '/api/:path*',
     '/((?!api|trpc|_next|_vercel|embed|.*\\..*).*)',
     '/docs.mdx',
     '/docs/:path*.mdx',

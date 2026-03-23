@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { checkRateLimit } from '@/lib/api-utils'
 
 type Interval = '5m' | '15m' | '1h' | '4h' | '1d'
 type Source = 'chainlink' | 'massive'
@@ -160,11 +159,6 @@ async function getSeriesMapBySlug() {
 }
 
 export async function GET(request: Request) {
-  const rateLimited = await checkRateLimit(request)
-  if (rateLimited) {
-    return rateLimited
-  }
-
   const { searchParams } = new URL(request.url)
   const seriesSlugParam = searchParams.get('seriesSlug')?.trim() ?? ''
   const eventStartMsParam = searchParams.get('eventStartMs')?.trim() ?? ''

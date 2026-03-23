@@ -1,5 +1,4 @@
-import { NextResponse } from 'next/server'
-import { getAuthRateLimiter, getPublicRateLimiter, getTradingRateLimiter } from '@/lib/redis'
+import type { NextResponse } from 'next/server'
 
 // ---------------------------------------------------------------------------
 // Cache-Control presets for API routes
@@ -26,64 +25,4 @@ export type CachePreset = keyof typeof cacheControl
 export function withCacheHeaders(response: NextResponse, preset: CachePreset): NextResponse {
   response.headers.set('Cache-Control', cacheControl[preset])
   return response
-}
-
-// ---------------------------------------------------------------------------
-// Rate limiting for API routes
-// ---------------------------------------------------------------------------
-
-type RateLimitTier = 'public' | 'trading' | 'auth'
-
-function getLimiterForTier(tier: RateLimitTier) {
-  switch (tier) {
-    case 'public': return getPublicRateLimiter()
-    case 'trading': return getTradingRateLimiter()
-    case 'auth': return getAuthRateLimiter()
-  }
-}
-
-/**
- * Check rate limit for an API request. Returns a 429 response if the
- * limit is exceeded, or null if the request is allowed.
- *
- * Extracts the client IP from standard headers. Falls back to allowing
- * the request if Redis is unavailable (fail-open).
- */
-export async function checkRateLimit(
-  request: Request,
-  tier: RateLimitTier = 'public',
-): Promise<NextResponse | null> {
-  const limiter = getLimiterForTier(tier)
-  if (!limiter) {
-    return null
-  }
-
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-    ?? request.headers.get('x-real-ip')
-    ?? 'anonymous'
-
-  try {
-    const { success, limit, remaining, reset } = await limiter.limit(ip)
-
-    if (!success) {
-      return new NextResponse(
-        JSON.stringify({ error: 'Too many requests. Please try again later.' }),
-        {
-          status: 429,
-          headers: {
-            'Content-Type': 'application/json',
-            'X-RateLimit-Limit': limit.toString(),
-            'X-RateLimit-Remaining': remaining.toString(),
-            'X-RateLimit-Reset': reset.toString(),
-            'Retry-After': Math.ceil((reset - Date.now()) / 1000).toString(),
-          },
-        },
-      )
-    }
-  }
-  catch {
-    // Redis failure — fail open, allow the request
-  }
-
-  return null
 }

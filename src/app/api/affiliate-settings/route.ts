@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { checkRateLimit } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { SettingsRepository } from '@/lib/db/queries/settings'
 
@@ -10,12 +9,7 @@ interface AffiliateSettingsResponse {
   lastUpdated?: string
 }
 
-export async function GET(request: Request) {
-  const rateLimited = await checkRateLimit(request)
-  if (rateLimited) {
-    return rateLimited
-  }
-
+export async function GET(_request: Request) {
   try {
     const { data: settings, error } = await SettingsRepository.getSettings()
 

@@ -3,7 +3,6 @@ import { getQuote, getTokens } from '@lifi/sdk'
 import { NextResponse } from 'next/server'
 import { parseUnits } from 'viem'
 import { sanitizeNumericInput } from '@/lib/amount-input'
-import { checkRateLimit } from '@/lib/api-utils'
 import { COLLATERAL_TOKEN_ADDRESS } from '@/lib/contracts'
 import { ensureLiFiServerConfig } from '@/lib/lifi'
 
@@ -22,11 +21,6 @@ function findUsdcToken(stepChainTokens: TokenExtended[]) {
 }
 
 export async function POST(request: Request) {
-  const rateLimited = await checkRateLimit(request, 'trading')
-  if (rateLimited) {
-    return rateLimited
-  }
-
   await ensureLiFiServerConfig()
 
   let body: QuoteRequestBody

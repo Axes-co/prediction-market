@@ -1,16 +1,12 @@
 import { NextResponse } from 'next/server'
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from '@/i18n/locales'
-import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
+import { withCacheHeaders } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { EventRepository } from '@/lib/db/queries/event'
 import { UserRepository } from '@/lib/db/queries/user'
 import { listHomeEventsPage } from '@/lib/home-events-page'
 
 export async function GET(request: Request) {
-  const rateLimited = await checkRateLimit(request)
-  if (rateLimited) {
-    return rateLimited
-  }
   const { searchParams } = new URL(request.url)
   const tag = searchParams.get('tag') || 'trending'
   const mainTag = searchParams.get('mainTag') || ''

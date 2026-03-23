@@ -1,14 +1,9 @@
 import { NextResponse } from 'next/server'
 import { loadAllowedMarketCreatorWallets } from '@/lib/allowed-market-creators-server'
-import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
+import { withCacheHeaders } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 
-export async function GET(request: Request) {
-  const rateLimited = await checkRateLimit(request)
-  if (rateLimited) {
-    return rateLimited
-  }
-
+export async function GET(_request: Request) {
   try {
     const { data, error } = await loadAllowedMarketCreatorWallets()
     if (error || !data) {

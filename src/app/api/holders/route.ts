@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { checkRateLimit, withCacheHeaders } from '@/lib/api-utils'
+import { withCacheHeaders } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { fetchTopHoldersFromDataApi } from '@/lib/data-api/holders'
 import { UserRepository } from '@/lib/db/queries/user'
@@ -39,11 +39,6 @@ function normalizeAvatarUrl(image: string | null | undefined) {
 }
 
 export async function GET(request: Request) {
-  const rateLimited = await checkRateLimit(request)
-  if (rateLimited) {
-    return rateLimited
-  }
-
   const { searchParams } = new URL(request.url)
   const conditionId = searchParams.get('conditionId') || searchParams.get('market')
   const yesToken = searchParams.get('yesToken') || undefined
