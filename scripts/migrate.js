@@ -221,7 +221,7 @@ async function createCleanJobsCron(sql) {
       PERFORM cron.unschedule(job_id);
     END IF;
 
-    PERFORM cron.schedule('clean-jobs', '15 * * * *', cmd);
+    PERFORM cron.schedule('clean-jobs', '12 * * * *', cmd);
   END $$;`
 
   await sql.unsafe(sqlQuery, [], { simple: true })
@@ -238,7 +238,7 @@ async function createSyncCron(sql, options) {
 async function createSyncEventsCron(sql, siteUrl, cronSecret) {
   await createSyncCron(sql, {
     jobName: 'sync-events',
-    schedule: '1-59/5 * * * *',
+    schedule: '1-59/3 * * * *',
     endpointPath: '/api/sync/events',
     siteUrl,
     cronSecret,
@@ -248,7 +248,7 @@ async function createSyncEventsCron(sql, siteUrl, cronSecret) {
 async function createSyncVolumeCron(sql, siteUrl, cronSecret) {
   await createSyncCron(sql, {
     jobName: 'sync-volume',
-    schedule: '14,44 * * * *',
+    schedule: '16,46 * * * *',
     endpointPath: '/api/sync/volume',
     siteUrl,
     cronSecret,
@@ -258,7 +258,7 @@ async function createSyncVolumeCron(sql, siteUrl, cronSecret) {
 async function createSyncTranslationsCron(sql, siteUrl, cronSecret) {
   await createSyncCron(sql, {
     jobName: 'sync-translations',
-    schedule: '*/10 * * * *',
+    schedule: '13,37 * * * *',
     endpointPath: '/api/sync/translations',
     siteUrl,
     cronSecret,
@@ -268,7 +268,7 @@ async function createSyncTranslationsCron(sql, siteUrl, cronSecret) {
 async function createSyncResolutionCron(sql, siteUrl, cronSecret) {
   await createSyncCron(sql, {
     jobName: 'sync-resolution',
-    schedule: '3-59/5 * * * *',
+    schedule: '2-56/6 * * * *',
     endpointPath: '/api/sync/resolution',
     siteUrl,
     cronSecret,
@@ -310,9 +310,9 @@ async function configureSupabaseScheduler(sql, siteUrl, cronSecret) {
   }
 
   await createSyncEventsCron(sql, siteUrl, cronSecret)
-  await createSyncTranslationsCron(sql, siteUrl, cronSecret)
   await createSyncResolutionCron(sql, siteUrl, cronSecret)
   await createSyncVolumeCron(sql, siteUrl, cronSecret)
+  await createSyncTranslationsCron(sql, siteUrl, cronSecret)
 }
 
 function resolveMigrationConnectionString() {
