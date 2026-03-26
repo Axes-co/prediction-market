@@ -1598,7 +1598,7 @@ function normalizeAssetReference(value: unknown): string | null {
   }
 
   const parts = withoutQuery.split('/').filter(Boolean)
-  return parts.length > 0 ? parts.at(-1) : withoutQuery
+  return parts.length > 0 ? (parts.at(-1) ?? withoutQuery) : withoutQuery
 }
 
 function buildSportsLogoStoragePath(reference: string): string {
