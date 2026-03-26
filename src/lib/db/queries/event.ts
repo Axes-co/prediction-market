@@ -1,6 +1,7 @@
 import type { SQL } from 'drizzle-orm'
 import type { SupportedLocale } from '@/i18n/locales'
 import type { conditions } from '@/lib/db/schema/events/tables'
+import type { EventListSortBy, EventListStatusFilter } from '@/lib/event-list-filters'
 import type { SportsSlugResolver } from '@/lib/sports-slug-mapping'
 import type { ConditionChangeLogEntry, Event, EventLiveChartConfig, EventSeriesEntry, QueryResult } from '@/types'
 import { and, asc, count, desc, eq, exists, ilike, inArray, or, sql } from 'drizzle-orm'
@@ -363,10 +364,11 @@ interface ListEventsProps {
   tag: string
   mainTag?: string
   search?: string
+  sortBy?: EventListSortBy
   userId?: string | undefined
   bookmarked?: boolean
   frequency?: 'all' | 'daily' | 'weekly' | 'monthly'
-  status?: Event['status']
+  status?: EventListStatusFilter
   offset?: number
   limit?: number
   locale?: SupportedLocale
@@ -374,11 +376,12 @@ interface ListEventsProps {
   sportsSection?: 'games' | 'props' | ''
 }
 
-interface ListHomeFeedEventsProps extends Omit<ListEventsProps, 'limit'> {
+interface ListHomeFeedEventsProps extends Omit<ListEventsProps, 'limit' | 'status'> {
   currentTimestamp?: number | null
   hideCrypto?: boolean
   hideEarnings?: boolean
   hideSports?: boolean
+  status?: 'active' | 'resolved'
 }
 
 interface RelatedEventOptions {
@@ -392,7 +395,7 @@ interface ListEventMarketSlugsProps {
   limit?: number
   sportsSection?: 'games' | 'props' | ''
   sportsSportSlug?: string
-  status?: Event['status']
+  status?: EventListStatusFilter
 }
 
 interface ListAdminEventsParams {
@@ -1025,6 +1028,95 @@ function buildTrendingVolumeOrder() {
   )`
 }
 
+function buildTotalVolumeOrder() {
+  return sql<number>`COALESCE((
+    SELECT SUM(${markets.volume})
+    FROM ${markets}
+    WHERE ${markets.event_id} = ${events.id}
+  ), 0)::double precision`
+}
+
+function buildEndDateNullsLastOrder() {
+  return sql<number>`CASE WHEN ${events.end_date} IS NULL THEN 1 ELSE 0 END`
+}
+
+function buildResolvedLikeCondition(input: {
+  hasAnyMarkets: SQL<unknown>
+  hasUnresolvedMarkets: SQL<unknown>
+}) {
+  return sql<boolean>`${events.status} = 'resolved' OR (${input.hasAnyMarkets} AND NOT ${input.hasUnresolvedMarkets})`
+}
+
+function buildEventStatusFilterCondition(
+  status: EventListStatusFilter,
+  input: {
+    hasAnyMarkets: SQL<unknown>
+    hasUnresolvedMarkets: SQL<unknown>
+  },
+) {
+  const resolvedLike = buildResolvedLikeCondition(input)
+  const resolvedFilterCondition = sql<boolean>`${resolvedLike}`
+
+  if (status === 'resolved') {
+    return resolvedFilterCondition
+  }
+
+  if (status === 'all') {
+    return or(
+      eq(events.status, 'active'),
+      resolvedFilterCondition,
+    )
+  }
+
+  return eq(events.status, status)
+}
+
+function buildSearchEventOrderBy(
+  status: EventListStatusFilter,
+  input: {
+    hasAnyMarkets: SQL<unknown>
+    hasUnresolvedMarkets: SQL<unknown>
+  },
+) {
+  const resolvedLike = buildResolvedLikeCondition(input)
+  const resolvedLikeRank = sql<number>`CASE WHEN ${resolvedLike} THEN 1 ELSE 0 END`
+  const activeResolutionDate = sql<Date | null>`CASE WHEN NOT (${resolvedLike}) THEN ${events.end_date} END`
+  const resolvedResolutionDate = sql<Date | null>`CASE WHEN ${resolvedLike} THEN COALESCE(${events.resolved_at}, ${events.end_date}) END`
+  const activeResolutionNullRank = sql<number>`CASE WHEN ${activeResolutionDate} IS NULL THEN 1 ELSE 0 END`
+  const resolvedResolutionNullRank = sql<number>`CASE WHEN ${resolvedResolutionDate} IS NULL THEN 1 ELSE 0 END`
+
+  if (status === 'resolved') {
+    return [
+      asc(resolvedResolutionNullRank),
+      desc(resolvedResolutionDate),
+      desc(events.created_at),
+      desc(events.updated_at),
+      desc(events.id),
+    ]
+  }
+
+  if (status === 'all') {
+    return [
+      asc(resolvedLikeRank),
+      asc(activeResolutionNullRank),
+      asc(activeResolutionDate),
+      asc(resolvedResolutionNullRank),
+      desc(resolvedResolutionDate),
+      desc(events.created_at),
+      desc(events.updated_at),
+      desc(events.id),
+    ]
+  }
+
+  return [
+    asc(activeResolutionNullRank),
+    asc(activeResolutionDate),
+    desc(events.created_at),
+    desc(events.updated_at),
+    desc(events.id),
+  ]
+}
+
 async function buildEventListQueryContext({
   tag = 'trending',
   mainTag = '',
@@ -1063,16 +1155,10 @@ async function buildEventListQueryContext({
         eq(markets.is_resolved, false),
       )),
   )
-  const statusFilterCondition = status === 'resolved'
-    ? or(
-        eq(events.status, 'resolved'),
-        and(
-          eq(events.status, 'active'),
-          hasAnyMarkets,
-          sql`NOT ${hasUnresolvedMarkets}`,
-        ),
-      )
-    : eq(events.status, status)
+  const statusFilterCondition = buildEventStatusFilterCondition(status, {
+    hasAnyMarkets,
+    hasUnresolvedMarkets,
+  })
 
   if (statusFilterCondition) {
     whereConditions.push(statusFilterCondition)
@@ -1514,6 +1600,7 @@ export const EventRepository = {
     tag = 'trending',
     mainTag = '',
     search = '',
+    sortBy,
     userId = '',
     bookmarked = false,
     frequency = 'all',
@@ -1535,6 +1622,8 @@ export const EventRepository = {
       const normalizedRequestedSportsSportSlug = sportsSportSlug.trim().toLowerCase()
 
       const whereConditions: SQL<unknown>[] = []
+      const normalizedSearch = search.trim().toLowerCase()
+      const isSearchOrderedQuery = normalizedSearch.length > 0 && !sortBy
       const hasAnyMarkets = exists(
         db.select({ condition_id: markets.condition_id })
           .from(markets)
@@ -1548,16 +1637,10 @@ export const EventRepository = {
             eq(markets.is_resolved, false),
           )),
       )
-      const statusFilterCondition = status === 'resolved'
-        ? or(
-            eq(events.status, 'resolved'),
-            and(
-              eq(events.status, 'active'),
-              hasAnyMarkets,
-              sql`NOT ${hasUnresolvedMarkets}`,
-            ),
-          )
-        : eq(events.status, status)
+      const statusFilterCondition = buildEventStatusFilterCondition(status, {
+        hasAnyMarkets,
+        hasUnresolvedMarkets,
+      })
 
       if (statusFilterCondition) {
         whereConditions.push(statusFilterCondition)
@@ -1566,7 +1649,6 @@ export const EventRepository = {
       whereConditions.push(eq(events.is_hidden, false))
 
       if (search) {
-        const normalizedSearch = search.trim().toLowerCase()
         const searchTerms = normalizedSearch.split(/\s+/).filter(Boolean)
 
         if (searchTerms.length > 0) {
@@ -1698,7 +1780,60 @@ export const EventRepository = {
 
       let eventsData: DrizzleEventResult[] = []
 
-      if (tag === 'trending') {
+      if (isSearchOrderedQuery) {
+        const orderedSearchEventIds = await db
+          .select({ id: events.id })
+          .from(events)
+          .where(baseWhere)
+          .orderBy(...buildSearchEventOrderBy(status, {
+            hasAnyMarkets,
+            hasUnresolvedMarkets,
+          }))
+          .limit(safeLimit)
+          .offset(validOffset)
+
+        if (orderedSearchEventIds.length === 0) {
+          return { data: [], error: null }
+        }
+
+        const orderedIds = orderedSearchEventIds.map(event => event.id)
+        const orderIndex = new Map(orderedIds.map((id, index) => [id, index]))
+
+        const orderedSearchData = await db.query.events.findMany({
+          where: and(
+            baseWhere,
+            inArray(events.id, orderedIds),
+          ),
+          with: {
+            markets: {
+              with: {
+                sports: true,
+                condition: {
+                  with: { outcomes: true },
+                },
+              },
+            },
+
+            eventTags: {
+              with: { tag: true },
+            },
+            sports: true,
+
+            ...(userId && {
+              bookmarks: {
+                where: eq(bookmarks.user_id, userId),
+              },
+            }),
+          },
+        }) as DrizzleEventResult[]
+
+        eventsData = orderedSearchData.sort((left, right) => {
+          const leftIndex = orderIndex.get(left.id) ?? Number.MAX_SAFE_INTEGER
+          const rightIndex = orderIndex.get(right.id) ?? Number.MAX_SAFE_INTEGER
+          return leftIndex - rightIndex
+        })
+      }
+      else if ((tag === 'trending' && !sortBy) || sortBy === 'trending') {
         const trendingVolumeOrder = buildTrendingVolumeOrder()
 
         const trendingEventIds = await db
@@ -1751,9 +1886,21 @@ export const EventRepository = {
         })
       }
       else {
-        const orderByClause = tag === 'new'
-          ? [desc(events.created_at)]
-          : [desc(events.id)]
+        const totalVolumeOrder = buildTotalVolumeOrder()
+        const orderByClause = (() => {
+          switch (sortBy) {
+            case 'volume':
+              return [desc(totalVolumeOrder), desc(events.created_at)]
+            case 'created_at':
+              return [desc(events.created_at)]
+            case 'end_date':
+              return [asc(buildEndDateNullsLastOrder()), asc(events.end_date), desc(events.created_at)]
+            default:
+              return tag === 'new'
+                ? [desc(events.created_at)]
+                : [desc(events.id)]
+          }
+        })()
 
         eventsData = await db.query.events.findMany({
           where: baseWhere,

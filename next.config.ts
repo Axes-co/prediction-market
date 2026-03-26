@@ -5,13 +5,12 @@ import createNextIntlPlugin from 'next-intl/plugin'
 import { getOptimizedImageHostPatterns } from '@/lib/image-optimization'
 import siteUrlUtils from './src/lib/site-url'
 
-const { isVercelEnv, resolveSiteUrl } = siteUrlUtils
+const { resolveSiteUrl } = siteUrlUtils
 const siteUrl = resolveSiteUrl(process.env)
-const isVercel = isVercelEnv(process.env)
 const optimizedImageHostPatterns = getOptimizedImageHostPatterns(process.env)
 
 const config: NextConfig = {
-  ...(isVercel ? {} : { output: 'standalone' }),
+  output: process.env.VERCEL_ENV ? undefined : 'standalone',
   cacheComponents: true,
   typedRoutes: true,
   reactStrictMode: false,
@@ -74,7 +73,7 @@ const config: NextConfig = {
     ]
   },
   env: {
-    IS_VERCEL: isVercel ? 'true' : 'false',
+    IS_VERCEL: process.env.VERCEL_ENV ? 'true' : 'false',
     SITE_URL: siteUrl,
     SENTRY_DSN: process.env.SENTRY_DSN,
     REOWN_APPKIT_PROJECT_ID: process.env.REOWN_APPKIT_PROJECT_ID,

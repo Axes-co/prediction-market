@@ -375,14 +375,13 @@ WITH desired(name, slug, display_order) AS (
     ('Crypto', 'crypto', 3),
     ('Finance', 'finance', 4),
     ('Geopolitics', 'geopolitics', 5),
-    ('Earnings', 'earnings', 6),
-    ('Tech', 'tech', 7),
-    ('Culture', 'culture', 8),
-    ('World', 'world', 9),
-    ('Economy', 'economy', 10),
-    ('Climate & Science', 'climate-science', 11),
-    ('Elections', 'elections', 12),
-    ('Mentions', 'mentions', 13)
+    ('Tech', 'tech', 6),
+    ('Culture', 'culture', 7),
+    ('World', 'world', 8),
+    ('Economy', 'economy', 9),
+    ('Weather', 'weather', 10),
+    ('Elections', 'elections', 11),
+    ('Mentions', 'mentions', 12)
 ),
 upserted AS (
   INSERT INTO tags (name, slug, is_main_category, display_order, is_hidden, hide_events)

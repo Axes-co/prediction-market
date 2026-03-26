@@ -1,14 +1,12 @@
 import type { Event, Market, Outcome, SportsTeam } from '@/types'
+import { resolveUniqueBinaryWinningOutcomeIndexFromPayoutNumerators } from '@/lib/binary-outcome-resolution'
+import {
+  doesTextMatchTeam,
+  normalizeComparableText,
+  parseSportsScore,
+} from '@/lib/sports-resolution'
 
-function normalizeText(value: string | null | undefined) {
-  return value
-    ?.normalize('NFKD')
-    .replace(/[\u0300-\u036F]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    ?? ''
-}
+const normalizeText = normalizeComparableText
 
 function normalizeHexColor(value: string | null | undefined) {
   if (!value) {
@@ -75,30 +73,6 @@ function marketDisplayText(market: Market) {
 
 function isDrawMarket(market: Market) {
   return normalizeText(marketDisplayText(market)).includes('draw')
-}
-
-function doesTextMatchTeam(value: string | null | undefined, team: HomeSportsTeam | null) {
-  if (!value || !team) {
-    return false
-  }
-
-  const haystack = normalizeText(value)
-  if (!haystack) {
-    return false
-  }
-
-  const normalizedName = normalizeText(team.name)
-  if (normalizedName && haystack.includes(normalizedName)) {
-    return true
-  }
-
-  const normalizedAbbreviation = normalizeText(team.abbreviation)
-  if (!normalizedAbbreviation) {
-    return false
-  }
-
-  const haystackTokens = new Set(haystack.split(' ').filter(Boolean))
-  return haystackTokens.has(normalizedAbbreviation)
 }
 
 function doesMarketMatchTeam(market: Market, team: HomeSportsTeam | null) {
@@ -266,6 +240,13 @@ export interface HomeSportsMoneylineModel {
   drawButton?: HomeSportsMoneylineButton
 }
 
+export interface ResolvedHomeSportsMoneylineWinner {
+  conditionId: string
+  label: string
+  outcomeIndex: number
+  tone: HomeSportsMoneylineButton['tone']
+}
+
 export function resolveHomeSportsButtonChance(baseChance: number | null | undefined, outcomeIndex: number) {
   const normalizedBaseChance = typeof baseChance === 'number' && Number.isFinite(baseChance)
     ? Math.max(0, Math.min(100, baseChance))
@@ -276,6 +257,87 @@ export function resolveHomeSportsButtonChance(baseChance: number | null | undefi
   }
 
   return normalizedBaseChance
+}
+
+function resolveBinaryWinningOutcomeIndex(market: Pick<Market, 'outcomes' | 'condition'>) {
+  const explicitWinner = market.outcomes.find(outcome => outcome.is_winning_outcome)
+  if (explicitWinner && Number.isFinite(explicitWinner.outcome_index)) {
+    return explicitWinner.outcome_index
+  }
+
+  return resolveUniqueBinaryWinningOutcomeIndexFromPayoutNumerators(market.condition?.payout_numerators)
+}
+
+function resolveResolvedWinnerLabel(
+  model: HomeSportsMoneylineModel,
+  tone: HomeSportsMoneylineButton['tone'],
+) {
+  if (tone === 'team1') {
+    return model.team1.name
+  }
+  if (tone === 'team2') {
+    return model.team2.name
+  }
+  return 'Draw'
+}
+
+export function resolveResolvedHomeSportsMoneylineWinner(
+  event: Pick<Event, 'markets' | 'sports_score'>,
+  model: HomeSportsMoneylineModel,
+): ResolvedHomeSportsMoneylineWinner | null {
+  const buttons = [
+    model.team1Button,
+    model.drawButton,
+    model.team2Button,
+  ].filter((button): button is HomeSportsMoneylineButton => Boolean(button))
+
+  for (const button of buttons) {
+    const market = event.markets.find(candidate => candidate.condition_id === button.conditionId)
+    if (!market) {
+      continue
+    }
+
+    const winnerIndex = resolveBinaryWinningOutcomeIndex(market)
+    if (winnerIndex !== button.outcomeIndex) {
+      continue
+    }
+
+    return {
+      conditionId: button.conditionId,
+      label: resolveResolvedWinnerLabel(model, button.tone),
+      outcomeIndex: button.outcomeIndex,
+      tone: button.tone,
+    }
+  }
+
+  const finalScore = parseSportsScore(event.sports_score)
+  if (!finalScore) {
+    return null
+  }
+
+  if (finalScore.team1 === finalScore.team2) {
+    if (!model.drawButton) {
+      return null
+    }
+
+    return {
+      conditionId: model.drawButton.conditionId,
+      label: resolveResolvedWinnerLabel(model, model.drawButton.tone),
+      outcomeIndex: model.drawButton.outcomeIndex,
+      tone: model.drawButton.tone,
+    }
+  }
+
+  const winningButton = finalScore.team1 > finalScore.team2
+    ? model.team1Button
+    : model.team2Button
+
+  return {
+    conditionId: winningButton.conditionId,
+    label: resolveResolvedWinnerLabel(model, winningButton.tone),
+    outcomeIndex: winningButton.outcomeIndex,
+    tone: winningButton.tone,
+  }
 }
 
 function buildSeparatedMoneylineModel(

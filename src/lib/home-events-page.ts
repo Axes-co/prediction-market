@@ -1,4 +1,5 @@
 import type { SupportedLocale } from '@/i18n/locales'
+import type { EventListSortBy, EventListStatusFilter } from '@/lib/event-list-filters'
 import type { Event } from '@/types'
 import { EventRepository } from '@/lib/db/queries/event'
 import { filterHomeEvents, HOME_EVENTS_PAGE_SIZE } from '@/lib/home-events'
@@ -14,16 +15,17 @@ interface ListHomeEventsPageOptions {
   mainTag: string
   offset?: number
   search?: string
+  sortBy?: EventListSortBy
   sportsSection?: 'games' | 'props' | ''
   sportsSportSlug?: string
-  status?: 'active' | 'resolved'
+  status?: EventListStatusFilter
   tag: string
   userId: string
 }
 
 export async function listHomeEventsPage({
   bookmarked,
-  currentTimestamp = null,
+  currentTimestamp,
   frequency = 'all',
   hideCrypto = false,
   hideEarnings = false,
@@ -32,6 +34,7 @@ export async function listHomeEventsPage({
   mainTag,
   offset = 0,
   search = '',
+  sortBy,
   sportsSection = '',
   sportsSportSlug = '',
   status = 'active',
@@ -40,6 +43,7 @@ export async function listHomeEventsPage({
 }: ListHomeEventsPageOptions) {
   const targetOffset = Math.max(0, offset)
   const targetVisibleCount = targetOffset + HOME_EVENTS_PAGE_SIZE
+  const resolvedCurrentTimestamp = currentTimestamp ?? null
   let rawOffset = 0
   const accumulatedEvents: Event[] = []
   let visibleEvents: Event[] = []
@@ -49,6 +53,7 @@ export async function listHomeEventsPage({
       tag,
       mainTag,
       search,
+      sortBy,
       userId,
       bookmarked,
       frequency,
@@ -60,7 +65,7 @@ export async function listHomeEventsPage({
     })
 
     if (error) {
-      return { data: [], error }
+      return { data: [], error, currentTimestamp: resolvedCurrentTimestamp ?? null }
     }
 
     const batch = rawEvents ?? []
@@ -71,7 +76,7 @@ export async function listHomeEventsPage({
     accumulatedEvents.push(...batch)
 
     visibleEvents = filterHomeEvents(accumulatedEvents, {
-      currentTimestamp,
+      currentTimestamp: resolvedCurrentTimestamp ?? null,
       hideSports,
       hideCrypto,
       hideEarnings,
@@ -92,5 +97,6 @@ export async function listHomeEventsPage({
   return {
     data: visibleEvents.slice(targetOffset, targetOffset + HOME_EVENTS_PAGE_SIZE),
     error: null,
+    currentTimestamp: resolvedCurrentTimestamp ?? null,
   }
 }

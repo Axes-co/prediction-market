@@ -1,7 +1,7 @@
 'use client'
 
 import { useDisconnect } from '@reown/appkit-controllers/react'
-import { BadgePercentIcon, ChevronDownIcon, SettingsIcon, ShieldIcon, TrophyIcon, UnplugIcon } from 'lucide-react'
+import { BadgePercentIcon, ChevronDownIcon, DownloadIcon, SettingsIcon, ShieldIcon, TrophyIcon, UnplugIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import HeaderPortfolio from '@/components/HeaderPortfolio'
 import IntentPrefetchLink from '@/components/IntentPrefetchLink'
 import LocaleSwitcherMenuItem from '@/components/LocaleSwitcherMenuItem'
+import PwaInstallIosInstructions from '@/components/PwaInstallIosInstructions'
 import ThemeSelector from '@/components/ThemeSelector'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,6 +22,7 @@ import {
 import UserInfoSection from '@/components/UserInfoSection'
 import { useAppKit } from '@/hooks/useAppKit'
 import { useIsMobile } from '@/hooks/useIsMobile'
+import { usePwaInstall } from '@/hooks/usePwaInstall'
 import { usePathname } from '@/i18n/navigation'
 import { getAvatarPlaceholderStyle, shouldUseAvatarPlaceholder } from '@/lib/avatar'
 import { signOutAndRedirect } from '@/lib/logout'
@@ -31,6 +33,7 @@ export default function HeaderDropdownUserMenuAuth() {
   const { isReady } = useAppKit()
   const { disconnect } = useDisconnect()
   const user = useUser()
+  const { canShowInstallUi, isIos, isPrompting, requestInstall } = usePwaInstall()
   const pathname = usePathname()
   const isAdmin = pathname.startsWith('/admin')
   const isMobile = useIsMobile()
@@ -94,6 +97,26 @@ export default function HeaderDropdownUserMenuAuth() {
 
   function handleMenuClose() {
     setMenuOpen(false)
+  }
+
+  async function handleInstallAction() {
+    handleMenuClose()
+
+    if (isIos) {
+      toast.info(t('Install app'), {
+        description: (
+          <PwaInstallIosInstructions className="max-w-sm pt-1" />
+        ),
+      })
+      return
+    }
+
+    try {
+      await requestInstall()
+    }
+    catch {
+      toast.error(t('An unexpected error occurred. Please try again.'))
+    }
   }
 
   async function handleLogout() {
@@ -208,6 +231,21 @@ export default function HeaderDropdownUserMenuAuth() {
               {t('Settings')}
             </IntentPrefetchLink>
           </DropdownMenuItem>
+
+          {canShowInstallUi && (
+            <DropdownMenuItem
+              className="py-2 text-sm font-semibold"
+              onSelect={() => {
+                void handleInstallAction()
+              }}
+              disabled={isPrompting}
+            >
+              <div className="flex w-full items-center gap-1.5">
+                <DownloadIcon className="size-4 text-sky-500" />
+                {t('Install app')}
+              </div>
+            </DropdownMenuItem>
+          )}
 
           <DropdownMenuItem asChild className="py-2 text-sm font-semibold">
             <IntentPrefetchLink href="/leaderboard" className="flex w-full items-center gap-1.5">

@@ -1,15 +1,6 @@
 const HAS_PROTOCOL_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//i
 const LOCAL_HOST_PATTERN = /^(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)(?::\d+)?(?:\/|$)/i
 
-function isVercelEnv(env = process.env) {
-  return Boolean(
-    env.VERCEL === '1'
-    || env.VERCEL_ENV
-    || env.VERCEL_URL
-    || env.VERCEL_PROJECT_PRODUCTION_URL,
-  )
-}
-
 function normalizeSiteUrl(value) {
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error('SITE_URL must be a non-empty string')
@@ -56,7 +47,5 @@ function resolveSiteUrl(env = process.env) {
 }
 
 module.exports = {
-  isVercelEnv,
-  normalizeSiteUrl,
   resolveSiteUrl,
 }

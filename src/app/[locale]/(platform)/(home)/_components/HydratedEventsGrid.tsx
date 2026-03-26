@@ -14,7 +14,7 @@ import { useEventMarketQuotes } from '@/app/[locale]/(platform)/event/[slug]/_ho
 import { buildMarketTargets } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useEventPriceHistory'
 import { useColumns } from '@/hooks/useColumns'
 import { useCurrentTimestamp } from '@/hooks/useCurrentTimestamp'
-import { HOME_EVENTS_PAGE_SIZE } from '@/lib/home-events'
+import { HOME_EVENTS_PAGE_SIZE, isHomeEventResolvedLike } from '@/lib/home-events'
 import { resolveDisplayPrice } from '@/lib/market-chance'
 import { buildHomeSportsMoneylineModel } from '@/lib/sports-home-card'
 import { useUser } from '@/stores/useUser'
@@ -22,7 +22,7 @@ import { useUser } from '@/stores/useUser'
 interface HydratedEventsGridProps {
   filters: FilterState
   initialEvents: Event[]
-  initialCurrentTimestamp: number
+  initialCurrentTimestamp: number | null
   maxColumns?: number
   onClearFilters?: () => void
   routeMainTag: string
@@ -38,7 +38,7 @@ const HOME_LIVE_OVERRIDE_SETTLE_DELAY_MS = 2_000
 const HOME_FEED_REFRESH_INTERVAL_MS = 60_000
 
 function resolveCardMarkets(event: Event) {
-  const activeMarkets = event.status === 'resolved'
+  const activeMarkets = isHomeEventResolvedLike(event)
     ? event.markets
     : event.markets.filter(market => !market.is_resolved && !market.condition?.resolved)
 
@@ -104,7 +104,7 @@ async function fetchEvents({
   filters,
   locale,
 }: {
-  currentTimestamp: number
+  currentTimestamp: number | null
   pageParam: number
   filters: FilterState
   locale: string
@@ -119,8 +119,11 @@ async function fetchEvents({
     status: filters.status,
     offset: pageParam.toString(),
     locale,
-    currentTimestamp: currentTimestamp.toString(),
   })
+
+  if (currentTimestamp != null) {
+    params.set('currentTimestamp', currentTimestamp.toString())
+  }
 
   if (filters.hideSports) {
     params.set('hideSports', 'true')
@@ -212,7 +215,7 @@ export default function HydratedEventsGrid({
   ].join(':')
   const queryTimestampRef = useRef<{
     key: string
-    timestamp: number
+    timestamp: number | null
   }>({
     key: queryRunKey,
     timestamp: resolvedCurrentTimestamp,
@@ -292,6 +295,18 @@ export default function HydratedEventsGrid({
 
   useEffect(() => {
     if (!shouldAutoRefreshEvents || status !== 'success') {
+      return
+    }
+
+    if (resolvedCurrentTimestamp == null) {
+      return
+    }
+
+    if (queryTimestampRef.current.timestamp == null) {
+      queryTimestampRef.current = {
+        key: queryRunKey,
+        timestamp: resolvedCurrentTimestamp,
+      }
       return
     }
 

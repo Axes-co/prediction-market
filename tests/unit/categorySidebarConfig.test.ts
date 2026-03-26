@@ -39,16 +39,18 @@ describe('category sidebar config', () => {
     })
   })
 
-  it('leaves non-configured categories untouched', () => {
+  it('builds a default sidebar for non-configured categories with a counted all item', () => {
     const result = resolveCategorySidebarData({
       categorySlug: 'economy',
       categoryCount: 4,
       childs: [{ slug: 'fed-rates', name: 'Fed Rates', count: 4 }],
     })
 
-    expect(result).toEqual({
-      childs: [{ slug: 'fed-rates', name: 'Fed Rates', count: 4 }],
-    })
+    expect(result.childs).toEqual([{ slug: 'fed-rates', name: 'Fed Rates', count: 4 }])
+    expect(result.sidebarItems).toEqual([
+      { type: 'link', slug: 'economy', label: 'All', count: 4, isAll: true },
+      { type: 'link', slug: 'fed-rates', label: 'Fed Rates', count: 4 },
+    ])
   })
 
   it('builds the finance sidebar with href overrides and hidden-count items', () => {
@@ -88,9 +90,9 @@ describe('category sidebar config', () => {
     })
   })
 
-  it('builds the climate-science sidebar with the predefined weather categories', () => {
+  it('builds the weather sidebar with the predefined weather categories', () => {
     const result = resolveCategorySidebarData({
-      categorySlug: 'climate-science',
+      categorySlug: 'weather',
       categoryCount: 6,
       childs: [
         { slug: 'temperature', name: 'Temperature', count: 3 },
@@ -105,7 +107,7 @@ describe('category sidebar config', () => {
       { slug: 'tornadoes', name: 'Tornadoes', count: 0 },
     ])
     expect(result.sidebarItems?.slice(0, 3)).toMatchObject([
-      { type: 'link', slug: 'climate-science', count: 6, isAll: true, icon: 'all-grid' },
+      { type: 'link', slug: 'weather', count: 6, isAll: true, icon: 'all-grid' },
       { type: 'link', slug: 'temperature', label: 'Temperature', count: 3, icon: 'temperature' },
       { type: 'link', slug: 'precipitation', label: 'Precipitation', count: 0, icon: 'precipitation' },
     ])

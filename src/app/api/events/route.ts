@@ -4,6 +4,7 @@ import { withCacheHeaders } from '@/lib/api-utils'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { EventRepository } from '@/lib/db/queries/event'
 import { UserRepository } from '@/lib/db/queries/user'
+import { isEventListSortBy, isEventListStatusFilter } from '@/lib/event-list-filters'
 import { listHomeEventsPage } from '@/lib/home-events-page'
 
 export async function GET(request: Request) {
@@ -17,10 +18,13 @@ export async function GET(request: Request) {
   const hideCrypto = searchParams.get('hideCrypto') === 'true'
   const hideEarnings = searchParams.get('hideEarnings') === 'true'
   const homeFeed = searchParams.get('homeFeed') === 'true'
-  const status = searchParams.get('status') || 'active'
+  const statusParam = searchParams.get('status')
+  const status = statusParam ?? 'active'
   const sportsSportSlug = searchParams.get('sportsSportSlug') || ''
   const sportsSectionParam = searchParams.get('sportsSection') || ''
   const sportsSection = sportsSectionParam.trim().toLowerCase()
+  const sortParam = searchParams.get('sort')
+  const sortBy = isEventListSortBy(sortParam) ? sortParam : undefined
   const currentTimestampParam = Number.parseInt(searchParams.get('currentTimestamp') || '', 10)
   const currentTimestamp = Number.isNaN(currentTimestampParam) ? null : currentTimestampParam
   const localeParam = searchParams.get('locale') ?? DEFAULT_LOCALE
@@ -29,8 +33,10 @@ export async function GET(request: Request) {
     : DEFAULT_LOCALE
   const offset = Number.parseInt(searchParams.get('offset') || '0', 10)
   const clampedOffset = Number.isNaN(offset) ? 0 : Math.max(0, offset)
+  const limitParam = Number.parseInt(searchParams.get('limit') || '', 10)
+  const limit = Number.isNaN(limitParam) ? undefined : Math.max(1, limitParam)
 
-  if (status !== 'active' && status !== 'resolved') {
+  if (!isEventListStatusFilter(status)) {
     return NextResponse.json({ error: 'Invalid status filter.' }, { status: 400 })
   }
 
@@ -55,10 +61,11 @@ export async function GET(request: Request) {
         tag,
         mainTag,
         search,
+        sortBy,
         userId: userId ?? '',
         bookmarked,
         frequency: (frequency === 'daily' || frequency === 'weekly' || frequency === 'monthly') ? frequency : 'all',
-        status: status === 'resolved' ? 'resolved' : 'active',
+        status,
         offset: clampedOffset,
         currentTimestamp,
         locale,
@@ -78,11 +85,13 @@ export async function GET(request: Request) {
       tag,
       mainTag,
       search,
+      sortBy,
       userId,
       bookmarked,
       frequency,
       status,
       offset: clampedOffset,
+      limit,
       locale,
       sportsSportSlug,
       sportsSection: (sportsSection === 'games' || sportsSection === 'props') ? sportsSection : '',

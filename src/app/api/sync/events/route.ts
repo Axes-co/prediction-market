@@ -1,7 +1,9 @@
 import { and, eq, inArray, lt, ne, or } from 'drizzle-orm'
+import { updateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { loadAllowedMarketCreatorWallets } from '@/lib/allowed-market-creators-server'
 import { isCronAuthorized } from '@/lib/auth-cron'
+import { cacheTags } from '@/lib/cache-tags'
 import {
   conditions as conditionsTable,
   event_sports as eventSportsTable,
@@ -283,7 +285,7 @@ async function syncMarkets(allowedCreators: Set<string>, options: SyncOptions): 
     }
     else if (!timeLimitReached) {
       // Avoid stalling forever if an entire page cannot be processed.
-      const lastConditionInPage = page.conditions[page.conditions.length - 1]
+      const lastConditionInPage = page.conditions.at(-1)
       const pageEndTimestamp = Number(lastConditionInPage?.updatedAt)
       if (!lastConditionInPage || Number.isNaN(pageEndTimestamp)) {
         break
@@ -938,6 +940,7 @@ async function updateEventStatusesFromMarketsBatch(eventIds: string[]) {
     db
       .select({
         id: eventsTable.id,
+        slug: eventsTable.slug,
         status: eventsTable.status,
         resolved_at: eventsTable.resolved_at,
       })
@@ -1021,6 +1024,13 @@ async function updateEventStatusesFromMarketsBatch(eventIds: string[]) {
       .update(eventsTable)
       .set({ status: nextStatus, resolved_at: resolvedAtUpdate })
       .where(eq(eventsTable.id, eventId))
+  }
+
+  updateTag(cacheTags.eventsGlobal)
+  for (const currentEvent of currentEvents) {
+    if (currentEvent.slug) {
+      updateTag(cacheTags.event(currentEvent.slug))
+    }
   }
 }
 
@@ -1588,7 +1598,7 @@ function normalizeAssetReference(value: unknown): string | null {
   }
 
   const parts = withoutQuery.split('/').filter(Boolean)
-  return parts.length > 0 ? parts[parts.length - 1] : withoutQuery
+  return parts.length > 0 ? parts.at(-1) : withoutQuery
 }
 
 function buildSportsLogoStoragePath(reference: string): string {

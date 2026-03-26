@@ -1,5 +1,6 @@
 'use client'
 
+import type { Route } from 'next'
 import { SearchIcon, XIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import { useEffect, useRef } from 'react'
@@ -7,12 +8,26 @@ import { SearchResults } from '@/app/[locale]/(platform)/_components/SearchResul
 import { Input } from '@/components/ui/input'
 import { useSearch } from '@/hooks/useSearch'
 import { useSiteIdentity } from '@/hooks/useSiteIdentity'
+import { useRouter } from '@/i18n/navigation'
+import { buildPredictionResultsPath } from '@/lib/prediction-search'
 import { cn } from '@/lib/utils'
 
 export default function HeaderSearch() {
   const searchRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const { query, handleQueryChange, results, isLoading, showResults, clearSearch, hideResults, activeTab, setActiveTab } = useSearch()
+  const router = useRouter()
+  const {
+    query,
+    handleQueryChange,
+    results,
+    isLoading,
+    showResults,
+    clearSearch,
+    hideResults,
+    showSearchResults,
+    activeTab,
+    setActiveTab,
+  } = useSearch()
   const showDropdown = showResults || isLoading.events || isLoading.profiles
   const inputBaseClass = showDropdown ? 'bg-background' : 'bg-accent'
   const inputBorderClass = showDropdown ? 'border-border' : 'border-transparent'
@@ -21,6 +36,17 @@ export default function HeaderSearch() {
   const site = useSiteIdentity()
   const sitename = `${site.name || 'events and profiles'}`.toLowerCase()
   const t = useExtracted()
+
+  function navigateToPredictionResults() {
+    const nextPath = buildPredictionResultsPath(query)
+
+    if (!nextPath) {
+      return
+    }
+
+    clearSearch()
+    router.push(nextPath as Route)
+  }
 
   useEffect(() => {
     function handleSlashShortcut(event: KeyboardEvent) {
@@ -75,6 +101,15 @@ export default function HeaderSearch() {
         placeholder={`${t('Search')} ${sitename}`}
         value={query}
         onChange={e => handleQueryChange(e.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' || event.nativeEvent.isComposing) {
+            return
+          }
+
+          event.preventDefault()
+          navigateToPredictionResults()
+        }}
+        onFocus={showSearchResults}
         className={cn(
           'h-12 w-full pr-12 pl-11 shadow-none transition-colors lg:h-10',
           inputBorderClass,

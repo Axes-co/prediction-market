@@ -1,3 +1,4 @@
+import type { EventListStatusFilter } from '@/lib/event-list-filters'
 import { isSportsAuxiliaryEventSlug } from '@/lib/sports-event-slugs'
 
 interface HomeEventVisibilityOptions {
@@ -5,7 +6,7 @@ interface HomeEventVisibilityOptions {
   hideCrypto?: boolean
   hideEarnings?: boolean
   hideSports?: boolean
-  status?: 'active' | 'resolved'
+  status?: EventListStatusFilter
 }
 
 export const HOME_EVENTS_PAGE_SIZE = 32
@@ -16,6 +17,9 @@ interface HomeVisibleEventTagCandidate {
 
 interface HomeVisibleEventMarketCandidate {
   is_resolved: boolean
+  condition?: {
+    resolved?: boolean | null
+  } | null
 }
 
 interface HomeVisibleEventCandidate {
@@ -63,7 +67,7 @@ function isMoreRecentEvent<T extends HomeVisibleEventCandidate>(candidate: T, cu
   return candidate.id > current.id
 }
 
-function isResolvedLike<T extends HomeVisibleEventCandidate>(event: T) {
+function isResolvedLike(event: any) {
   if (event.status === 'resolved') {
     return true
   }
@@ -72,12 +76,24 @@ function isResolvedLike<T extends HomeVisibleEventCandidate>(event: T) {
     return false
   }
 
-  return event.markets.every(market => market.is_resolved)
+  return event.markets.every((market: any) => market.is_resolved)
+}
+
+export function isHomeEventResolvedLike<T extends HomeVisibleEventCandidate>(event: T) {
+  if (event.status === 'resolved') {
+    return true
+  }
+
+  if (!event.markets || event.markets.length === 0) {
+    return false
+  }
+
+  return event.markets.every(market => market.is_resolved || market.condition?.resolved === true)
 }
 
 function isOverdueUnresolved<T extends HomeVisibleEventCandidate>(event: T, nowMs: number) {
   const endTimestamp = toTimestamp(event.end_date)
-  return !isResolvedLike(event) && Number.isFinite(endTimestamp) && endTimestamp < nowMs
+  return !isHomeEventResolvedLike(event) && Number.isFinite(endTimestamp) && endTimestamp < nowMs
 }
 
 function isPreferredSeriesEvent<T extends HomeVisibleEventCandidate>(candidate: T, current: T, nowMs: number) {
@@ -85,8 +101,8 @@ function isPreferredSeriesEvent<T extends HomeVisibleEventCandidate>(candidate: 
   const currentEnd = toTimestamp(current.end_date)
   const candidateHasFutureEnd = candidateEnd >= nowMs
   const currentHasFutureEnd = currentEnd >= nowMs
-  const candidateResolved = isResolvedLike(candidate)
-  const currentResolved = isResolvedLike(current)
+  const candidateResolved = isHomeEventResolvedLike(candidate)
+  const currentResolved = isHomeEventResolvedLike(current)
   const candidateOverdueUnresolved = isOverdueUnresolved(candidate, nowMs)
   const currentOverdueUnresolved = isOverdueUnresolved(current, nowMs)
 
@@ -179,12 +195,16 @@ export function filterHomeEvents<T extends HomeVisibleEventCandidate>(
   })
 
   if (status === 'resolved') {
-    return eventsMatchingTagFilters
+    return eventsMatchingTagFilters.filter(event => isHomeEventResolvedLike(event))
   }
+
+  const activeSeriesCandidates = status === 'all'
+    ? eventsMatchingTagFilters.filter(event => !isResolvedLike(event))
+    : eventsMatchingTagFilters
 
   const newestBySeriesSlug = new Map<string, T>()
 
-  for (const event of eventsMatchingTagFilters) {
+  for (const event of activeSeriesCandidates) {
     const seriesSlug = normalizeSeriesSlug(event.series_slug)
     if (!seriesSlug) {
       continue
@@ -205,6 +225,10 @@ export function filterHomeEvents<T extends HomeVisibleEventCandidate>(
   }
 
   return eventsMatchingTagFilters.filter((event) => {
+    if (status === 'all' && isResolvedLike(event)) {
+      return true
+    }
+
     const seriesSlug = normalizeSeriesSlug(event.series_slug)
     if (!seriesSlug) {
       return true

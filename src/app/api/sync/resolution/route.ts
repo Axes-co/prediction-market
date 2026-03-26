@@ -1,6 +1,8 @@
 import { and, eq, inArray, isNull, lt, ne, or } from 'drizzle-orm'
+import { updateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { isCronAuthorized } from '@/lib/auth-cron'
+import { cacheTags } from '@/lib/cache-tags'
 import {
   conditions as conditionsTable,
   events as eventsTable,
@@ -388,7 +390,7 @@ async function syncResolutions(): Promise<SyncStats> {
     }
     else if (!timeLimitReached) {
       // Avoid stalling forever when a page only contains unknown IDs.
-      const lastResolutionInPage = page.resolutions[page.resolutions.length - 1]
+      const lastResolutionInPage = page.resolutions.at(-1)
       const pageEndTimestamp = Number(lastResolutionInPage?.lastUpdateTimestamp)
       if (!lastResolutionInPage || Number.isNaN(pageEndTimestamp)) {
         break
@@ -744,6 +746,7 @@ async function updateEventStatusesFromMarketsBatch(eventIds: string[]) {
     db
       .select({
         id: eventsTable.id,
+        slug: eventsTable.slug,
         status: eventsTable.status,
         resolved_at: eventsTable.resolved_at,
       })
@@ -833,6 +836,13 @@ async function updateEventStatusesFromMarketsBatch(eventIds: string[]) {
       const message = error instanceof Error ? error.message : String(error)
       console.error(`Failed to update event status for ${eventId}:`, error)
       failedUpdates.push(`${eventId}: ${message}`)
+    }
+  }
+
+  updateTag(cacheTags.eventsGlobal)
+  for (const currentEvent of currentEvents) {
+    if (currentEvent.slug) {
+      updateTag(cacheTags.event(currentEvent.slug))
     }
   }
 

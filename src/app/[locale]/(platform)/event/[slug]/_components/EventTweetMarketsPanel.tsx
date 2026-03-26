@@ -6,6 +6,7 @@ import { formatCompactCount } from '@/lib/formatters'
 interface EventTweetMarketsPanelProps {
   tweetCount: number | null
   countdownTargetMs: number | null
+  isFinal?: boolean
 }
 
 interface CountdownUnit {
@@ -17,14 +18,39 @@ function padTwoDigits(value: number) {
   return String(Math.max(0, value)).padStart(2, '0')
 }
 
-function buildCountdownUnits(countdownTargetMs: number | null, nowMs: number): CountdownUnit[] {
+function buildPlaceholderCountdownUnits() {
+  return [
+    { label: 'DAYS', value: '--' },
+    { label: 'HRS', value: '--' },
+    { label: 'MIN', value: '--' },
+    { label: 'SEG', value: '--' },
+  ] satisfies CountdownUnit[]
+}
+
+function buildFinalCountdownUnits() {
+  return [
+    { label: 'DAYS', value: '0' },
+    { label: 'HRS', value: '00' },
+    { label: 'MIN', value: '00' },
+    { label: 'SEG', value: '00' },
+  ] satisfies CountdownUnit[]
+}
+
+function buildCountdownUnits(
+  countdownTargetMs: number | null,
+  nowMs: number,
+  isFinal: boolean,
+): CountdownUnit[] {
   if (countdownTargetMs == null || !Number.isFinite(countdownTargetMs)) {
-    return [
-      { label: 'DAYS', value: '--' },
-      { label: 'HRS', value: '--' },
-      { label: 'MIN', value: '--' },
-      { label: 'SEG', value: '--' },
-    ]
+    return buildPlaceholderCountdownUnits()
+  }
+
+  if (isFinal) {
+    return buildFinalCountdownUnits()
+  }
+
+  if (!Number.isFinite(nowMs) || nowMs <= 0) {
+    return buildPlaceholderCountdownUnits()
   }
 
   const totalSeconds = Math.max(0, Math.floor((countdownTargetMs - nowMs) / 1000))
@@ -44,6 +70,7 @@ function buildCountdownUnits(countdownTargetMs: number | null, nowMs: number): C
 export default function EventTweetMarketsPanel({
   tweetCount,
   countdownTargetMs,
+  isFinal = false,
 }: EventTweetMarketsPanelProps) {
   const [nowMs, setNowMs] = useState(0)
 
@@ -64,9 +91,13 @@ export default function EventTweetMarketsPanel({
   }, [countdownTargetMs])
 
   const countdownUnits = useMemo(
-    () => buildCountdownUnits(countdownTargetMs, nowMs),
-    [countdownTargetMs, nowMs],
+    () => buildCountdownUnits(countdownTargetMs, nowMs, isFinal),
+    [countdownTargetMs, isFinal, nowMs],
   )
+  const hasReachedCountdownTarget = countdownTargetMs != null
+    && Number.isFinite(countdownTargetMs)
+    && nowMs >= countdownTargetMs
+  const isResolved = isFinal || hasReachedCountdownTarget
   const tweetCountLabel = typeof tweetCount === 'number' && Number.isFinite(tweetCount)
     ? formatCompactCount(tweetCount)
     : '--'
@@ -80,24 +111,38 @@ export default function EventTweetMarketsPanel({
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="grid gap-2">
-          <a
-            href="https://xtracker.polymarket.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group inline-flex w-fit items-center gap-2 text-red-500"
-          >
-            <span className="relative inline-flex size-2.5 items-center justify-center">
-              <span className="absolute inset-0 m-auto inline-flex size-2.5 animate-ping rounded-full bg-red-500/45" />
-              <span className="relative inline-flex size-2 rounded-full bg-red-500" />
-            </span>
-            <span className={`
-              text-xs font-semibold tracking-[0.12em] uppercase
-              group-hover:underline group-hover:decoration-red-500 group-hover:underline-offset-3
-            `}
-            >
-              TWEET COUNT
-            </span>
-          </a>
+          {isResolved
+            ? (
+                <span className={`
+                  inline-flex w-fit text-xs font-semibold tracking-[0.12em] text-muted-foreground uppercase
+                `}
+                >
+                  FINAL
+                </span>
+              )
+            : (
+                <a
+                  href="https://xtracker.polymarket.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group inline-flex w-fit items-center gap-2 text-red-500"
+                >
+                  <span className="relative inline-flex size-2.5 items-center justify-center">
+                    <span className={`
+                      absolute inset-0 m-auto inline-flex size-2.5 animate-ping rounded-full bg-red-500/45
+                    `}
+                    />
+                    <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+                  </span>
+                  <span className={`
+                    text-xs font-semibold tracking-[0.12em] uppercase
+                    group-hover:underline group-hover:decoration-red-500 group-hover:underline-offset-3
+                  `}
+                  >
+                    TWEET COUNT
+                  </span>
+                </a>
+              )}
 
           <div className="text-2xl leading-none font-semibold text-foreground tabular-nums sm:text-[1.8rem]">
             {tweetCountLabel}

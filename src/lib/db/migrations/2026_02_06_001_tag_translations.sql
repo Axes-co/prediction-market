@@ -50,11 +50,11 @@ EXECUTE FUNCTION set_updated_at();
 
 WITH defaults(slug, locale, name) AS (
   VALUES
-    ('climate-science', 'de', 'Klima & Wissenschaft'),
-    ('climate-science', 'es', 'Clima y Ciencia'),
-    ('climate-science', 'pt', 'Clima e Ciência'),
-    ('climate-science', 'fr', 'Climat et Science'),
-    ('climate-science', 'zh', '气候与科学'),
+    ('weather', 'de', 'Wetter'),
+    ('weather', 'es', 'Clima'),
+    ('weather', 'pt', 'Tempo'),
+    ('weather', 'fr', 'Météo'),
+    ('weather', 'zh', '天气'),
 
     ('crypto', 'de', 'Krypto'),
     ('crypto', 'es', 'Cripto'),
@@ -73,12 +73,6 @@ WITH defaults(slug, locale, name) AS (
     ('economy', 'pt', 'Economia'),
     ('economy', 'fr', 'Économie'),
     ('economy', 'zh', '经济'),
-
-    ('earnings', 'de', 'Ergebnisse'),
-    ('earnings', 'es', 'Resultados'),
-    ('earnings', 'pt', 'Resultados'),
-    ('earnings', 'fr', 'Résultats'),
-    ('earnings', 'zh', '财报'),
 
     ('elections', 'de', 'Wahlen'),
     ('elections', 'es', 'Elecciones'),

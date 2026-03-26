@@ -1,5 +1,6 @@
 import type { SearchLoadingStates, SearchResultItems } from '@/types'
 import { useCallback, useEffect, useState } from 'react'
+import { sortSearchResultEvents } from '@/lib/event-search-results'
 import { isSportsAuxiliaryEventSlug } from '@/lib/sports-event-slugs'
 
 interface UseSearch {
@@ -11,6 +12,7 @@ interface UseSearch {
   handleQueryChange: (query: string) => void
   clearSearch: () => void
   hideResults: () => void
+  showSearchResults: () => void
   setActiveTab: (tab: 'events' | 'profiles') => void
 }
 
@@ -35,13 +37,17 @@ export function useSearch(): UseSearch {
 
     setIsLoading(prev => ({ ...prev, events: true }))
     try {
-      const response = await fetch(`/api/events?search=${encodeURIComponent(searchQuery)}`)
+      const params = new URLSearchParams({
+        search: searchQuery,
+        status: 'all',
+      })
+      const response = await fetch(`/api/events?${params.toString()}`)
       if (response.ok) {
         const data = await response.json()
         const filteredEvents = Array.isArray(data)
           ? data.filter(event => !isSportsAuxiliaryEventSlug(event?.slug))
           : []
-        setResults(prev => ({ ...prev, events: filteredEvents }))
+        setResults(prev => ({ ...prev, events: sortSearchResultEvents(filteredEvents) }))
       }
       else {
         setResults(prev => ({ ...prev, events: [] }))
@@ -137,6 +143,14 @@ export function useSearch(): UseSearch {
     setShowResults(false)
   }
 
+  function showSearchResults() {
+    if (query.length < 2) {
+      return
+    }
+
+    setShowResults(true)
+  }
+
   function handleSetActiveTab(tab: 'events' | 'profiles') {
     setActiveTab(tab)
   }
@@ -150,6 +164,7 @@ export function useSearch(): UseSearch {
     handleQueryChange,
     clearSearch,
     hideResults,
+    showSearchResults,
     setActiveTab: handleSetActiveTab,
   }
 }
