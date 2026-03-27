@@ -2,6 +2,19 @@ import type { EmbedTheme } from '@/lib/embed-theme'
 
 export type EmbedCodeFormat = 'default' | 'standard' | 'minimal'
 
+export const EMBED_SCRIPT_URL = `${process.env.SITE_URL ?? ''}/embed/market-widget.js`
+
+export function requireEmbedValue(value: string | undefined, name: string) {
+  if (!value || !value.trim()) {
+    throw new Error(`${name} is required for embeds.`)
+  }
+  return value.trim()
+}
+
+export function normalizeEmbedBaseUrl(value: string) {
+  return value.replace(/\/$/, '')
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -17,7 +30,9 @@ function escapeHtmlAttr(value: string) {
 
 function appendParam(params: URLSearchParams, key: string, value: string | undefined) {
   const sanitized = value?.trim()
-  if (!sanitized || params.has(key)) return
+  if (!sanitized || params.has(key)) {
+    return
+  }
   params.set(key, sanitized)
 }
 
@@ -58,7 +73,9 @@ export function buildEmbedSrc(
   isEvent?: boolean,
   locale?: string,
 ) {
-  if (!slug) return ''
+  if (!slug) {
+    return ''
+  }
 
   const params = new URLSearchParams({ theme })
 
@@ -75,12 +92,24 @@ export function buildEmbedSrc(
 
   // Only include toggles that differ from defaults
   const resolved = { ...EMBED_TOGGLE_DEFAULTS, ...toggles }
-  if (!resolved.showChart) params.set('showChart', 'false')
-  if (!resolved.showButtons) params.set('showButtons', 'false')
-  if (!resolved.showVolume) params.set('showVolume', 'false')
-  if (!resolved.showYAxis) params.set('showYAxis', 'false')
-  if (!resolved.showGridRows) params.set('showGridRows', 'false')
-  if (resolved.showBorder) params.set('showBorder', 'true')
+  if (!resolved.showChart) {
+    params.set('showChart', 'false')
+  }
+  if (!resolved.showButtons) {
+    params.set('showButtons', 'false')
+  }
+  if (!resolved.showVolume) {
+    params.set('showVolume', 'false')
+  }
+  if (!resolved.showYAxis) {
+    params.set('showYAxis', 'false')
+  }
+  if (!resolved.showGridRows) {
+    params.set('showGridRows', 'false')
+  }
+  if (resolved.showBorder) {
+    params.set('showBorder', 'true')
+  }
 
   appendParam(params, 'r', affiliateCode)
   appendParam(params, 'locale', locale)
@@ -98,7 +127,9 @@ export function buildPreviewSrc(
   isEvent?: boolean,
   locale?: string,
 ) {
-  if (!slug) return ''
+  if (!slug) {
+    return ''
+  }
   return buildEmbedSrc('', slug, theme, width, height, toggles, affiliateCode, isEvent, locale)
 }
 

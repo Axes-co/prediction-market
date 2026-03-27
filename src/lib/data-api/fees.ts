@@ -1,4 +1,4 @@
-import { cacheKeys, cacheTTL, withCache } from '@/lib/redis'
+import { buildDataApiUrl, normalizeDataApiAddress } from '@/lib/data-api/client'
 
 export interface FeeReceiverTotal {
   exchange: string
@@ -18,30 +18,18 @@ interface FeeReceiverTotalsParams {
   offset?: number
 }
 
-const DATA_API_URL = process.env.DATA_URL!
-
-function assertDataApiUrl() {
-  if (!DATA_API_URL) {
-    throw new Error('DATA_URL environment variable is not configured.')
-  }
-}
-
-function normalizeAddress(value: string) {
-  return value.trim().toLowerCase()
-}
-
-async function fetchFeeReceiverTotalsFromApi(
-  endpoint: string,
-  address: string,
-  exchange?: string,
-  tokenId?: string,
+export async function fetchFeeReceiverTotals({
+  endpoint,
+  address,
+  exchange,
+  tokenId,
   limit = 100,
   offset = 0,
-): Promise<FeeReceiverTotal[]> {
+}: FeeReceiverTotalsParams): Promise<FeeReceiverTotal[]> {
   const params = new URLSearchParams()
-  params.set('address', normalizeAddress(address))
+  params.set('address', normalizeDataApiAddress(address))
   if (exchange) {
-    params.set('exchange', normalizeAddress(exchange))
+    params.set('exchange', normalizeDataApiAddress(exchange))
   }
   if (tokenId) {
     params.set('tokenId', tokenId)
@@ -49,7 +37,7 @@ async function fetchFeeReceiverTotalsFromApi(
   params.set('limit', Math.min(Math.max(limit, 1), 500).toString())
   params.set('offset', Math.max(offset, 0).toString())
 
-  const response = await fetch(`${DATA_API_URL}/${endpoint}?${params.toString()}`, {
+  const response = await fetch(buildDataApiUrl(`/${endpoint}`, params), {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
@@ -62,23 +50,6 @@ async function fetchFeeReceiverTotalsFromApi(
   }
 
   return response.json() as Promise<FeeReceiverTotal[]>
-}
-
-export async function fetchFeeReceiverTotals({
-  endpoint,
-  address,
-  exchange,
-  tokenId,
-  limit = 100,
-  offset = 0,
-}: FeeReceiverTotalsParams): Promise<FeeReceiverTotal[]> {
-  assertDataApiUrl()
-
-  return withCache(
-    cacheKeys.feeReceiverTotals(normalizeAddress(address), endpoint, offset),
-    () => fetchFeeReceiverTotalsFromApi(endpoint, address, exchange, tokenId, limit, offset),
-    cacheTTL.feeReceiverTotals,
-  )
 }
 
 export function sumFeeTotals(totals: FeeReceiverTotal[]): bigint {
