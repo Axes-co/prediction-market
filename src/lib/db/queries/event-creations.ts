@@ -221,32 +221,6 @@ export const EventCreationRepository = {
     })
   },
 
-  async getDraftSummaryByIdForUser(input: {
-    draftId: string
-    userId: string
-  }): Promise<QueryResult<EventCreationDraftSummary>> {
-    return runQuery(async () => {
-      const rows = await db
-        .select()
-        .from(event_creations)
-        .where(and(
-          eq(event_creations.id, input.draftId),
-          eq(event_creations.created_by_user_id, input.userId),
-        ))
-        .limit(1)
-
-      const row = rows[0]
-      if (!row) {
-        return { data: null, error: 'Draft not found.' }
-      }
-
-      return {
-        data: mapDraftSummary(row),
-        error: null,
-      }
-    })
-  },
-
   async listDraftSummariesByUser(input: {
     userId: string
     search?: string

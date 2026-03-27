@@ -4,6 +4,7 @@ import type { Event, Market, Outcome } from '@/types'
 import { DialogTitle } from '@radix-ui/react-dialog'
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
 import { useExtracted } from 'next-intl'
+import { MOBILE_BOTTOM_NAV_OFFSET } from '@/app/[locale]/(platform)/_lib/mobile-bottom-nav'
 import EventOrderPanelForm from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelForm'
 import EventOrderPanelTermsDisclaimer
   from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelTermsDisclaimer'
@@ -105,7 +106,10 @@ export default function EventOrderPanelMobile({
     >
       {shouldShowDefaultTrigger && (
         <DrawerTrigger asChild>
-          <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-background p-4 lg:hidden">
+          <div
+            className="fixed inset-x-0 z-30 border-t bg-background p-4 lg:hidden"
+            style={{ bottom: MOBILE_BOTTOM_NAV_OFFSET }}
+          >
             <div className="flex gap-2">
               <Button
                 variant="yes"

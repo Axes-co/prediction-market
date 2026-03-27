@@ -583,8 +583,7 @@ export function resolveStableSpreadPrimaryOutcomeIndex(card: SportsGamesCard, co
     return null
   }
 
-  const marketIndices = [...market.outcomes]
-    .map(outcome => outcome.outcome_index)
+  const marketIndices = Array.from(market.outcomes, outcome => outcome.outcome_index)
     .filter((index): index is number => index === OUTCOME_INDEX.YES || index === OUTCOME_INDEX.NO)
   const uniqueMarketIndices = Array.from(new Set(marketIndices)).sort((a, b) => a - b)
 
@@ -1446,8 +1445,14 @@ export function SportsGameGraph({
       return undefined
     }
 
-    const firstTimestamp = chartData[0]?.date.getTime()
-    const lastTimestamp = chartData[chartData.length - 1]?.date.getTime()
+    const firstPoint = chartData[0]
+    const lastPoint = chartData.at(-1)
+    if (!firstPoint || !lastPoint) {
+      return undefined
+    }
+
+    const firstTimestamp = firstPoint.date.getTime()
+    const lastTimestamp = lastPoint.date.getTime()
     if (!Number.isFinite(firstTimestamp) || !Number.isFinite(lastTimestamp) || lastTimestamp <= firstTimestamp) {
       return undefined
     }
@@ -1514,8 +1519,14 @@ export function SportsGameGraph({
         }>
       }
 
-      const firstTimestamp = chartData[0]?.date.getTime()
-      const lastTimestamp = chartData[chartData.length - 1]?.date.getTime()
+      const firstPoint = chartData[0]
+      const lastPoint = chartData.at(-1)
+      if (!firstPoint || !lastPoint) {
+        return []
+      }
+
+      const firstTimestamp = firstPoint.date.getTime()
+      const lastTimestamp = lastPoint.date.getTime()
       if (!Number.isFinite(firstTimestamp) || !Number.isFinite(lastTimestamp)) {
         return []
       }
@@ -2480,11 +2491,9 @@ export function SportsGameDetailsPanel({
         ? position.outcome_index
         : undefined
       const normalizedOutcomeText = position.outcome_text?.trim().toLowerCase()
-      const resolvedOutcomeIndex = explicitOutcomeIndex != null
-        ? explicitOutcomeIndex
-        : normalizedOutcomeText === 'no'
-          ? OUTCOME_INDEX.NO
-          : OUTCOME_INDEX.YES
+      const resolvedOutcomeIndex = explicitOutcomeIndex ?? normalizedOutcomeText === 'no'
+        ? OUTCOME_INDEX.NO
+        : OUTCOME_INDEX.YES
 
       if (resolvedOutcomeIndex !== OUTCOME_INDEX.YES && resolvedOutcomeIndex !== OUTCOME_INDEX.NO) {
         return
@@ -2945,7 +2954,7 @@ export function SportsGameDetailsPanel({
     }
 
     const firstOptionId = linePickerOptions[0]?.conditionId
-    const lastOptionId = linePickerOptions[linePickerOptions.length - 1]?.conditionId
+    const lastOptionId = linePickerOptions.at(-1)?.conditionId
     const firstButton = firstOptionId ? linePickerButtonsRef.current[firstOptionId] : null
     const lastButton = lastOptionId ? linePickerButtonsRef.current[lastOptionId] : null
     const fallbackButtonWidth = 40
@@ -3466,6 +3475,8 @@ export function SportsGameDetailsPanel({
                           && tag.outcomeIndex === OUTCOME_INDEX.NO
                           && tag.outcome.outcome_index === OUTCOME_INDEX.NO
                           && tag.shares > 0
+                        const canRedeem = showRedeemInPositions
+                          && Boolean(tag.market.is_resolved || tag.market.condition?.resolved)
 
                         return (
                           <tr key={tag.key} className="text-xs text-foreground">
@@ -3509,7 +3520,7 @@ export function SportsGameDetailsPanel({
                                     Convert
                                   </button>
                                 )}
-                                {showRedeemInPositions
+                                {canRedeem
                                   ? (
                                       <button
                                         type="button"
@@ -3740,7 +3751,7 @@ export default function SportsGamesCenter({
     return String(initialWeek)
   }, [initialWeek, isLivePage])
   const latestWeekOption = useMemo(
-    () => (weekOptions.length > 0 ? String(weekOptions[weekOptions.length - 1]) : 'all'),
+    () => (weekOptions.length > 0 ? String(weekOptions.at(-1)) : 'all'),
     [weekOptions],
   )
 
@@ -4151,11 +4162,40 @@ export default function SportsGamesCenter({
       return
     }
 
-    setOrderEvent(activeTradeContext.card.event)
-    setOrderMarket(activeTradeContext.market)
-    setOrderOutcome(activeTradeContext.outcome)
-    setOrderSide(ORDER_SIDE.BUY)
-  }, [activeTradeContext, setOrderEvent, setOrderMarket, setOrderOutcome, setOrderSide])
+    const {
+      event: currentOrderEvent,
+      market: currentOrderMarket,
+      outcome: currentOrderOutcome,
+    } = useOrder.getState()
+
+    const isSameSelection = (
+      currentOrderEvent?.id === activeTradeContext.card.event.id
+      && currentOrderMarket?.condition_id === activeTradeContext.market.condition_id
+      && currentOrderOutcome?.outcome_index === activeTradeContext.outcome.outcome_index
+    )
+
+    if (currentOrderEvent !== activeTradeContext.card.event) {
+      setOrderEvent(activeTradeContext.card.event)
+    }
+
+    if (currentOrderMarket !== activeTradeContext.market) {
+      setOrderMarket(activeTradeContext.market)
+    }
+
+    if (currentOrderOutcome !== activeTradeContext.outcome) {
+      setOrderOutcome(activeTradeContext.outcome)
+    }
+
+    if (!isSameSelection) {
+      setOrderSide(ORDER_SIDE.BUY)
+    }
+  }, [
+    activeTradeContext,
+    setOrderEvent,
+    setOrderMarket,
+    setOrderOutcome,
+    setOrderSide,
+  ])
 
   function toggleCard(
     card: SportsGamesCard,

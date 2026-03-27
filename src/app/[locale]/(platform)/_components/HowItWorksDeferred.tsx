@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import { useEffect, useState } from 'react'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { useUser } from '@/stores/useUser'
 
 const HowItWorks = dynamic(
@@ -11,10 +12,12 @@ const HowItWorks = dynamic(
 
 export default function HowItWorksDeferred() {
   const user = useUser()
+  const isMobile = useIsMobile()
   const [shouldRender, setShouldRender] = useState(false)
+  const shouldRenderInHeader = !isMobile
 
   useEffect(() => {
-    if (user) {
+    if (user || !shouldRenderInHeader) {
       return
     }
 
@@ -33,9 +36,9 @@ export default function HowItWorksDeferred() {
       window.removeEventListener('pointerdown', renderHowItWorks)
       window.removeEventListener('keydown', renderHowItWorks)
     }
-  }, [user])
+  }, [shouldRenderInHeader, user])
 
-  if (user || !shouldRender) {
+  if (user || !shouldRender || !shouldRenderInHeader) {
     return null
   }
 

@@ -4,7 +4,7 @@ import type { Event } from '@/types'
 import { notFound } from 'next/navigation'
 import { DEFAULT_LOCALE } from '@/i18n/locales'
 import { OUTCOME_INDEX } from '@/lib/constants'
-import { loadEventPagePublicContentData, loadEventPageShellData } from '@/lib/event-page-data'
+import { loadEventPageShellData } from '@/lib/event-page-data'
 import { resolveEventMarketPath, resolveEventPagePath } from '@/lib/events-routing'
 import { buildHreflangAlternates } from '@/lib/seo'
 import siteUrlUtils from '@/lib/site-url'
@@ -122,10 +122,7 @@ export async function buildEventPageMetadata({
   locale,
   marketSlug,
 }: BuildEventPageMetadataOptions): Promise<Metadata> {
-  const [shellData, contentData] = await Promise.all([
-    loadEventPageShellData(eventSlug, locale),
-    loadEventPagePublicContentData(eventSlug, locale),
-  ])
+  const shellData = await loadEventPageShellData(eventSlug, locale)
   const title = shellData.title
 
   if (!title) {
@@ -145,7 +142,7 @@ export async function buildEventPageMetadata({
     eventSlug,
     locale,
     marketSlug,
-    version: contentData ? buildEventOgImageVersion(contentData.event, marketSlug) : process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+    version: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
   })
   const socialImage = {
     url: imageUrl,

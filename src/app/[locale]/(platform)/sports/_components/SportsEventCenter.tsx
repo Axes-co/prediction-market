@@ -554,7 +554,7 @@ function SportsEventShareButton({ event }: { event: SportsGamesCard['event'] }) 
       }
       await navigator.clipboard.writeText(url.toString())
       setShareSuccess(true)
-      window.setTimeout(() => setShareSuccess(false), 2000)
+      window.setTimeout(setShareSuccess, 2000, false)
     }
     catch {
       // noop
@@ -950,7 +950,6 @@ export default function SportsEventCenter({
   const orderEventId = useOrder(state => state.event?.id ?? null)
   const orderMarketConditionId = useOrder(state => state.market?.condition_id ?? null)
   const orderOutcomeIndex = useOrder(state => state.outcome?.outcome_index ?? null)
-  const orderSide = useOrder(state => state.side)
   const user = useUser()
   const [querySelection, setQuerySelection] = useState<SportsEventQuerySelection>(EMPTY_QUERY_SELECTION)
   const [oddsFormat, setOddsFormat] = useState<OddsFormat>('price')
@@ -1399,6 +1398,15 @@ export default function SportsEventCenter({
   const previousCardIdRef = useRef<string | null>(null)
   const appliedMarketSlugSelectionRef = useRef<string | null>(null)
   const pushedOrderSelectionRef = useRef<string | null>(null)
+  const currentOrderSelectionRef = useRef<{
+    eventId: string | null
+    conditionId: string | null
+    outcomeIndex: number | null
+  }>({
+    eventId: null,
+    conditionId: null,
+    outcomeIndex: null,
+  })
   const auxiliaryMarketCards = useMemo<AuxiliaryMarketPanel[]>(() => {
     const buttonsByConditionId = new Map<string, SportsGamesButton[]>()
 
@@ -1869,8 +1877,8 @@ export default function SportsEventCenter({
       return null
     }
 
-    return `${orderEventId}:${orderMarketConditionId}:${orderOutcomeIndex}:${orderSide}`
-  }, [orderEventId, orderMarketConditionId, orderOutcomeIndex, orderSide])
+    return `${orderEventId}:${orderMarketConditionId}:${orderOutcomeIndex}`
+  }, [orderEventId, orderMarketConditionId, orderOutcomeIndex])
   const fallbackButtonFromOrderState = useMemo(() => {
     if (orderEventId !== activeCard.event.id || !orderMarketConditionId) {
       return null
@@ -2062,6 +2070,14 @@ export default function SportsEventCenter({
   const activeTradeContextButtonKey = activeTradeContext?.button.key ?? null
 
   useEffect(() => {
+    currentOrderSelectionRef.current = {
+      eventId: orderEventId,
+      conditionId: orderMarketConditionId,
+      outcomeIndex: orderOutcomeIndex,
+    }
+  }, [orderEventId, orderMarketConditionId, orderOutcomeIndex])
+
+  useEffect(() => {
     if (!activeTradeContextButtonKey) {
       pushedOrderSelectionRef.current = null
       return
@@ -2075,13 +2091,17 @@ export default function SportsEventCenter({
       return
     }
 
-    const nextOrderSelectionSyncKey = `${activeCard.event.id}:${market.condition_id}:${outcome.outcome_index}:${ORDER_SIDE.BUY}`
+    const nextOrderSelectionSyncKey = `${activeCard.event.id}:${market.condition_id}:${outcome.outcome_index}`
+    const {
+      eventId: currentOrderEventId,
+      conditionId: currentOrderMarketConditionId,
+      outcomeIndex: currentOrderOutcomeIndex,
+    } = currentOrderSelectionRef.current
 
     if (
-      orderEventId === activeCard.event.id
-      && orderMarketConditionId === market.condition_id
-      && orderOutcomeIndex === outcome.outcome_index
-      && orderSide === ORDER_SIDE.BUY
+      currentOrderEventId === activeCard.event.id
+      && currentOrderMarketConditionId === market.condition_id
+      && currentOrderOutcomeIndex === outcome.outcome_index
     ) {
       pushedOrderSelectionRef.current = nextOrderSelectionSyncKey
       return
@@ -2095,10 +2115,6 @@ export default function SportsEventCenter({
   }, [
     activeCard,
     activeTradeContextButtonKey,
-    orderEventId,
-    orderMarketConditionId,
-    orderOutcomeIndex,
-    orderSide,
     setOrderEvent,
     setOrderMarket,
     setOrderOutcome,
@@ -2680,7 +2696,7 @@ export default function SportsEventCenter({
               allowedConditionIds={new Set(singleConditionId ? [singleConditionId] : entry.markets.map(market => market.condition_id))}
               showAboutTab
               aboutEvent={activeCard.event}
-              showRedeemInPositions={activeCard.event.sports_ended === true}
+              showRedeemInPositions
               onOpenRedeemForCondition={handleOpenRedeemForCondition}
               oddsFormat={oddsFormat}
               onChangeTab={tab => setTabByAuxiliaryConditionId(current => ({ ...current, [panelKey]: tab }))}
@@ -2820,7 +2836,7 @@ export default function SportsEventCenter({
             allowedConditionIds={new Set(entry.markets.map(market => market.condition_id))}
             showAboutTab
             aboutEvent={activeCard.event}
-            showRedeemInPositions={activeCard.event.sports_ended === true}
+            showRedeemInPositions
             onOpenRedeemForCondition={handleOpenRedeemForCondition}
             oddsFormat={oddsFormat}
             onChangeTab={tab => setTabByAuxiliaryConditionId(current => ({ ...current, [panelKey]: tab }))}
@@ -2851,7 +2867,7 @@ export default function SportsEventCenter({
                 defaultGraphTimeRange="ALL"
                 allowedConditionIds={allCardConditionIds}
                 positionsTitle="All Positions"
-                showRedeemInPositions={activeCard.event.sports_ended === true}
+                showRedeemInPositions
                 onOpenRedeemForCondition={handleOpenRedeemForCondition}
                 oddsFormat={oddsFormat}
                 onChangeTab={() => {}}
