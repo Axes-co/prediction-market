@@ -5,6 +5,7 @@ import type { SupportedLocale } from '@/i18n/locales'
 import { getExtracted, setRequestLocale } from 'next-intl/server'
 import { notFound } from 'next/navigation'
 import SportsContent from '@/app/[locale]/(platform)/sports/_components/SportsContent'
+import { findSportsHrefBySlug } from '@/app/[locale]/(platform)/sports/_utils/sports-menu-routing'
 import { SportsMenuRepository } from '@/lib/db/queries/sports-menu'
 import { buildPageMetadata } from '@/lib/seo'
 import { STATIC_PARAMS_PLACEHOLDER } from '@/lib/static-params'
@@ -41,8 +42,18 @@ export default async function SportsFuturesBySportPage({
     notFound()
   }
 
-  const { data: canonicalSportSlug } = await SportsMenuRepository.resolveCanonicalSlugByAlias(sportSlug)
-  if (!canonicalSportSlug) {
+  const [{ data: canonicalSportSlug }, { data: layoutData }] = await Promise.all([
+    SportsMenuRepository.resolveCanonicalSlugByAlias(sportSlug),
+    SportsMenuRepository.getLayoutData('sports'),
+  ])
+  if (
+    !canonicalSportSlug
+    || !findSportsHrefBySlug({
+      menuEntries: layoutData?.menuEntries,
+      canonicalSportSlug,
+      hrefPrefix: '/sports/futures/',
+    })
+  ) {
     notFound()
   }
 

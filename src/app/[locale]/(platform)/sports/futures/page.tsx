@@ -11,7 +11,7 @@ export default async function SportsFuturesRedirectPage({
 }) {
   const { locale } = await params
   setRequestLocale(locale)
-  const { data: futuresHref } = await SportsMenuRepository.getFuturesHref()
+  const { data: futuresHref } = await SportsMenuRepository.getFuturesHref('sports')
   if (!futuresHref) {
     notFound()
   }

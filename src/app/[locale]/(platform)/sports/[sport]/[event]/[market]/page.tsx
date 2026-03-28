@@ -90,9 +90,10 @@ export default async function SportsEventMarketPage({
   if (!eventRoute) {
     notFound()
   }
-  if (!resolveEventBasePath(eventRoute)) {
+  const expectedPath = resolveEventMarketPath(eventRoute, market)
+  if (!resolveEventBasePath(eventRoute) || expectedPath !== `/sports/${sport}/${event}/${market}`) {
     redirect({
-      href: resolveEventMarketPath(eventRoute, market),
+      href: expectedPath,
       locale: resolvedLocale,
     })
   }
@@ -113,7 +114,7 @@ export default async function SportsEventMarketPage({
     || targetCard.event.sports_sport_slug
     || sport
   const [{ data: layoutData }, { data: relatedEventsResult }, runtimeTheme] = await Promise.all([
-    SportsMenuRepository.getLayoutData(),
+    SportsMenuRepository.getLayoutData('sports'),
     EventRepository.listEvents({
       tag: 'sports',
       search: '',
@@ -156,6 +157,7 @@ export default async function SportsEventMarketPage({
           sportLabel={sportLabel}
           initialMarketSlug={market}
           initialMarketViewKey={resolveSportsEventMarketViewKey(canonicalEventSlug)}
+          vertical="sports"
           key={`is-bookmarked-${targetCard.event.is_bookmarked}`}
         />
       </EventMarketChannelProvider>

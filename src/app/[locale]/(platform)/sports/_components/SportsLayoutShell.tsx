@@ -3,14 +3,17 @@
 import type { Route } from 'next'
 import type { ReactNode } from 'react'
 import type { SportsMenuEntry } from '@/lib/sports-menu-types'
-import { useCallback, useEffect, useMemo } from 'react'
+import type { SportsVertical } from '@/lib/sports-vertical'
+import { useEffect, useMemo } from 'react'
 import SportsSidebarMenu from '@/app/[locale]/(platform)/sports/_components/SportsSidebarMenu'
 import { usePathname, useRouter } from '@/i18n/navigation'
 import { normalizeAliasKey } from '@/lib/sports-slug-mapping'
+import { getSportsVerticalConfig } from '@/lib/sports-vertical'
 import { cn } from '@/lib/utils'
 
 interface SportsLayoutShellProps {
   children: ReactNode
+  vertical?: SportsVertical
   sportsCountsBySlug?: Record<string, number>
   sportsMenuEntries: SportsMenuEntry[]
   canonicalSlugByAliasKey: Record<string, string>
@@ -57,23 +60,26 @@ function resolveMenuLabelByHref(menuEntries: SportsMenuEntry[], href: string) {
 }
 
 function getSportsPathContext(params: {
+  vertical: SportsVertical
   pathname: string
   menuEntries: SportsMenuEntry[]
   canonicalSlugByAliasKey: Record<string, string>
   h1TitleBySlug: Record<string, string>
 }): SportsPathContext {
   const {
+    vertical,
     pathname,
     menuEntries,
     canonicalSlugByAliasKey,
     h1TitleBySlug,
   } = params
+  const verticalConfig = getSportsVerticalConfig(vertical)
   const segments = pathname
     .split('/')
     .map(segment => segment.trim().toLowerCase())
     .filter(Boolean)
 
-  if (segments[0] !== 'sports') {
+  if (segments[0] !== vertical) {
     return {
       isEventRoute: false,
       mode: 'all',
@@ -104,11 +110,11 @@ function getSportsPathContext(params: {
       activeTagSlug: null,
       sportSlug: null,
       section: null,
-      title: resolveMenuLabelByHref(menuEntries, '/sports/live'),
+      title: resolveMenuLabelByHref(menuEntries, verticalConfig.livePath),
     }
   }
 
-  if (second === 'futures') {
+  if (second === verticalConfig.futurePathSegment) {
     const canonicalSportSlug = resolveCanonicalSlugFromAlias(canonicalSlugByAliasKey, third)
 
     return {
@@ -117,7 +123,9 @@ function getSportsPathContext(params: {
       activeTagSlug: canonicalSportSlug,
       sportSlug: canonicalSportSlug,
       section: null,
-      title: h1TitleBySlug[canonicalSportSlug ?? ''] ?? '',
+      title: canonicalSportSlug
+        ? h1TitleBySlug[canonicalSportSlug] ?? ''
+        : resolveMenuLabelByHref(menuEntries, verticalConfig.futurePath),
     }
   }
 
@@ -148,6 +156,7 @@ function getSportsPathContext(params: {
 
 export default function SportsLayoutShell({
   children,
+  vertical = 'sports',
   sportsCountsBySlug = {},
   sportsMenuEntries,
   canonicalSlugByAliasKey,
@@ -156,23 +165,17 @@ export default function SportsLayoutShell({
 }: SportsLayoutShellProps) {
   const pathname = usePathname()
   const router = useRouter()
+  const verticalConfig = getSportsVerticalConfig(vertical)
   const context = useMemo(
     () => getSportsPathContext({
+      vertical,
       pathname,
       menuEntries: sportsMenuEntries,
       canonicalSlugByAliasKey,
       h1TitleBySlug,
     }),
-    [pathname, sportsMenuEntries, canonicalSlugByAliasKey, h1TitleBySlug],
+    [vertical, pathname, sportsMenuEntries, canonicalSlugByAliasKey, h1TitleBySlug],
   )
-
-  const handleNavigateHref = useCallback((href: string) => {
-    router.push(href as Route)
-  }, [router])
-
-  const handleSelectSportsTag = useCallback((_requestedTagSlug: string, href: string) => {
-    router.push(href as Route)
-  }, [router])
 
   const sectionConfig = context.sportSlug ? sectionsBySlug[context.sportSlug] : null
   const showSportSectionPills = context.mode === 'all'
@@ -259,11 +262,9 @@ export default function SportsLayoutShell({
       >
         <SportsSidebarMenu
           entries={sportsMenuEntries}
+          vertical={vertical}
           mode={context.mode}
           activeTagSlug={context.activeTagSlug}
-          onSelectMode={() => {}}
-          onSelectTagSlug={handleSelectSportsTag}
-          onNavigateHref={handleNavigateHref}
           countByTagSlug={sportsCountsBySlug}
         />
         <div
@@ -299,7 +300,7 @@ export default function SportsLayoutShell({
                   <div className="flex items-center gap-3">
                     <button
                       type="button"
-                      onClick={() => router.push(`/sports/${context.sportSlug}/games` as Route)}
+                      onClick={() => router.push(`${verticalConfig.basePath}/${context.sportSlug}/games` as Route)}
                       className={cn(
                         'rounded-full bg-card px-6 py-2.5 text-sm font-semibold text-foreground transition-colors',
                         activeSection === 'games' && 'bg-primary text-primary-foreground',
@@ -309,7 +310,7 @@ export default function SportsLayoutShell({
                     </button>
                     <button
                       type="button"
-                      onClick={() => router.push(`/sports/${context.sportSlug}/props` as Route)}
+                      onClick={() => router.push(`${verticalConfig.basePath}/${context.sportSlug}/props` as Route)}
                       className={cn(
                         'rounded-full bg-card px-6 py-2.5 text-sm font-semibold text-foreground transition-colors',
                         activeSection === 'props' && 'bg-primary text-primary-foreground',

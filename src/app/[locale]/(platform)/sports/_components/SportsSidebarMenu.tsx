@@ -1,30 +1,33 @@
 'use client'
 
+import type { Route } from 'next'
 import type {
   SportsMenuEntry,
   SportsMenuGroupEntry,
   SportsMenuLinkEntry,
 } from '@/lib/sports-menu-types'
+import type { SportsVertical } from '@/lib/sports-vertical'
 import { ChevronDownIcon } from 'lucide-react'
 import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import IntentPrefetchLink from '@/components/IntentPrefetchLink'
 import { Drawer, DrawerContent } from '@/components/ui/drawer'
+import { getSportsVerticalConfig } from '@/lib/sports-vertical'
 import { cn } from '@/lib/utils'
 
 export type SportsSidebarMode = 'all' | 'live' | 'futures'
 
 interface SportsSidebarMenuProps {
   entries: SportsMenuEntry[]
+  vertical: SportsVertical
   mode: SportsSidebarMode
   activeTagSlug: string | null
   countByTagSlug?: Record<string, number>
-  onSelectMode: (mode: SportsSidebarMode) => void
-  onSelectTagSlug: (tagSlug: string, href: string) => void
-  onNavigateHref: (href: string) => void
 }
 
 type SportsMenuChildLinkEntry = SportsMenuGroupEntry['links'][number]
 type SportsMenuRenderableLinkEntry = SportsMenuLinkEntry | SportsMenuChildLinkEntry
+type SportsMenuNavigableEntry = SportsMenuRenderableLinkEntry | SportsMenuGroupEntry
 
 const MOBILE_MENU_ITEM_WIDTH = 72
 const MOBILE_MENU_ITEM_GAP = 6
@@ -34,9 +37,9 @@ function normalizeTagSlug(value: string | null | undefined) {
   return value?.trim().toLowerCase() || ''
 }
 
-function isFuturesMenuHref(value: string | null | undefined) {
-  return normalizeTagSlug(value).startsWith('/sports/futures')
-}
+// function isFutureMenuHref(value: string | null | undefined, vertical: SportsVertical) {
+//   return normalizeTagSlug(value).startsWith(normalizeTagSlug(getSportsVerticalConfig(vertical).futurePathPrefix))
+// }
 
 function areTagSlugsEquivalent(input: string | null | undefined, current: string | null | undefined) {
   const left = normalizeTagSlug(input)
@@ -57,78 +60,69 @@ function isGroupEntry(entry: SportsMenuEntry): entry is SportsMenuGroupEntry {
   return entry.type === 'group'
 }
 
-function isLiveMenuHref(value: string) {
-  return value === '/sports/live'
+function isLiveMenuHref(value: string, vertical: SportsVertical) {
+  return value === normalizeTagSlug(getSportsVerticalConfig(vertical).livePath)
 }
 
-function isFuturesMenuLinkHref(value: string) {
-  return value.startsWith('/sports/futures')
+function isFutureMenuLinkHref(value: string, vertical: SportsVertical) {
+  return value.startsWith(normalizeTagSlug(getSportsVerticalConfig(vertical).futurePathPrefix))
 }
 
 function isMenuLinkActive({
   entry,
+  vertical,
   mode,
   activeTagSlug,
 }: {
   entry: SportsMenuRenderableLinkEntry
+  vertical: SportsVertical
   mode: SportsSidebarMode
   activeTagSlug: string | null
 }) {
   const href = normalizeTagSlug(entry.href)
-  const isLiveLink = isLiveMenuHref(href)
-  const isFuturesLink = isFuturesMenuLinkHref(href)
+  const isLiveLink = isLiveMenuHref(href, vertical)
+  const isFutureLink = isFutureMenuLinkHref(href, vertical)
 
   if (isLiveLink) {
     return mode === 'live'
   }
 
-  if (isFuturesLink) {
+  if (isFutureLink) {
     return mode === 'futures'
   }
 
   return mode === 'all' && areTagSlugsEquivalent(entry.menuSlug, activeTagSlug)
 }
 
-function handleMenuLinkSelection({
+function isMenuGroupActive(entry: SportsMenuGroupEntry, activeTagSlug: string | null) {
+  if (areTagSlugsEquivalent(entry.menuSlug, activeTagSlug)) {
+    return true
+  }
+
+  return entry.links.some(link => areTagSlugsEquivalent(link.menuSlug, activeTagSlug))
+}
+
+function isMenuEntryActive({
   entry,
-  onSelectMode,
-  onSelectTagSlug,
-  onNavigateHref,
-  onActionComplete,
+  vertical,
+  mode,
+  activeTagSlug,
 }: {
-  entry: SportsMenuRenderableLinkEntry
-  onSelectMode: (mode: SportsSidebarMode) => void
-  onSelectTagSlug: (tagSlug: string, href: string) => void
-  onNavigateHref: (href: string) => void
-  onActionComplete?: () => void
+  entry: SportsMenuNavigableEntry
+  vertical: SportsVertical
+  mode: SportsSidebarMode
+  activeTagSlug: string | null
 }) {
-  const href = normalizeTagSlug(entry.href)
-  const isLiveLink = isLiveMenuHref(href)
-  const isFuturesLink = isFuturesMenuLinkHref(href)
-  const entryTagSlug = entry.menuSlug
-
-  if (isLiveLink) {
-    onSelectMode('live')
-    onNavigateHref(entry.href)
-    onActionComplete?.()
-    return
+  if (entry.type === 'group') {
+    return mode === 'all' && isMenuGroupActive(entry, activeTagSlug)
   }
 
-  if (isFuturesLink) {
-    onSelectMode('futures')
-    onNavigateHref(entry.href)
-    onActionComplete?.()
-    return
-  }
-
-  if (entryTagSlug) {
-    onSelectTagSlug(entryTagSlug, entry.href)
-    onActionComplete?.()
-    return
-  }
-
-  onNavigateHref(entry.href)
-  onActionComplete?.()
+  return isMenuLinkActive({
+    entry,
+    vertical,
+    mode,
+    activeTagSlug,
+  })
 }
 
 function resolveLinkEventsCount(
@@ -156,10 +150,6 @@ function resolveGroupEventsCount(
   let hasCount = false
 
   for (const link of entry.links) {
-    if (isFuturesMenuHref(link.href)) {
-      continue
-    }
-
     const count = resolveLinkEventsCount(link, countByTagSlug)
     if (count == null) {
       continue
@@ -170,6 +160,14 @@ function resolveGroupEventsCount(
   }
 
   return hasCount ? total : null
+}
+
+function findActiveGroupId(entries: SportsMenuEntry[], activeTagSlug: string | null) {
+  const activeGroup = entries
+    .filter(isGroupEntry)
+    .find(entry => isMenuGroupActive(entry, activeTagSlug))
+
+  return activeGroup?.id ?? null
 }
 
 function LiveStatusIcon({ className }: { className?: string }) {
@@ -281,16 +279,48 @@ function FuturesStatusIcon({ className }: { className?: string }) {
   )
 }
 
+function UpcomingStatusIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      className={cn(className, 'text-muted-foreground')}
+      fill="none"
+    >
+      <circle
+        cx="9"
+        cy="9"
+        r="7.25"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+      <polyline
+        points="9 4.75 9 9 12.25 11.25"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  )
+}
+
 function SportsMenuIcon({
   className,
   entry,
-  isFuturesLink,
+  futureIconVariant,
+  isFutureLink,
   isLiveLink,
   nested,
 }: {
   className?: string
   entry: SportsMenuRenderableLinkEntry
-  isFuturesLink: boolean
+  futureIconVariant: 'futures' | 'upcoming'
+  isFutureLink: boolean
   isLiveLink: boolean
   nested: boolean
 }) {
@@ -298,8 +328,10 @@ function SportsMenuIcon({
     return <LiveStatusIcon className={className} />
   }
 
-  if (isFuturesLink && !nested) {
-    return <FuturesStatusIcon className={className} />
+  if (isFutureLink && !nested) {
+    return futureIconVariant === 'upcoming'
+      ? <UpcomingStatusIcon className={className} />
+      : <FuturesStatusIcon className={className} />
   }
 
   return (
@@ -315,47 +347,38 @@ function SportsMenuIcon({
 
 function SportsMobileQuickLink({
   entry,
+  vertical,
   mode,
   activeTagSlug,
-  onSelectMode,
-  onSelectTagSlug,
-  onNavigateHref,
 }: {
   entry: SportsMenuLinkEntry
+  vertical: SportsVertical
   mode: SportsSidebarMode
   activeTagSlug: string | null
-  onSelectMode: (mode: SportsSidebarMode) => void
-  onSelectTagSlug: (tagSlug: string, href: string) => void
-  onNavigateHref: (href: string) => void
 }) {
   const href = normalizeTagSlug(entry.href)
-  const isLiveLink = isLiveMenuHref(href)
-  const isFuturesLink = isFuturesMenuLinkHref(href)
-  const isActive = isMenuLinkActive({ entry, mode, activeTagSlug })
+  const isLiveLink = isLiveMenuHref(href, vertical)
+  const isFutureLink = isFutureMenuLinkHref(href, vertical)
+  const futureIconVariant = vertical === 'esports' ? 'upcoming' : 'futures'
+  const isActive = isMenuLinkActive({ entry, vertical, mode, activeTagSlug })
 
   return (
-    <button
-      type="button"
-      onClick={() => {
-        handleMenuLinkSelection({
-          entry,
-          onSelectMode,
-          onSelectTagSlug,
-          onNavigateHref,
-        })
-      }}
+    <IntentPrefetchLink
+      href={entry.href as Route}
+      aria-current={isActive ? 'page' : undefined}
       className={cn(
         `
           flex h-19 w-[72px] shrink-0 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-center
           transition-colors
         `,
-        isActive ? 'bg-muted/75' : 'bg-transparent hover:bg-muted/55',
+        isActive ? 'bg-muted' : 'bg-transparent hover:bg-muted',
       )}
     >
       <span className="size-6">
         <SportsMenuIcon
           entry={entry}
-          isFuturesLink={isFuturesLink}
+          futureIconVariant={futureIconVariant}
+          isFutureLink={isFutureLink}
           isLiveLink={isLiveLink}
           nested={false}
           className="size-full"
@@ -364,59 +387,50 @@ function SportsMobileQuickLink({
       <span className="w-full truncate text-2xs leading-none font-semibold tracking-[0.05em] text-foreground uppercase">
         {entry.label}
       </span>
-    </button>
+    </IntentPrefetchLink>
   )
 }
 
 function SportsMobileSheetLink({
   entry,
+  vertical,
   nested = false,
   mode,
   activeTagSlug,
   countByTagSlug,
-  onSelectMode,
-  onSelectTagSlug,
-  onNavigateHref,
   onActionComplete,
 }: {
   entry: SportsMenuRenderableLinkEntry
+  vertical: SportsVertical
   nested?: boolean
   mode: SportsSidebarMode
   activeTagSlug: string | null
   countByTagSlug?: Record<string, number>
-  onSelectMode: (mode: SportsSidebarMode) => void
-  onSelectTagSlug: (tagSlug: string, href: string) => void
-  onNavigateHref: (href: string) => void
   onActionComplete?: () => void
 }) {
   const href = normalizeTagSlug(entry.href)
-  const isLiveLink = isLiveMenuHref(href)
-  const isFuturesLink = isFuturesMenuLinkHref(href)
-  const isActive = isMenuLinkActive({ entry, mode, activeTagSlug })
+  const isLiveLink = isLiveMenuHref(href, vertical)
+  const isFutureLink = isFutureMenuLinkHref(href, vertical)
+  const futureIconVariant = vertical === 'esports' ? 'upcoming' : 'futures'
+  const isActive = isMenuLinkActive({ entry, vertical, mode, activeTagSlug })
   const displayCount = resolveLinkEventsCount(entry, countByTagSlug)
 
   return (
-    <button
-      type="button"
-      onClick={() => {
-        handleMenuLinkSelection({
-          entry,
-          onSelectMode,
-          onSelectTagSlug,
-          onNavigateHref,
-          onActionComplete,
-        })
-      }}
+    <IntentPrefetchLink
+      href={entry.href as Route}
+      aria-current={isActive ? 'page' : undefined}
+      onClick={() => onActionComplete?.()}
       className={cn(
-        `flex w-full items-center gap-2.5 rounded-md p-3 text-left transition-colors hover:bg-muted/55`,
+        `flex w-full items-center gap-2.5 rounded-md p-3 text-left transition-colors hover:bg-muted`,
         nested && 'py-2.5 pl-7',
-        isActive ? 'bg-muted/70' : 'bg-transparent',
+        isActive ? 'bg-muted' : 'bg-transparent',
       )}
     >
       <span className={cn('shrink-0', nested ? 'size-4' : 'size-5')}>
         <SportsMenuIcon
           entry={entry}
-          isFuturesLink={isFuturesLink}
+          futureIconVariant={futureIconVariant}
+          isFutureLink={isFutureLink}
           isLiveLink={isLiveLink}
           nested={nested}
           className="size-full"
@@ -439,79 +453,101 @@ function SportsMobileSheetLink({
           )
         </span>
       )}
-    </button>
+    </IntentPrefetchLink>
   )
 }
 
 function SportsMenuLink({
   entry,
+  vertical,
   nested = false,
   mode,
   activeTagSlug,
   countByTagSlug,
-  onSelectMode,
-  onSelectTagSlug,
-  onNavigateHref,
   onActionComplete,
 }: {
   entry: SportsMenuRenderableLinkEntry
+  vertical: SportsVertical
   nested?: boolean
   mode: SportsSidebarMode
   activeTagSlug: string | null
   countByTagSlug?: Record<string, number>
-  onSelectMode: (mode: SportsSidebarMode) => void
-  onSelectTagSlug: (tagSlug: string, href: string) => void
-  onNavigateHref: (href: string) => void
   onActionComplete?: () => void
 }) {
   const href = normalizeTagSlug(entry.href)
-  const isLiveLink = isLiveMenuHref(href)
-  const isFuturesLink = isFuturesMenuLinkHref(href)
-  const entryTagSlug = entry.menuSlug
-  const isActive = isMenuLinkActive({ entry, mode, activeTagSlug })
-  const dynamicCount = entryTagSlug ? countByTagSlug?.[entryTagSlug] : null
-  const displayCount = typeof dynamicCount === 'number' && dynamicCount > 0
-    ? dynamicCount
-    : null
+  const isLiveLink = isLiveMenuHref(href, vertical)
+  const isFutureLink = isFutureMenuLinkHref(href, vertical)
+  const futureIconVariant = vertical === 'esports' ? 'upcoming' : 'futures'
+  const isActive = isMenuLinkActive({ entry, vertical, mode, activeTagSlug })
+  const displayCount = resolveLinkEventsCount(entry, countByTagSlug)
 
-  function handleClick() {
-    handleMenuLinkSelection({
-      entry,
-      onSelectMode,
-      onSelectTagSlug,
-      onNavigateHref,
-      onActionComplete,
-    })
+  if (nested) {
+    return (
+      <IntentPrefetchLink
+        href={entry.href as Route}
+        aria-current={isActive ? 'page' : undefined}
+        onClick={() => onActionComplete?.()}
+        className="block"
+      >
+        <div
+          className={cn(
+            'relative rounded-md p-3 transition-colors hover:bg-muted',
+            isActive ? 'bg-muted' : 'bg-transparent',
+          )}
+        >
+          <div className="flex min-w-0 items-center gap-x-2.5">
+            <span className="shrink-0 text-muted-foreground [&_svg]:size-4">
+              <SportsMenuIcon
+                entry={entry}
+                futureIconVariant={futureIconVariant}
+                isFutureLink={isFutureLink}
+                isLiveLink={isLiveLink}
+                nested
+                className="size-5 object-contain"
+              />
+            </span>
+            <span className="truncate pr-4 text-sm font-medium whitespace-nowrap">
+              {entry.label}
+            </span>
+          </div>
+
+          {displayCount !== null && (
+            <span
+              className="absolute top-1/2 right-3 -translate-y-1/2 text-[11px] font-bold text-neutral-400 tabular-nums"
+            >
+              {displayCount}
+            </span>
+          )}
+        </div>
+      </IntentPrefetchLink>
+    )
   }
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
+    <IntentPrefetchLink
+      href={entry.href as Route}
+      aria-current={isActive ? 'page' : undefined}
+      onClick={() => onActionComplete?.()}
       className={cn(
-        `flex w-full items-center justify-between rounded-md p-3 text-left transition-colors hover:bg-muted/55`,
-        nested && 'py-2.5',
-        isActive ? 'bg-muted/70' : 'bg-transparent',
+        `
+          flex w-full flex-row items-center justify-between rounded-md bg-transparent p-3 text-left transition-colors
+          hover:bg-muted
+        `,
+        isActive ? 'bg-muted' : 'bg-transparent',
       )}
     >
-      <span className="flex min-w-0 flex-1 items-center gap-2.5">
-        <span className={cn('shrink-0', nested ? 'size-4' : 'size-5')}>
+      <span className="flex min-w-0 flex-1 flex-row items-center gap-x-2.5">
+        <span className="size-5 shrink-0 text-muted-foreground [&_svg]:size-5">
           <SportsMenuIcon
             entry={entry}
-            isFuturesLink={isFuturesLink}
+            futureIconVariant={futureIconVariant}
+            isFutureLink={isFutureLink}
             isLiveLink={isLiveLink}
-            nested={nested}
+            nested={false}
             className="size-full"
           />
         </span>
-        <span
-          className={cn(
-            'truncate text-foreground',
-            nested ? 'text-sm font-medium' : 'text-sm font-semibold',
-          )}
-        >
-          {entry.label}
-        </span>
+        <span className="truncate text-sm font-semibold">{entry.label}</span>
       </span>
 
       {displayCount !== null && (
@@ -519,40 +555,36 @@ function SportsMenuLink({
           {displayCount}
         </span>
       )}
-    </button>
+    </IntentPrefetchLink>
   )
 }
 
 export default function SportsSidebarMenu({
   entries,
+  vertical,
   mode,
   activeTagSlug,
   countByTagSlug,
-  onSelectMode,
-  onSelectTagSlug,
-  onNavigateHref,
 }: SportsSidebarMenuProps) {
+  const verticalConfig = getSportsVerticalConfig(vertical)
   const mobileQuickMenuContainerRef = useRef<HTMLDivElement | null>(null)
   const [isMobileMoreMenuOpen, setIsMobileMoreMenuOpen] = useState(false)
   const [mobileVisiblePrimaryLinkCount, setMobileVisiblePrimaryLinkCount] = useState(4)
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
-    const groups = entries.filter(isGroupEntry)
-    return Object.fromEntries(groups.map(group => [group.id, false]))
-  })
-  const nonFuturesTopLevelLinks = useMemo(
-    () => entries
-      .filter(isLinkEntry)
-      .filter(entry => !isFuturesMenuHref(entry.href)),
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(() =>
+    findActiveGroupId(entries, activeTagSlug),
+  )
+  const primaryTopLevelLinks = useMemo(
+    () => entries.filter(isLinkEntry),
     [entries],
   )
-  const allNonFuturesLinks = useMemo(
+  const allMenuEntries = useMemo(
     () => entries.flatMap((entry) => {
       if (entry.type === 'link') {
-        return isFuturesMenuHref(entry.href) ? [] : [entry]
+        return [entry]
       }
 
       if (entry.type === 'group') {
-        return entry.links.filter(link => !isFuturesMenuHref(link.href))
+        return [entry, ...entry.links]
       }
 
       return []
@@ -560,50 +592,28 @@ export default function SportsSidebarMenu({
     [entries],
   )
   const mobileVisiblePrimaryLinks = useMemo(
-    () => nonFuturesTopLevelLinks.slice(0, mobileVisiblePrimaryLinkCount),
-    [nonFuturesTopLevelLinks, mobileVisiblePrimaryLinkCount],
+    () => primaryTopLevelLinks.slice(0, mobileVisiblePrimaryLinkCount),
+    [primaryTopLevelLinks, mobileVisiblePrimaryLinkCount],
   )
   const hasVisibleActiveMobilePrimaryLink = mobileVisiblePrimaryLinks.some(entry => isMenuLinkActive({
     entry,
+    vertical,
     mode,
     activeTagSlug,
   }))
-  const isMobileMoreButtonActive = !hasVisibleActiveMobilePrimaryLink && allNonFuturesLinks.some(entry =>
-    isMenuLinkActive({
+  const isMobileMoreButtonActive = !hasVisibleActiveMobilePrimaryLink && allMenuEntries.some(entry =>
+    isMenuEntryActive({
       entry,
+      vertical,
       mode,
       activeTagSlug,
     }),
   )
 
   useEffect(() => {
-    const groupIds = entries
-      .filter(isGroupEntry)
-      .map(group => group.id)
-
-    setExpandedGroups((current) => {
-      const next: Record<string, boolean> = {}
-      let changed = false
-
-      for (const groupId of groupIds) {
-        next[groupId] = current[groupId] ?? false
-      }
-
-      if (Object.keys(current).length !== Object.keys(next).length) {
-        changed = true
-      }
-      else {
-        for (const groupId of groupIds) {
-          if ((current[groupId] ?? false) !== next[groupId]) {
-            changed = true
-            break
-          }
-        }
-      }
-
-      return changed ? next : current
-    })
-  }, [entries])
+    const nextExpandedGroupId = findActiveGroupId(entries, activeTagSlug)
+    setExpandedGroupId(current => (current === nextExpandedGroupId ? current : nextExpandedGroupId))
+  }, [entries, activeTagSlug])
 
   useEffect(() => {
     const container = mobileQuickMenuContainerRef.current
@@ -650,17 +660,17 @@ export default function SportsSidebarMenu({
   function renderDesktopMenuEntries(onActionComplete?: () => void) {
     return entries.map((entry) => {
       if (entry.type === 'divider') {
-        return <div key={entry.id} className="mb-2 w-full border-b border-border pb-2" />
+        return <div key={entry.id} className="mb-2 w-full border-b pb-2" />
       }
 
       if (entry.type === 'header') {
         return (
           <div
             key={entry.id}
-            className={`
-              mt-2 mb-1 flex w-full items-center px-3 py-2 text-left text-[11px] font-semibold tracking-[0.08em]
+            className="
+              mt-4 mb-3 flex items-center p-3 text-[11px] font-medium tracking-wider whitespace-nowrap
               text-muted-foreground uppercase
-            `}
+            "
           >
             {entry.label}
           </div>
@@ -668,48 +678,49 @@ export default function SportsSidebarMenu({
       }
 
       if (isLinkEntry(entry)) {
-        if (isFuturesMenuHref(entry.href)) {
-          return null
-        }
-
         return (
           <SportsMenuLink
             key={entry.id}
             entry={entry}
+            vertical={vertical}
             mode={mode}
             activeTagSlug={activeTagSlug}
             countByTagSlug={countByTagSlug}
-            onSelectMode={onSelectMode}
-            onSelectTagSlug={onSelectTagSlug}
-            onNavigateHref={onNavigateHref}
             onActionComplete={onActionComplete}
           />
         )
       }
 
-      const visibleLinks = entry.links.filter(link => !isFuturesMenuHref(link.href))
+      const visibleLinks = entry.links
       if (visibleLinks.length === 0) {
         return null
       }
 
-      const isExpanded = expandedGroups[entry.id] ?? true
+      const isExpanded = expandedGroupId === entry.id
+      const isCurrentPage = areTagSlugsEquivalent(entry.menuSlug, activeTagSlug)
+
       return (
         <div key={entry.id}>
-          <button
-            type="button"
-            className={`
-              flex w-full items-center justify-between rounded-md bg-transparent p-3 text-left transition-colors
-              hover:bg-muted/55
-            `}
-            onClick={() => {
-              setExpandedGroups(current => ({
-                ...current,
-                [entry.id]: !(current[entry.id] ?? true),
-              }))
+          <IntentPrefetchLink
+            href={entry.href as Route}
+            aria-current={isCurrentPage ? 'page' : undefined}
+            onClick={(event) => {
+              if (isCurrentPage) {
+                event.preventDefault()
+                setExpandedGroupId(current => (current === entry.id ? null : entry.id))
+                return
+              }
+
+              setExpandedGroupId(entry.id)
+              onActionComplete?.()
             }}
+            className={cn(
+              `flex w-full flex-row items-center justify-between rounded-md p-3 transition-colors hover:bg-muted`,
+              isExpanded ? 'bg-muted' : 'bg-transparent',
+            )}
           >
-            <span className="flex min-w-0 flex-1 items-center gap-2.5">
-              <span className="size-5 shrink-0">
+            <span className="flex min-w-0 items-center gap-x-2.5">
+              <span className="size-5 shrink-0 text-muted-foreground [&_svg]:size-5">
                 <Image
                   src={entry.iconPath}
                   alt=""
@@ -718,21 +729,21 @@ export default function SportsSidebarMenu({
                   className="size-full object-contain"
                 />
               </span>
-              <span className="truncate text-sm font-semibold text-foreground">{entry.label}</span>
+              <span className="truncate text-sm font-semibold">{entry.label}</span>
             </span>
             <ChevronDownIcon
               className={cn(
-                'size-3.5 shrink-0 text-muted-foreground transition-transform duration-200',
+                'size-3 shrink-0 text-muted-foreground transition-transform duration-200',
                 isExpanded ? 'rotate-180' : 'rotate-0',
               )}
             />
-          </button>
+          </IntentPrefetchLink>
 
           <div
             aria-hidden={!isExpanded}
             className={cn(
-              `grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-out`,
-              isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-65',
+              'grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-out',
+              isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
             )}
           >
             <div className="min-h-0 overflow-hidden">
@@ -741,13 +752,11 @@ export default function SportsSidebarMenu({
                   <SportsMenuLink
                     key={link.id}
                     entry={link}
+                    vertical={vertical}
                     nested
                     mode={mode}
                     activeTagSlug={activeTagSlug}
                     countByTagSlug={countByTagSlug}
-                    onSelectMode={onSelectMode}
-                    onSelectTagSlug={onSelectTagSlug}
-                    onNavigateHref={onNavigateHref}
                     onActionComplete={onActionComplete}
                   />
                 ))}
@@ -779,43 +788,38 @@ export default function SportsSidebarMenu({
       }
 
       if (isLinkEntry(entry)) {
-        if (isFuturesMenuHref(entry.href)) {
-          return null
-        }
-
         return (
           <SportsMobileSheetLink
             key={entry.id}
             entry={entry}
+            vertical={vertical}
             mode={mode}
             activeTagSlug={activeTagSlug}
             countByTagSlug={countByTagSlug}
-            onSelectMode={onSelectMode}
-            onSelectTagSlug={onSelectTagSlug}
-            onNavigateHref={onNavigateHref}
             onActionComplete={() => setIsMobileMoreMenuOpen(false)}
           />
         )
       }
 
-      const visibleLinks = entry.links.filter(link => !isFuturesMenuHref(link.href))
+      const visibleLinks = entry.links
       if (visibleLinks.length === 0) {
         return null
       }
 
-      const isExpanded = expandedGroups[entry.id] ?? true
+      const isExpanded = expandedGroupId === entry.id
+      const isGroupActive = isMenuGroupActive(entry, activeTagSlug)
       const groupCount = resolveGroupEventsCount(entry, countByTagSlug)
 
       return (
         <div key={entry.id}>
           <button
             type="button"
-            className="flex w-full items-center gap-2.5 rounded-md p-3 text-left transition-colors hover:bg-muted/55"
+            className={cn(
+              'flex w-full items-center gap-2.5 rounded-md p-3 text-left transition-colors hover:bg-muted',
+              isGroupActive ? 'bg-muted' : 'bg-transparent',
+            )}
             onClick={() => {
-              setExpandedGroups(current => ({
-                ...current,
-                [entry.id]: !(current[entry.id] ?? true),
-              }))
+              setExpandedGroupId(current => (current === entry.id ? null : entry.id))
             }}
           >
             <span className="size-5 shrink-0">
@@ -861,13 +865,11 @@ export default function SportsSidebarMenu({
                   <SportsMobileSheetLink
                     key={link.id}
                     entry={link}
+                    vertical={vertical}
                     nested
                     mode={mode}
                     activeTagSlug={activeTagSlug}
                     countByTagSlug={countByTagSlug}
-                    onSelectMode={onSelectMode}
-                    onSelectTagSlug={onSelectTagSlug}
-                    onNavigateHref={onNavigateHref}
                     onActionComplete={() => setIsMobileMoreMenuOpen(false)}
                   />
                 ))}
@@ -887,11 +889,9 @@ export default function SportsSidebarMenu({
             <SportsMobileQuickLink
               key={entry.id}
               entry={entry}
+              vertical={vertical}
               mode={mode}
               activeTagSlug={activeTagSlug}
-              onSelectMode={onSelectMode}
-              onSelectTagSlug={onSelectTagSlug}
-              onNavigateHref={onNavigateHref}
             />
           ))}
 
@@ -904,10 +904,10 @@ export default function SportsSidebarMenu({
                 transition-colors
               `,
               isMobileMoreButtonActive || isMobileMoreMenuOpen
-                ? 'bg-muted/75'
-                : 'bg-transparent hover:bg-muted/55',
+                ? 'bg-muted'
+                : 'bg-transparent hover:bg-muted',
             )}
-            aria-label="Open more sports"
+            aria-label={`Open more ${verticalConfig.label.toLowerCase()}`}
           >
             <span className="relative -top-1 text-[30px] leading-none font-bold text-foreground">...</span>
             <span className="
@@ -922,7 +922,7 @@ export default function SportsSidebarMenu({
         <Drawer open={isMobileMoreMenuOpen} onOpenChange={setIsMobileMoreMenuOpen}>
           <DrawerContent className="max-h-[88vh] w-full border-border/70 bg-background px-0 pt-2 pb-4">
             <div className="px-4 pb-2">
-              <p className="text-base font-semibold text-foreground">Sports</p>
+              <p className="text-base font-semibold text-foreground">{verticalConfig.label}</p>
             </div>
             <div className="max-h-[72dvh] overflow-y-auto px-2">
               {renderMobileSheetMenuEntries()}
@@ -934,7 +934,7 @@ export default function SportsSidebarMenu({
       <aside
         data-sports-scroll-pane="sidebar"
         className={`
-          hidden w-[180px] shrink-0 self-start
+          hidden w-[190px] shrink-0 self-start
           lg:sticky lg:top-22 lg:flex lg:max-h-[calc(100vh-5.5rem)] lg:flex-col lg:overflow-y-auto lg:py-2 lg:pr-1
         `}
       >

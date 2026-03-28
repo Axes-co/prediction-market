@@ -35,7 +35,7 @@ export default async function SportsLivePage({ params }: { params: Promise<{ loc
       locale: locale as SupportedLocale,
       sportsSection: 'games',
     }),
-    SportsMenuRepository.getLayoutData(),
+    SportsMenuRepository.getLayoutData('sports'),
   ])
   const cards = buildSportsGamesCards(events ?? [])
 
@@ -46,6 +46,7 @@ export default async function SportsLivePage({ params }: { params: Promise<{ loc
       sportTitle="LIVE"
       pageMode="live"
       categoryTitleBySlug={layoutData?.h1TitleBySlug ?? {}}
+      vertical="sports"
     />
   )
 }

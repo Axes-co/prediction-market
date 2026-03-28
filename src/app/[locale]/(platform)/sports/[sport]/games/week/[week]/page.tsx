@@ -7,6 +7,7 @@ import { notFound } from 'next/navigation'
 import SportsGamesCenter from '@/app/[locale]/(platform)/sports/_components/SportsGamesCenter'
 import { buildSportsGamesCards } from '@/app/[locale]/(platform)/sports/_utils/sports-games-data'
 import { mergeUniqueEventsById } from '@/app/[locale]/(platform)/sports/_utils/sports-games-utils'
+import { findSportsHrefBySlug } from '@/app/[locale]/(platform)/sports/_utils/sports-menu-routing'
 import { EventRepository } from '@/lib/db/queries/event'
 import { SportsMenuRepository } from '@/lib/db/queries/sports-menu'
 import { buildPageMetadata } from '@/lib/seo'
@@ -64,9 +65,15 @@ export default async function SportsGamesBySportWeekPage({
 
   const [{ data: canonicalSportSlug }, { data: layoutData }] = await Promise.all([
     SportsMenuRepository.resolveCanonicalSlugByAlias(sport),
-    SportsMenuRepository.getLayoutData(),
+    SportsMenuRepository.getLayoutData('sports'),
   ])
-  if (!canonicalSportSlug) {
+  if (
+    !canonicalSportSlug
+    || !findSportsHrefBySlug({
+      menuEntries: layoutData?.menuEntries,
+      canonicalSportSlug,
+    })
+  ) {
     notFound()
   }
 
@@ -101,6 +108,7 @@ export default async function SportsGamesBySportWeekPage({
       sportSlug={canonicalSportSlug}
       sportTitle={sportTitle}
       initialWeek={parsedWeek}
+      vertical="sports"
     />
   )
 }
