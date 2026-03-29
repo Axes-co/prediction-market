@@ -6,7 +6,7 @@ import PlatformViewerState from '@/app/[locale]/(platform)/_components/PlatformV
 import AdminHeader from '@/app/[locale]/admin/_components/AdminHeader'
 import AdminSidebar from '@/app/[locale]/admin/_components/AdminSidebar'
 import { buildNoIndexMetadata } from '@/lib/seo'
-import { AppProviders } from '@/providers/AppProviders'
+import AppKitProvider from '@/providers/AppKitProvider'
 
 export const metadata: Metadata = buildNoIndexMetadata('Admin')
 
@@ -15,7 +15,7 @@ export default async function AdminLayout({ params, children }: LayoutProps<'/[l
   setRequestLocale(locale)
 
   return (
-    <AppProviders>
+    <AppKitProvider>
       <PlatformViewerState />
       <AdminHeader />
       <main className="container py-4 lg:py-8">
@@ -26,6 +26,6 @@ export default async function AdminLayout({ params, children }: LayoutProps<'/[l
           </div>
         </div>
       </main>
-    </AppProviders>
+    </AppKitProvider>
   )
 }

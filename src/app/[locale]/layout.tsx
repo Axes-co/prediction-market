@@ -18,6 +18,7 @@ import { IS_TEST_MODE } from '@/lib/network'
 import { resolvePwaThemeColors } from '@/lib/pwa-colors'
 import siteUrlUtils from '@/lib/site-url'
 import { loadRuntimeThemeState } from '@/lib/theme-settings'
+import { AppProviders } from '@/providers/AppProviders'
 import SiteIdentityProvider from '@/providers/SiteIdentityProvider'
 
 const { resolveSiteUrl } = siteUrlUtils
@@ -123,9 +124,11 @@ export default async function LocaleLayout({ params, children }: LayoutProps<'/[
         {runtimeTheme.theme.cssText && <style id="theme-vars" dangerouslySetInnerHTML={{ __html: runtimeTheme.theme.cssText }} />}
         <SiteIdentityProvider site={runtimeTheme.site}>
           <NextIntlClientProvider locale={locale}>
-            {IS_TEST_MODE && <TestModeBannerDeferred />}
-            <PwaInstallStateSync />
-            {children}
+            <AppProviders>
+              {IS_TEST_MODE && <TestModeBannerDeferred />}
+              <PwaInstallStateSync />
+              {children}
+            </AppProviders>
           </NextIntlClientProvider>
         </SiteIdentityProvider>
       </body>

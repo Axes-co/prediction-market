@@ -14,7 +14,7 @@ import PlatformNavigationProvider from '@/app/[locale]/(platform)/_providers/Pla
 import { cacheTags } from '@/lib/cache-tags'
 import { TagRepository } from '@/lib/db/queries/tag'
 import { buildChildParentMap, buildPlatformNavigationTags } from '@/lib/platform-navigation'
-import { AppProviders } from '@/providers/AppProviders'
+import AppKitProvider from '@/providers/AppKitProvider'
 
 export default async function PlatformLayout({ params, children }: LayoutProps<'/[locale]'>) {
   const { locale } = await params
@@ -32,7 +32,7 @@ export default async function PlatformLayout({ params, children }: LayoutProps<'
   const childParentMap = buildChildParentMap(mainTags ?? [])
 
   return (
-    <AppProviders>
+    <AppKitProvider>
       <PlatformViewerState />
       <FilterProvider>
         <PlatformNavigationProvider tags={tags} childParentMap={childParentMap}>
@@ -44,6 +44,6 @@ export default async function PlatformLayout({ params, children }: LayoutProps<'
           <AffiliateQueryHandler />
         </PlatformNavigationProvider>
       </FilterProvider>
-    </AppProviders>
+    </AppKitProvider>
   )
 }

@@ -26,6 +26,7 @@ import {
   validateThemeSiteLogoImagePath,
   validateThemeSiteLogoMode,
   validateThemeSiteName,
+  validateThemeSiteSupportUrl,
 } from '@/lib/theme-site-identity'
 
 const THEME_SETTINGS_GROUP = 'theme'
@@ -420,7 +421,7 @@ function normalizeThemeSiteConfig(params: {
     return { data: null, error: redditLinkValidated.error }
   }
 
-  const supportUrlValidated = validateThemeSiteExternalUrl(params.supportUrlValue, params.supportUrlErrorLabel)
+  const supportUrlValidated = validateThemeSiteSupportUrl(params.supportUrlValue, params.supportUrlErrorLabel)
   if (supportUrlValidated.error) {
     return { data: null, error: supportUrlValidated.error }
   }

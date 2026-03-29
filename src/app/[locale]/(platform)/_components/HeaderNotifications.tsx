@@ -118,7 +118,7 @@ export default function HeaderNotifications() {
   }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button type="button" size="headerIconCompact" variant="ghost" className="relative">
           <BellIcon className="size-[1.35rem]" />
