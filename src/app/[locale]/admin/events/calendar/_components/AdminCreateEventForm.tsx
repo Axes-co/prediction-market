@@ -4026,7 +4026,7 @@ export default function AdminCreateEventForm({
           setPendingWorkflowRequestId(null)
           setPendingWorkflowStatus(null)
           toast.success('All signatures completed. Your created event will be available on your site shortly.', {
-            duration: 10000,
+            duration: 10_000,
           })
           return pending
         }
@@ -4465,7 +4465,7 @@ export default function AdminCreateEventForm({
             setPendingWorkflowRequestId(null)
             setPendingWorkflowStatus(null)
             toast.success('All signatures completed. Your created event will be available on your site shortly.', {
-              duration: 10000,
+              duration: 10_000,
             })
             return
           }

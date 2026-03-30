@@ -80,6 +80,7 @@ export default function HeaderDropdownUserMenuGuest() {
 
     if (isIos) {
       toast.info(t('Install app'), {
+        duration: 10_000,
         description: (
           <PwaInstallIosInstructions className="max-w-sm pt-1" />
         ),
