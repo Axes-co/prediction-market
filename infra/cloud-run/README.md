@@ -82,6 +82,13 @@ gcloud scheduler jobs create http kuest-sync-events \
   --http-method=GET \
   --headers="Authorization=Bearer ${CRON_SECRET}"
 
+gcloud scheduler jobs create http kuest-sync-event-creations \
+  --location=us-central1 \
+  --schedule="0,30 * * * *" \
+  --uri="${SITE_URL}/api/sync/event-creations" \
+  --http-method=GET \
+  --headers="Authorization=Bearer ${CRON_SECRET}"
+
 gcloud scheduler jobs create http kuest-sync-resolution \
   --location=us-central1 \
   --schedule="2-56/6 * * * *" \

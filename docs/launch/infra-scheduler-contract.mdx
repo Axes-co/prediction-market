@@ -14,6 +14,7 @@ description: Canonical `/api/sync/*` schedule and request contract for non-Verce
 - Base URL: `SITE_URL`
 - Endpoints:
   - `/api/sync/events`
+  - `/api/sync/event-creations`
   - `/api/sync/resolution`
   - `/api/sync/translations`
   - `/api/sync/volume`
@@ -33,6 +34,7 @@ curl -sS -X GET \
 | Endpoint | Cron schedule | Notes |
 | --- | --- | --- |
 | `/api/sync/events` | `1-59/3 * * * *` | Every 3 min (offset by 1 min) |
+| `/api/sync/event-creations` | `0,30 * * * *` | Twice per hour (minute 0 and 30) |
 | `/api/sync/resolution` | `2-56/6 * * * *` | Every 6 min (offset by 2 min) |
 | `/api/sync/volume` | `16,46 * * * *` | Twice per hour (minute 16 and 46) |
 | `/api/sync/translations` | `13,37 * * * *` | Twice per hour (minute 13 and 37) |

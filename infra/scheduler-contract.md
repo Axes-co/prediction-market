@@ -17,6 +17,7 @@ If you run Supabase mode, `npm run db:push` configures `pg_cron` with the same s
 - Base URL: `SITE_URL`
 - Endpoints:
   - `/api/sync/events`
+  - `/api/sync/event-creations`
   - `/api/sync/resolution`
   - `/api/sync/translations`
   - `/api/sync/volume`
@@ -36,6 +37,7 @@ These schedules mirror what `scripts/migrate.js` configures with `pg_cron` in Su
 | Endpoint | Cron schedule | Notes |
 | --- | --- | --- |
 | `/api/sync/events` | `1-59/3 * * * *` | Every 3 min (offset by 1 min) |
+| `/api/sync/event-creations` | `0,30 * * * *` | Twice per hour (minute 0 and 30) |
 | `/api/sync/resolution` | `2-56/6 * * * *` | Every 6 min (offset by 2 min) |
 | `/api/sync/volume` | `16,46 * * * *` | Twice per hour (minute 16 and 46) |
 | `/api/sync/translations` | `13,37 * * * *` | Twice per hour (minute 13 and 37) |
@@ -46,6 +48,7 @@ Use UTC unless your operations team has a strict local-time requirement.
 
 - Always set scheduler concurrency to non-overlapping if your platform supports it.
 - `events` and `resolution` have DB lock protection and may return `409` when a run is already in progress.
+- `event-creations` uses job dedupe and retry handling, but should still run from a single scheduler backend only.
 - Treat each endpoint as idempotent operationally, but do not intentionally run duplicate schedulers.
 - Pick one scheduler backend for these endpoints:
   - Supabase `pg_cron`, or
