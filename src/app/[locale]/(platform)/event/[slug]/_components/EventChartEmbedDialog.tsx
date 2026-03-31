@@ -1,16 +1,19 @@
 'use client'
 
-import type { EmbedCodeFormat, EmbedToggles } from '@/lib/embed-widget'
 import type { EmbedTheme } from '@/lib/embed-theme'
+import type { EmbedCodeFormat, EmbedToggles } from '@/lib/embed-widget'
 import type { Market } from '@/types'
+import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
 import { CheckIcon, ChevronLeftIcon, CodeIcon, CopyIcon } from 'lucide-react'
 import { useExtracted, useLocale } from 'next-intl'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button } from '@/components/ui/button'
 import EmbedCodeHighlight from '@/components/embed/EmbedCodeHighlight'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 import { fetchAffiliateSettingsFromAPI } from '@/lib/affiliate-data'
 import { maybeShowAffiliateToast } from '@/lib/affiliate-toast'
@@ -22,8 +25,8 @@ import {
   MIN_EMBED_HEIGHT,
   MIN_EMBED_WIDTH,
 } from '@/lib/embed-dimensions'
-import { buildEmbedCode, buildEmbedSrc, buildPreviewSrc } from '@/lib/embed-widget'
 import { buildMarketLabel, normalizeBaseUrl, normalizeOutcomePrice, toPercent } from '@/lib/embed-utils'
+import { buildEmbedCode, buildEmbedSrc, buildPreviewSrc } from '@/lib/embed-widget'
 import { useUser } from '@/stores/useUser'
 
 // ---------------------------------------------------------------------------
@@ -50,7 +53,9 @@ const DIM_STEP = 10
 const SITE_URL = normalizeBaseUrl(
   (() => {
     const v = process.env.SITE_URL
-    if (!v?.trim()) throw new Error('SITE_URL is required for embeds.')
+    if (!v?.trim()) {
+      throw new Error('SITE_URL is required for embeds.')
+    }
     return v
   })(),
 )
@@ -69,8 +74,8 @@ function HeightDimensionInput({ value, min, max, onChange }: { value: number, mi
   const clamp = useCallback((v: number) => Math.min(max, Math.max(min, v)), [min, max])
   return (
     <div className="group/dim relative before:absolute before:inset-[-12px] before:content-['']">
-      <button type="button" className={`${DIM_BTN_BASE} left-1/2 -translate-x-1/2 bottom-full mb-1`} onClick={() => onChange(clamp(value + DIM_STEP))}>+</button>
-      <button type="button" className={`${DIM_BTN_BASE} left-1/2 -translate-x-1/2 top-full mt-1`} onClick={() => onChange(clamp(value - DIM_STEP))}>−</button>
+      <button type="button" className={`${DIM_BTN_BASE} bottom-full left-1/2 mb-1 -translate-x-1/2`} onClick={() => onChange(clamp(value + DIM_STEP))}>+</button>
+      <button type="button" className={`${DIM_BTN_BASE} top-full left-1/2 mt-1 -translate-x-1/2`} onClick={() => onChange(clamp(value - DIM_STEP))}>−</button>
       <input type="number" min={min} max={max} step={DIM_STEP} value={value} onChange={e => onChange(clamp(Number(e.target.value) || value))} className={DIM_INPUT_CLASS} />
     </div>
   )
@@ -83,8 +88,8 @@ function WidthDimensionInput({ value, min, max, onChange }: { value: number, min
   const clamp = useCallback((v: number) => Math.min(max, Math.max(min, v)), [min, max])
   return (
     <div className="group/dim relative before:absolute before:inset-[-12px] before:content-['']">
-      <button type="button" className={`${DIM_BTN_BASE} top-1/2 -translate-y-1/2 right-full mr-1`} onClick={() => onChange(clamp(value - DIM_STEP))}>−</button>
-      <button type="button" className={`${DIM_BTN_BASE} top-1/2 -translate-y-1/2 left-full ml-1`} onClick={() => onChange(clamp(value + DIM_STEP))}>+</button>
+      <button type="button" className={`${DIM_BTN_BASE} top-1/2 right-full mr-1 -translate-y-1/2`} onClick={() => onChange(clamp(value - DIM_STEP))}>−</button>
+      <button type="button" className={`${DIM_BTN_BASE} top-1/2 left-full ml-1 -translate-y-1/2`} onClick={() => onChange(clamp(value + DIM_STEP))}>+</button>
       <input type="number" min={min} max={max} step={DIM_STEP} value={value} onChange={e => onChange(clamp(Number(e.target.value) || value))} className={DIM_INPUT_CLASS} />
     </div>
   )
@@ -116,6 +121,7 @@ export default function EventChartEmbedDialog({
   const t = useExtracted()
   const locale = useLocale()
   const site = useSiteIdentity()
+  const isMobile = useIsMobile()
   const user = useUser()
   const affiliateCode = user?.affiliate_code?.trim() ?? ''
 
@@ -132,7 +138,9 @@ export default function EventChartEmbedDialog({
 
   // Reset on open
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      return
+    }
     setView('preview')
     setTheme('dark')
     setCodeFormat('default')
@@ -153,7 +161,9 @@ export default function EventChartEmbedDialog({
     let active = true
     fetchAffiliateSettingsFromAPI()
       .then((r) => {
-        if (!active) return
+        if (!active) {
+          return
+        }
         if (r.success) {
           const s = Number.parseFloat(r.data.affiliateSharePercent)
           const f = Number.parseFloat(r.data.tradeFeePercent)
@@ -161,13 +171,22 @@ export default function EventChartEmbedDialog({
           setTradeFeePercent(Number.isFinite(f) && f > 0 ? f : null)
         }
       })
-      .catch(() => { if (active) { setAffiliateSharePercent(null); setTradeFeePercent(null) } })
-    return () => { active = false }
+      .catch(() => {
+        if (active) {
+          setAffiliateSharePercent(null)
+          setTradeFeePercent(null)
+        }
+      })
+    return () => {
+      active = false
+    }
   }, [affiliateCode, open])
 
   // Sync market selection
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      return
+    }
     if (!markets.some(m => m.condition_id === selectedMarketId)) {
       setSelectedMarketId(initialMarketId ?? markets[0]?.condition_id ?? '')
     }
@@ -181,8 +200,7 @@ export default function EventChartEmbedDialog({
   const marketQuestion = selectedMarket?.question || selectedMarket?.title || marketSlug
 
   const sortedOutcomes = useMemo(() =>
-    [...(selectedMarket?.outcomes ?? [])].sort((a, b) => (a.outcome_index ?? 0) - (b.outcome_index ?? 0)),
-  [selectedMarket])
+    [...(selectedMarket?.outcomes ?? [])].sort((a, b) => (a.outcome_index ?? 0) - (b.outcome_index ?? 0)), [selectedMarket])
   const yesPercent = sortedOutcomes[0] ? toPercent(normalizeOutcomePrice(sortedOutcomes[0])) : 50
   const noPercent = sortedOutcomes[1] ? toPercent(normalizeOutcomePrice(sortedOutcomes[1])) : 50
 
@@ -198,17 +216,24 @@ export default function EventChartEmbedDialog({
   const localePath = locale && locale !== 'en' ? `/${locale}` : ''
   const eventUrl = `${SITE_URL}${localePath}/event/${marketSlug}`
   const embedCode = useMemo(() => buildEmbedCode(codeFormat, {
-    src: embedSrc, width, height,
+    src: embedSrc,
+    width,
+    height,
     title: `${marketQuestion} — ${site.name} Prediction Market`,
-    slug: marketSlug, siteName: site.name, siteUrl: SITE_URL,
-    question: marketQuestion, yesPercent, noPercent, eventUrl,
+    slug: marketSlug,
+    siteName: site.name,
+    siteUrl: SITE_URL,
+    question: marketQuestion,
+    yesPercent,
+    noPercent,
+    eventUrl,
   }), [codeFormat, embedSrc, width, height, marketQuestion, marketSlug, site.name, yesPercent, noPercent, eventUrl])
 
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(embedCode)
       setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
+      window.setTimeout(setCopied, 1500, false)
       maybeShowAffiliateToast({ affiliateCode, affiliateSharePercent, tradeFeePercent, siteName: site.name, context: 'embed' })
     }
     catch (e) { console.error(e) }
@@ -222,185 +247,227 @@ export default function EventChartEmbedDialog({
   const previewScale = Math.min(1, PREVIEW_CONTAINER_WIDTH / width)
   const scaledHeight = height * previewScale
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] w-[calc(100%-1rem)] max-w-4xl overflow-y-auto p-3 sm:p-6 lg:w-fit! lg:max-w-fit!">
-        <DialogHeader className="flex-row items-center">
-          <DialogTitle className="text-xl font-semibold">{t('Embed')}</DialogTitle>
-        </DialogHeader>
-
-        <div className="flex flex-col lg:flex-row gap-4 lg:gap-12 min-h-0">
-          {/* RIGHT — Preview or Code */}
-          <div className="w-full lg:w-fit lg:order-last lg:h-fit">
-            {view === 'preview'
-              ? (
-                  <>
-                    {/* Desktop: full preview with H/W dimension controls */}
-                    <div className="hidden lg:flex w-[500px] h-[400px] flex-col pb-2 pl-6">
-                      <div className="grid grid-cols-[auto_1fr] grid-rows-[1fr_auto] w-fit h-fit">
-                        <div className="flex flex-col items-center gap-2 w-12 justify-center">
-                          <div className="flex flex-col items-center gap-2 transition-[height] duration-150" style={{ height: `${scaledHeight}px` }}>
-                            <span className="flex-1 w-px bg-muted-foreground/20" />
-                            <div className="relative">
-                              <span className="text-xs text-muted-foreground font-semibold leading-none absolute -left-4 top-1/2 -translate-y-1/2">H</span>
-                              <HeightDimensionInput value={height} min={MIN_EMBED_HEIGHT} max={MAX_EMBED_HEIGHT} onChange={setHeight} />
-                            </div>
-                            <span className="flex-1 w-px bg-muted-foreground/20" />
-                          </div>
+  const dialogBody = (
+    <div className="flex min-h-0 flex-col gap-4 lg:flex-row lg:gap-12">
+      {/* RIGHT — Preview or Code */}
+      <div className="w-full lg:order-last lg:size-fit">
+        {view === 'preview'
+          ? (
+              <>
+                {/* Desktop: full preview with H/W dimension controls */}
+                <div className="hidden h-[400px] w-[500px] flex-col pb-2 pl-6 lg:flex">
+                  <div className="grid size-fit grid-cols-[auto_1fr] grid-rows-[1fr_auto]">
+                    <div className="flex w-12 flex-col items-center justify-center gap-2">
+                      <div className="flex flex-col items-center gap-2 transition-[height] duration-150" style={{ height: `${scaledHeight}px` }}>
+                        <span className="w-px flex-1 bg-muted-foreground/20" />
+                        <div className="relative">
+                          <span className="
+                            absolute top-1/2 -left-4 -translate-y-1/2 text-xs leading-none font-semibold
+                            text-muted-foreground
+                          "
+                          >
+                            H
+                          </span>
+                          <HeightDimensionInput value={height} min={MIN_EMBED_HEIGHT} max={MAX_EMBED_HEIGHT} onChange={setHeight} />
                         </div>
-                        <div className="flex items-center justify-center" style={{ width: `${PREVIEW_CONTAINER_WIDTH}px`, height: `${PREVIEW_CONTAINER_HEIGHT}px` }}>
-                          {previewSrc
-                            ? (
-                                <div style={{ width: `${PREVIEW_CONTAINER_WIDTH}px`, height: `${scaledHeight}px` }}>
-                                  <iframe title={t('Embed preview')} src={previewSrc} width={width} height={height} frameBorder={0} scrolling="no" style={{ border: 'none', display: 'block', borderRadius: '16px', overflow: 'hidden', transform: `scale(${previewScale})`, transformOrigin: 'left top' }} />
-                                </div>
-                              )
-                            : <p className="text-sm text-muted-foreground">{t('No market available for this event')}</p>}
-                        </div>
-                        <div />
-                        <div className="flex items-center justify-center h-8">
-                          <div className="flex items-center gap-2 transition-[width] duration-150" style={{ width: `${PREVIEW_CONTAINER_WIDTH}px` }}>
-                            <span className="flex-1 h-px bg-muted-foreground/20" />
-                            <div className="relative">
-                              <span className="text-xs text-muted-foreground font-semibold leading-none absolute -bottom-4 left-1/2 -translate-x-1/2">W</span>
-                              <WidthDimensionInput value={width} min={MIN_EMBED_WIDTH} max={MAX_EMBED_WIDTH} onChange={setWidth} />
-                            </div>
-                            <span className="flex-1 h-px bg-muted-foreground/20" />
-                          </div>
-                        </div>
+                        <span className="w-px flex-1 bg-muted-foreground/20" />
                       </div>
                     </div>
-
-                    {/* Mobile: simple scaled preview */}
-                    <div className="lg:hidden w-full overflow-hidden rounded-2xl">
+                    <div className="flex items-center justify-center" style={{ width: `${PREVIEW_CONTAINER_WIDTH}px`, height: `${PREVIEW_CONTAINER_HEIGHT}px` }}>
                       {previewSrc
                         ? (
-                            <div style={{ height: `${height * Math.min(1, 320 / width)}px` }}>
-                              <iframe title={t('Embed preview')} src={previewSrc} width={width} height={height} frameBorder={0} scrolling="no" style={{ border: 'none', display: 'block', borderRadius: '16px', overflow: 'hidden', transform: `scale(${Math.min(1, 320 / width)})`, transformOrigin: 'left top' }} />
+                            <div style={{ width: `${PREVIEW_CONTAINER_WIDTH}px`, height: `${scaledHeight}px` }}>
+                              <iframe title={t('Embed preview')} src={previewSrc} width={width} height={height} frameBorder={0} scrolling="no" style={{ border: 'none', display: 'block', borderRadius: '16px', overflow: 'hidden', transform: `scale(${previewScale})`, transformOrigin: 'left top' }} />
                             </div>
                           )
-                        : <p className="px-4 py-8 text-center text-sm text-muted-foreground">{t('No market available for this event')}</p>}
+                        : <p className="text-sm text-muted-foreground">{t('No market available for this event')}</p>}
                     </div>
-                  </>
-                )
-              : (
-                  /* ---- CODE VIEW ---- */
-                  <div className="w-full lg:w-[500px] h-[300px] lg:h-[400px] flex flex-col">
-                    <div className="flex flex-col gap-2 h-full min-h-0">
-                      <p className="text-sm text-muted-foreground shrink-0">{t('Copy and paste this code into your website')}</p>
-                      <div className="group relative min-w-0 flex-1 overflow-auto rounded-lg bg-muted/50">
-                        <div className="p-3 pt-7 text-[0.7rem] leading-relaxed">
-                          <EmbedCodeHighlight code={embedCode} />
+                    <div />
+                    <div className="flex h-8 items-center justify-center">
+                      <div className="flex items-center gap-2 transition-[width] duration-150" style={{ width: `${PREVIEW_CONTAINER_WIDTH}px` }}>
+                        <span className="h-px flex-1 bg-muted-foreground/20" />
+                        <div className="relative">
+                          <span className="
+                            absolute -bottom-4 left-1/2 -translate-x-1/2 text-xs leading-none font-semibold
+                            text-muted-foreground
+                          "
+                          >
+                            W
+                          </span>
+                          <WidthDimensionInput value={width} min={MIN_EMBED_WIDTH} max={MAX_EMBED_WIDTH} onChange={setWidth} />
                         </div>
-                        <button
-                          type="button"
-                          className="absolute top-1 right-1 p-1.5 cursor-pointer text-muted-foreground hover:text-foreground"
-                          onClick={handleCopy}
-                        >
-                          {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
-                        </button>
+                        <span className="h-px flex-1 bg-muted-foreground/20" />
                       </div>
                     </div>
                   </div>
-                )}
-          </div>
+                </div>
 
-          {/* LEFT — Controls */}
-          <div className="flex flex-col gap-4 w-full lg:w-64 shrink-0 lg:overflow-y-auto min-h-0 lg:h-[400px] lg:max-h-[500px]">
-            {view === 'preview'
-              ? (
-                  /* ---- PREVIEW CONTROLS ---- */
-                  <>
-                    {/* Market selector */}
-                    {showMarketSelector && (
-                      <div className="flex items-center justify-between gap-2 min-w-0">
-                        <span className="text-sm text-foreground shrink-0">{t('Market')}</span>
-                        <div className="min-w-0">
-                          <Select value={selectedMarketId} onValueChange={setSelectedMarketId}>
-                            <SelectTrigger className="max-w-full overflow-hidden justify-between gap-2 h-9 px-4">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {marketOptions.map(o => <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
+                {/* Mobile: simple scaled preview */}
+                <div className="w-full overflow-hidden rounded-2xl lg:hidden">
+                  {previewSrc
+                    ? (
+                        <div style={{ height: `${height * Math.min(1, 320 / width)}px` }}>
+                          <iframe title={t('Embed preview')} src={previewSrc} width={width} height={height} frameBorder={0} scrolling="no" style={{ border: 'none', display: 'block', borderRadius: '16px', overflow: 'hidden', transform: `scale(${Math.min(1, 320 / width)})`, transformOrigin: 'left top' }} />
                         </div>
-                      </div>
-                    )}
-
-                    {/* Toggles */}
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-foreground">{t('Chart')}</span>
-                        <Switch checked={toggles.showChart} onCheckedChange={v => updateToggle('showChart', v)} />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-foreground">{t('Buy buttons')}</span>
-                        <Switch checked={toggles.showButtons} onCheckedChange={v => updateToggle('showButtons', v)} />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-foreground">{t('Volume')}</span>
-                        <Switch checked={toggles.showVolume} onCheckedChange={v => updateToggle('showVolume', v)} />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-foreground">{t('Y Axis')}</span>
-                        <Switch checked={toggles.showYAxis} onCheckedChange={v => updateToggle('showYAxis', v)} />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-foreground">{t('Grid rows')}</span>
-                        <Switch checked={toggles.showGridRows} onCheckedChange={v => updateToggle('showGridRows', v)} />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-foreground">{t('Border')}</span>
-                        <Switch checked={toggles.showBorder} onCheckedChange={v => updateToggle('showBorder', v)} />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-foreground">{t('Dark mode')}</span>
-                        <Switch checked={theme === 'dark'} onCheckedChange={v => setTheme(v ? 'dark' : 'light')} />
-                      </div>
+                      )
+                    : <p className="px-4 py-8 text-center text-sm text-muted-foreground">{t('No market available for this event')}</p>}
+                </div>
+              </>
+            )
+          : (
+              /* ---- CODE VIEW ---- */
+              <div className="flex h-[300px] w-full flex-col lg:h-[400px] lg:w-[500px]">
+                <div className="flex h-full min-h-0 flex-col gap-2">
+                  <p className="shrink-0 text-sm text-muted-foreground">{t('Copy and paste this code into your website')}</p>
+                  <div className="group relative min-w-0 flex-1 overflow-auto rounded-lg bg-muted/50">
+                    <div className="p-3 pt-7 text-[0.7rem] leading-relaxed">
+                      <EmbedCodeHighlight code={embedCode} />
                     </div>
+                    <button
+                      type="button"
+                      className="
+                        absolute top-1 right-1 cursor-pointer p-1.5 text-muted-foreground
+                        hover:text-foreground
+                      "
+                      onClick={handleCopy}
+                    >
+                      {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+      </div>
 
-                    {/* View Code button */}
-                    <Button className="w-full" onClick={() => setView('code')}>
-                      <CodeIcon className="size-4" />
-                      {t('View Code')}
-                    </Button>
-                  </>
-                )
-              : (
-                  /* ---- CODE CONTROLS ---- */
-                  <>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm text-foreground shrink-0">{t('Code style')}</span>
-                      <Select value={codeFormat} onValueChange={v => setCodeFormat(v as EmbedCodeFormat)}>
-                        <SelectTrigger className="justify-between gap-2 h-9 px-4">
+      {/* LEFT — Controls */}
+      <div className="
+        flex min-h-0 w-full shrink-0 flex-col gap-4
+        lg:h-[400px] lg:max-h-[500px] lg:w-64 lg:overflow-y-auto
+      "
+      >
+        {view === 'preview'
+          ? (
+              /* ---- PREVIEW CONTROLS ---- */
+              <>
+                {/* Market selector */}
+                {showMarketSelector && (
+                  <div className="flex min-w-0 items-center justify-between gap-2">
+                    <span className="shrink-0 text-sm text-foreground">{t('Market')}</span>
+                    <div className="min-w-0">
+                      <Select value={selectedMarketId} onValueChange={setSelectedMarketId}>
+                        <SelectTrigger className="h-9 max-w-full justify-between gap-2 overflow-hidden px-4">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="default">Default</SelectItem>
-                          <SelectItem value="minimal">Minimal</SelectItem>
+                          {marketOptions.map(o => <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>
-
-                    {/* Spacer */}
-                    <div className="flex-1" />
-
-                    {/* Back + Copy */}
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" onClick={() => setView('preview')}>
-                        <ChevronLeftIcon className="size-3" />
-                        {t('Back')}
-                      </Button>
-                      <Button className="flex-1" onClick={handleCopy}>
-                        {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
-                        {t('Copy')}
-                      </Button>
-                    </div>
-                  </>
+                  </div>
                 )}
+
+                {/* Toggles */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-foreground">{t('Chart')}</span>
+                    <Switch checked={toggles.showChart} onCheckedChange={v => updateToggle('showChart', v)} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-foreground">{t('Buy buttons')}</span>
+                    <Switch checked={toggles.showButtons} onCheckedChange={v => updateToggle('showButtons', v)} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-foreground">{t('Volume')}</span>
+                    <Switch checked={toggles.showVolume} onCheckedChange={v => updateToggle('showVolume', v)} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-foreground">{t('Y Axis')}</span>
+                    <Switch checked={toggles.showYAxis} onCheckedChange={v => updateToggle('showYAxis', v)} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-foreground">{t('Grid rows')}</span>
+                    <Switch checked={toggles.showGridRows} onCheckedChange={v => updateToggle('showGridRows', v)} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-foreground">{t('Border')}</span>
+                    <Switch checked={toggles.showBorder} onCheckedChange={v => updateToggle('showBorder', v)} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-foreground">{t('Dark mode')}</span>
+                    <Switch checked={theme === 'dark'} onCheckedChange={v => setTheme(v ? 'dark' : 'light')} />
+                  </div>
+                </div>
+
+                {/* View Code button */}
+                <Button className="w-full" onClick={() => setView('code')}>
+                  <CodeIcon className="size-4" />
+                  {t('View Code')}
+                </Button>
+              </>
+            )
+          : (
+              /* ---- CODE CONTROLS ---- */
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="shrink-0 text-sm text-foreground">{t('Code style')}</span>
+                  <Select value={codeFormat} onValueChange={v => setCodeFormat(v as EmbedCodeFormat)}>
+                    <SelectTrigger className="h-9 justify-between gap-2 px-4">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Default</SelectItem>
+                      <SelectItem value="minimal">Minimal</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Spacer */}
+                <div className="flex-1" />
+
+                {/* Back + Copy */}
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" onClick={() => setView('preview')}>
+                    <ChevronLeftIcon className="size-3" />
+                    {t('Back')}
+                  </Button>
+                  <Button className="flex-1" onClick={handleCopy}>
+                    {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
+                    {t('Copy')}
+                  </Button>
+                </div>
+              </>
+            )}
+      </div>
+    </div>
+  )
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        <DrawerContent className="max-h-[90vh] w-full overflow-hidden bg-background px-4 pt-4 pb-6">
+          <VisuallyHidden>
+            <DrawerTitle>{t('Embed')}</DrawerTitle>
+          </VisuallyHidden>
+          <div className="min-h-0 overflow-y-auto pr-1">
+            {dialogBody}
           </div>
-        </div>
+        </DrawerContent>
+      </Drawer>
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="
+        max-h-[90vh] w-[calc(100%-1rem)] max-w-4xl overflow-y-auto p-3
+        sm:p-6
+        lg:w-fit! lg:max-w-fit!
+      "
+      >
+        <VisuallyHidden>
+          <DialogTitle>{t('Embed')}</DialogTitle>
+        </VisuallyHidden>
+        {dialogBody}
       </DialogContent>
     </Dialog>
   )
