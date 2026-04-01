@@ -31,7 +31,6 @@ import { useExtracted, useLocale } from 'next-intl'
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import SellPositionModal from '@/app/[locale]/(platform)/_components/SellPositionModal'
 import EventChartControls, { defaultChartSettings } from '@/app/[locale]/(platform)/event/[slug]/_components/EventChartControls'
 import EventChartEmbedDialog from '@/app/[locale]/(platform)/event/[slug]/_components/EventChartEmbedDialog'
@@ -53,6 +52,7 @@ import SportsLivestreamFloatingPlayer
   from '@/app/[locale]/(platform)/sports/_components/SportsLivestreamFloatingPlayer'
 import {
   hasSportsGamesCardPrimaryMarketTrio,
+  isSportsGamesCardResolved,
   resolveSportsGamesCardVisibleMarketTypes,
   resolveSportsGamesHeaderMarketTypes,
 } from '@/app/[locale]/(platform)/sports/_utils/sports-games-data'
@@ -84,6 +84,7 @@ import {
   formatVolume,
   fromMicro,
 } from '@/lib/formatters'
+import { resolveOutcomePriceCents, resolveOutcomeSelectionPriceCents } from '@/lib/market-pricing'
 import { formatOddsFromCents, ODDS_FORMAT_OPTIONS } from '@/lib/odds-format'
 import { calculateMarketFill, normalizeBookLevels } from '@/lib/order-panel-utils'
 import { calculateYAxisBounds } from '@/lib/prediction-chart'
@@ -402,16 +403,6 @@ function normalizeHexColor(value: string | null | undefined) {
   return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(withHash) ? withHash : null
 }
 
-function normalizeMarketPriceCents(market: Market) {
-  const value = Number.isFinite(market.price)
-    ? market.price * 100
-    : Number.isFinite(market.probability)
-      ? market.probability
-      : 0
-
-  return Math.max(0, Math.min(100, Math.round(value)))
-}
-
 export function resolveButtonStyle(
   color: string | null,
   tone?: SportsGamesButton['tone'],
@@ -475,13 +466,11 @@ export function resolveButtonOverlayStyle(
 }
 
 function normalizeOutcomePriceCents(outcome: Outcome | null | undefined, market: Market) {
-  if (outcome && Number.isFinite(outcome.buy_price)) {
-    const value = Number(outcome.buy_price) * 100
-    return Math.max(0, Math.min(100, Math.round(value)))
-  }
+  const outcomeIndex = outcome?.outcome_index === OUTCOME_INDEX.NO
+    ? OUTCOME_INDEX.NO
+    : OUTCOME_INDEX.YES
 
-  const yesPrice = normalizeMarketPriceCents(market)
-  return outcome?.outcome_index === OUTCOME_INDEX.NO ? Math.max(0, 100 - yesPrice) : yesPrice
+  return resolveOutcomePriceCents(market, outcomeIndex) ?? 50
 }
 
 export function groupButtonsByMarketType(buttons: SportsGamesButton[]) {
@@ -1084,6 +1073,7 @@ export function SportsGameGraph({
   const heroLegendTextMeasureCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const tradeFlowIdRef = useRef(0)
   const [measuredChartWidth, setMeasuredChartWidth] = useState<number | null>(null)
+  const canRenderPositionedSeriesLegend = usesPositionedSeriesLegend && measuredChartWidth !== null
 
   const fallbackChartWidth = useMemo(() => {
     const viewportWidth = windowWidth ?? 1200
@@ -1096,25 +1086,33 @@ export function SportsGameGraph({
   }, [windowWidth])
   const chartWidth = measuredChartWidth ?? fallbackChartWidth
 
-  useEffect(() => {
+  useBrowserLayoutEffect(() => {
     const element = chartContainerRef.current
-    if (!element || typeof ResizeObserver === 'undefined') {
+    if (!element) {
       return
     }
     const chartElement = element
 
     function updateWidth() {
       const nextWidth = Math.floor(chartElement.clientWidth)
-      if (nextWidth > 0) {
-        setMeasuredChartWidth(nextWidth)
-      }
+      const resolvedWidth = nextWidth > 0 ? nextWidth : fallbackChartWidth
+
+      setMeasuredChartWidth(current => (current === resolvedWidth ? current : resolvedWidth))
     }
 
     updateWidth()
-    const observer = new ResizeObserver(() => updateWidth())
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateWidth)
+      return () => {
+        window.removeEventListener('resize', updateWidth)
+      }
+    }
+
+    const observer = new ResizeObserver(updateWidth)
     observer.observe(chartElement)
     return () => observer.disconnect()
-  }, [])
+  }, [fallbackChartWidth])
 
   useEffect(() => {
     const stored = loadStoredChartSettings()
@@ -1309,7 +1307,7 @@ export function SportsGameGraph({
   }, [graphSeriesTargets])
 
   const heroLegendRenderedWidth = useMemo(() => {
-    if (!usesPositionedSeriesLegend || chartSeries.length === 0) {
+    if (!canRenderPositionedSeriesLegend || chartSeries.length === 0) {
       return HERO_LEGEND_MIN_WIDTH_PX
     }
 
@@ -1339,7 +1337,7 @@ export function SportsGameGraph({
 
     const targetWidth = Math.ceil(longestLabelWidth + HERO_LEGEND_NAME_PADDING_PX)
     return Math.max(HERO_LEGEND_MIN_WIDTH_PX, targetWidth)
-  }, [chartSeries, usesPositionedSeriesLegend])
+  }, [canRenderPositionedSeriesLegend, chartSeries])
 
   const historyChartData = useMemo<DataPoint[]>(() => {
     return normalizedHistory
@@ -1488,7 +1486,7 @@ export function SportsGameGraph({
 
   const heroLegendSeriesWithValues = useMemo(
     () => {
-      if (!usesPositionedSeriesLegend) {
+      if (!canRenderPositionedSeriesLegend) {
         return []
       }
 
@@ -1506,12 +1504,12 @@ export function SportsGameGraph({
         })
         .filter((entry): entry is { key: string, name: string, color: string, value: number } => entry !== null)
     },
-    [chartSeries, cursorSnapshot, latestSnapshot, usesPositionedSeriesLegend],
+    [canRenderPositionedSeriesLegend, chartSeries, cursorSnapshot, latestSnapshot],
   )
 
   const heroLegendPositionedEntries = useMemo(
     () => {
-      if (!usesPositionedSeriesLegend || heroLegendSeriesWithValues.length === 0 || chartData.length === 0) {
+      if (!canRenderPositionedSeriesLegend || heroLegendSeriesWithValues.length === 0 || chartData.length === 0) {
         return [] as Array<{
           key: string
           name: string
@@ -1641,7 +1639,7 @@ export function SportsGameGraph({
       chartXDomain?.start,
       cursorSnapshot?.date,
       heroLegendSeriesWithValues,
-      usesPositionedSeriesLegend,
+      canRenderPositionedSeriesLegend,
     ],
   )
 
@@ -1786,7 +1784,7 @@ export function SportsGameGraph({
             leadingGapStart={leadingGapStart}
           />
 
-          {usesPositionedSeriesLegend && heroLegendPositionedEntries.length > 0 && (
+          {canRenderPositionedSeriesLegend && heroLegendPositionedEntries.length > 0 && (
             <div className="pointer-events-none absolute inset-0 overflow-hidden">
               {heroLegendPositionedEntries.map(entry => (
                 <div
@@ -3006,9 +3004,15 @@ export function SportsGameDetailsPanel({
     }
 
     updateLinePickerSpacers()
-    const observer = new ResizeObserver(() => {
-      updateLinePickerSpacers()
-    })
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateLinePickerSpacers)
+      return () => {
+        window.removeEventListener('resize', updateLinePickerSpacers)
+      }
+    }
+
+    const observer = new ResizeObserver(updateLinePickerSpacers)
     observer.observe(scrollerElement)
     return () => {
       observer.disconnect()
@@ -3634,7 +3638,6 @@ export default function SportsGamesCenter({
   const [showSpreadsAndTotals, setShowSpreadsAndTotals] = useState(false)
   const [hasLoadedOddsFormat, setHasLoadedOddsFormat] = useState(false)
   const [currentTimestampMs, setCurrentTimestampMs] = useState(0)
-  const [titleRowActionsTarget, setTitleRowActionsTarget] = useState<HTMLElement | null>(null)
   const searchShellRef = useRef<HTMLDivElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const openLivestream = useSportsLivestream(state => state.openStream)
@@ -3693,15 +3696,6 @@ export default function SportsGamesCenter({
     )
   }, [hasLoadedOddsFormat, oddsFormat, showSpreadsAndTotals])
 
-  useBrowserLayoutEffect(() => {
-    if (!isLivePage || typeof document === 'undefined') {
-      setTitleRowActionsTarget(null)
-      return
-    }
-
-    setTitleRowActionsTarget(document.getElementById('sports-title-row-actions'))
-  }, [isLivePage])
-
   useEffect(() => {
     if (!isMobile) {
       return
@@ -3735,19 +3729,27 @@ export default function SportsGamesCenter({
       ?? resolveDefaultConditionId(card)
   }, [showSpreadsAndTotals])
 
+  const visibleCards = useMemo(() => {
+    if (isLivePage) {
+      return cards
+    }
+
+    return cards.filter(card => !isSportsGamesCardResolved(card))
+  }, [cards, isLivePage])
+
   const weekOptions = useMemo(() => {
     if (isLivePage) {
       return []
     }
 
     const weeks = Array.from(new Set(
-      cards
+      visibleCards
         .map(card => card.week)
         .filter((week): week is number => Number.isFinite(week)),
     ))
 
     return weeks.sort((a, b) => a - b)
-  }, [cards, isLivePage])
+  }, [isLivePage, visibleCards])
 
   const requestedWeekOption = useMemo(() => {
     if (isLivePage || initialWeek == null || !Number.isFinite(initialWeek)) {
@@ -3755,6 +3757,7 @@ export default function SportsGamesCenter({
     }
     return String(initialWeek)
   }, [initialWeek, isLivePage])
+
   const latestWeekOption = useMemo(
     () => (weekOptions.length > 0 ? String(weekOptions.at(-1)) : 'all'),
     [weekOptions],
@@ -3789,16 +3792,16 @@ export default function SportsGamesCenter({
 
   const weekFilteredCards = useMemo(() => {
     if (isLivePage) {
-      return cards
+      return visibleCards
     }
 
     if (selectedWeek === 'all') {
-      return cards
+      return visibleCards
     }
 
     const week = Number(selectedWeek)
-    return cards.filter(card => card.week === week)
-  }, [cards, isLivePage, selectedWeek])
+    return visibleCards.filter(card => card.week === week)
+  }, [isLivePage, selectedWeek, visibleCards])
 
   useEffect(() => {
     if (!isSearchOpen) {
@@ -3857,6 +3860,59 @@ export default function SportsGamesCenter({
       return searchableText.includes(normalizedSearchQuery)
     })
   }, [normalizedSearchQuery, resolveCardCategory, weekFilteredCards])
+  const buttonTokenIds = useMemo(() => {
+    const tokenIds = new Set<string>()
+
+    filteredCards.forEach((card) => {
+      const marketsByConditionId = new Map(
+        card.detailMarkets.map(market => [market.condition_id, market] as const),
+      )
+
+      card.buttons.forEach((button) => {
+        const market = marketsByConditionId.get(button.conditionId)
+        const outcome = market?.outcomes.find(currentOutcome => currentOutcome.outcome_index === button.outcomeIndex)
+          ?? market?.outcomes[button.outcomeIndex]
+
+        if (outcome?.token_id) {
+          tokenIds.add(String(outcome.token_id))
+        }
+      })
+    })
+
+    return Array.from(tokenIds)
+  }, [filteredCards])
+  const { data: buttonOrderBookSummaries } = useOrderBookSummaries(buttonTokenIds)
+  const buttonPriceCentsByKey = useMemo(() => {
+    const priceByKey = new Map<string, number>()
+
+    filteredCards.forEach((card) => {
+      const marketsByConditionId = new Map(
+        card.detailMarkets.map(market => [market.condition_id, market] as const),
+      )
+
+      card.buttons.forEach((button) => {
+        const market = marketsByConditionId.get(button.conditionId) ?? null
+        const outcome = market?.outcomes.find(currentOutcome => currentOutcome.outcome_index === button.outcomeIndex)
+          ?? market?.outcomes[button.outcomeIndex]
+        const cents = resolveOutcomePriceCents(
+          market,
+          button.outcomeIndex === OUTCOME_INDEX.NO ? OUTCOME_INDEX.NO : OUTCOME_INDEX.YES,
+          {
+            orderBookSummaries: buttonOrderBookSummaries,
+            side: ORDER_SIDE.BUY,
+          },
+        )
+        const selectionCents = resolveOutcomeSelectionPriceCents(market, outcome, {
+          orderBookSummaries: buttonOrderBookSummaries,
+          side: ORDER_SIDE.BUY,
+          fallbackIsNoOutcome: button.fallbackIsNoOutcome,
+        })
+        priceByKey.set(`${card.id}:${button.key}`, selectionCents ?? cents ?? button.cents)
+      })
+    })
+
+    return priceByKey
+  }, [buttonOrderBookSummaries, filteredCards])
 
   const emptyStateLabel = normalizedSearchQuery
     ? 'No games found for this search.'
@@ -4812,7 +4868,7 @@ export default function SportsGamesCenter({
                                 {button.label}
                               </span>
                               <span className="relative z-1 text-sm leading-none tabular-nums">
-                                {formatButtonOdds(button.cents)}
+                                {formatButtonOdds(buttonPriceCentsByKey.get(`${card.id}:${button.key}`) ?? button.cents)}
                               </span>
                             </button>
                           </div>
@@ -5023,39 +5079,36 @@ export default function SportsGamesCenter({
     )
   }
 
-  const liveTitleRowActions = isLivePage && titleRowActionsTarget
-    ? createPortal(
-        <div className="flex items-center gap-2">
-          {renderSearchControl()}
-          {renderSettingsMenu()}
-        </div>,
-        titleRowActionsTarget,
-      )
-    : null
-
   return (
     <>
-      {liveTitleRowActions}
       <div className="
-        min-[1200px]:grid min-[1200px]:h-full min-[1200px]:grid-cols-[minmax(0,1fr)_21.25rem] min-[1200px]:gap-6
+        min-[1200px]:grid min-[1200px]:h-full min-[1200px]:grid-cols-[minmax(0,1fr)_21.25rem]
+        min-[1200px]:[align-content:start] min-[1200px]:[align-items:start] min-[1200px]:gap-6
       "
       >
         <section
           data-sports-scroll-pane="center"
-          className="min-w-0 min-[1200px]:min-h-0 min-[1200px]:overflow-y-auto min-[1200px]:pr-1 lg:ml-4"
+          className="
+            min-w-0
+            min-[1200px]:min-h-0 min-[1200px]:overflow-y-auto min-[1200px]:overscroll-contain min-[1200px]:pr-1
+            lg:ml-4
+          "
         >
           <div className="mb-4">
-            {!isLivePage && (
-              <div className="mb-3 flex items-start justify-between gap-3 lg:mt-2">
-                <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-                  {sportTitle}
-                </h1>
-
-                <div className="flex items-center gap-2">
-                  {renderSettingsMenu()}
-                </div>
-              </div>
+            <div className={cn(
+              'mb-3 flex items-start justify-between gap-3',
+              !isLivePage && 'lg:mt-2',
             )}
+            >
+              <h1 className="text-3xl font-semibold tracking-tight text-foreground">
+                {sportTitle}
+              </h1>
+
+              <div className="flex items-center gap-2">
+                {isLivePage && renderSearchControl()}
+                {renderSettingsMenu()}
+              </div>
+            </div>
 
             {!isLivePage && (
               <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -5206,8 +5259,8 @@ export default function SportsGamesCenter({
           data-sports-scroll-pane="aside"
           className={`
             hidden gap-4
-            min-[1200px]:sticky min-[1200px]:top-0 min-[1200px]:grid min-[1200px]:max-h-full min-[1200px]:self-start
-            min-[1200px]:overflow-y-auto
+            min-[1200px]:sticky min-[1200px]:top-0 min-[1200px]:block min-[1200px]:h-fit min-[1200px]:max-h-full
+            min-[1200px]:self-start min-[1200px]:overflow-y-auto
           `}
         >
           {activeTradeContext

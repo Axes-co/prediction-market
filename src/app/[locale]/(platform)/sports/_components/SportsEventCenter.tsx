@@ -18,6 +18,7 @@ import Image from 'next/image'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import EventBookmark from '@/app/[locale]/(platform)/event/[slug]/_components/EventBookmark'
+import { useOrderBookSummaries } from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderBook'
 import EventOrderPanelForm from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelForm'
 import EventOrderPanelMobile from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelMobile'
 import EventOrderPanelTermsDisclaimer
@@ -56,6 +57,7 @@ import { ensureReadableTextColorOnDark } from '@/lib/color-contrast'
 import { ORDER_SIDE, OUTCOME_INDEX } from '@/lib/constants'
 import { fetchUserPositionsForMarket } from '@/lib/data-api/user'
 import { formatVolume } from '@/lib/formatters'
+import { resolveOutcomePriceCents, resolveOutcomeSelectionPriceCents } from '@/lib/market-pricing'
 import { formatOddsFromCents, ODDS_FORMAT_OPTIONS } from '@/lib/odds-format'
 import { shouldUseCroppedSportsTeamLogo } from '@/lib/sports-team-logo'
 import { getSportsVerticalConfig } from '@/lib/sports-vertical'
@@ -1038,6 +1040,47 @@ export default function SportsEventCenter({
     () => new Map(activeCard.detailMarkets.map(market => [market.condition_id, market] as const)),
     [activeCard.detailMarkets],
   )
+  const activeCardButtonTokenIds = useMemo(() => {
+    const tokenIds = new Set<string>()
+
+    activeCard.buttons.forEach((button) => {
+      const market = detailMarketByConditionId.get(button.conditionId)
+      const outcome = market?.outcomes.find(currentOutcome => currentOutcome.outcome_index === button.outcomeIndex)
+        ?? market?.outcomes[button.outcomeIndex]
+
+      if (outcome?.token_id) {
+        tokenIds.add(String(outcome.token_id))
+      }
+    })
+
+    return Array.from(tokenIds)
+  }, [activeCard.buttons, detailMarketByConditionId])
+  const { data: buttonOrderBookSummaries } = useOrderBookSummaries(activeCardButtonTokenIds)
+  const buttonPriceCentsByKey = useMemo(() => {
+    const priceByKey = new Map<string, number>()
+
+    activeCard.buttons.forEach((button) => {
+      const market = detailMarketByConditionId.get(button.conditionId) ?? null
+      const outcome = market?.outcomes.find(currentOutcome => currentOutcome.outcome_index === button.outcomeIndex)
+        ?? market?.outcomes[button.outcomeIndex]
+      const cents = resolveOutcomePriceCents(
+        market,
+        button.outcomeIndex === OUTCOME_INDEX.NO ? OUTCOME_INDEX.NO : OUTCOME_INDEX.YES,
+        {
+          orderBookSummaries: buttonOrderBookSummaries,
+          side: ORDER_SIDE.BUY,
+        },
+      )
+      const selectionCents = resolveOutcomeSelectionPriceCents(market, outcome, {
+        orderBookSummaries: buttonOrderBookSummaries,
+        side: ORDER_SIDE.BUY,
+        fallbackIsNoOutcome: button.fallbackIsNoOutcome,
+      })
+      priceByKey.set(button.key, selectionCents ?? cents ?? button.cents)
+    })
+
+    return priceByKey
+  }, [activeCard.buttons, buttonOrderBookSummaries, detailMarketByConditionId])
   const cs2MapTabNumbers = useMemo(() => {
     const numbers = new Set<number>()
 
@@ -2612,7 +2655,7 @@ export default function SportsEventCenter({
                           isActive ? 'opacity-100' : 'opacity-45',
                         )}
                         >
-                          {formatButtonOdds(button.cents)}
+                          {formatButtonOdds(buttonPriceCentsByKey.get(button.key) ?? button.cents)}
                         </span>
                       </button>
                     </div>
@@ -2814,7 +2857,7 @@ export default function SportsEventCenter({
                     >
                       <span className="uppercase opacity-80">{button.label}</span>
                       <span className="text-sm leading-none tabular-nums">
-                        {formatButtonOdds(button.cents)}
+                        {formatButtonOdds(buttonPriceCentsByKey.get(button.key) ?? button.cents)}
                       </span>
                     </button>
                   </div>
@@ -3064,7 +3107,7 @@ export default function SportsEventCenter({
                                             isActive ? 'opacity-100' : 'opacity-45',
                                           )}
                                           >
-                                            {formatButtonOdds(button.cents)}
+                                            {formatButtonOdds(buttonPriceCentsByKey.get(button.key) ?? button.cents)}
                                           </span>
                                         </button>
                                       </div>
@@ -3126,7 +3169,7 @@ export default function SportsEventCenter({
                                           {button.label}
                                         </span>
                                         <span className="shrink-0 text-sm leading-none tabular-nums">
-                                          {formatButtonOdds(button.cents)}
+                                          {formatButtonOdds(buttonPriceCentsByKey.get(button.key) ?? button.cents)}
                                         </span>
                                       </span>
                                     </button>
@@ -3224,12 +3267,17 @@ export default function SportsEventCenter({
         <SportsEventQuerySync onSelectionChange={handleQuerySelectionChange} />
       </Suspense>
       <div className="
-        min-[1200px]:grid min-[1200px]:h-full min-[1200px]:grid-cols-[minmax(0,1fr)_21.25rem] min-[1200px]:gap-6
+        min-[1200px]:grid min-[1200px]:h-full min-[1200px]:grid-cols-[minmax(0,1fr)_21.25rem]
+        min-[1200px]:[align-content:start] min-[1200px]:[align-items:start] min-[1200px]:gap-6
       "
       >
         <section
           data-sports-scroll-pane="center"
-          className="min-w-0 min-[1200px]:min-h-0 min-[1200px]:overflow-y-auto min-[1200px]:pr-1 lg:ml-4"
+          className="
+            min-w-0
+            min-[1200px]:min-h-0 min-[1200px]:overflow-y-auto min-[1200px]:overscroll-contain min-[1200px]:pr-1
+            lg:ml-4
+          "
         >
           <div className="mb-4">
             <div className="relative mb-1 flex min-h-9 items-center justify-center">
@@ -3502,8 +3550,8 @@ export default function SportsEventCenter({
           data-sports-scroll-pane="aside"
           className={`
             hidden gap-4
-            min-[1200px]:sticky min-[1200px]:top-0 min-[1200px]:grid min-[1200px]:max-h-full min-[1200px]:self-start
-            min-[1200px]:overflow-y-auto
+            min-[1200px]:sticky min-[1200px]:top-0 min-[1200px]:block min-[1200px]:h-fit min-[1200px]:max-h-full
+            min-[1200px]:self-start min-[1200px]:overflow-y-auto
           `}
         >
           {activeTradeContext

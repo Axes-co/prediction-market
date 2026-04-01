@@ -1,6 +1,7 @@
 import type { SportsEventMarketViewKey } from '@/lib/sports-event-slugs'
 import type { Event, Market, Outcome, SportsTeam } from '@/types'
 import { resolveEventPagePath } from '@/lib/events-routing'
+import { resolveOutcomeSelectionPriceCents } from '@/lib/market-pricing'
 import {
   isSportsMoreMarketsSlug,
   SPORTS_EVENT_MARKET_VIEW_LABELS,
@@ -21,6 +22,7 @@ export interface SportsGamesButton {
   key: string
   conditionId: string
   outcomeIndex: number
+  fallbackIsNoOutcome: boolean
   label: string
   cents: number
   color: string | null
@@ -101,6 +103,18 @@ export function resolveSportsGamesHeaderMarketTypes(
     ? firstColumns
     : []
 }
+
+export function isSportsGamesCardResolved(
+  card: Pick<SportsGamesCard, 'event' | 'detailMarkets'>,
+) {
+  if (card.event.status === 'resolved' || Boolean(card.event.resolved_at)) {
+    return true
+  }
+
+  return card.detailMarkets.length > 0
+    && card.detailMarkets.every(market => market.is_resolved || market.condition?.resolved)
+}
+
 export interface SportsGamesCardMarketView {
   key: SportsEventMarketViewKey
   label: string
@@ -254,28 +268,14 @@ function normalizeTeamRecord(value: string | null | undefined) {
   return trimmed
 }
 
-function normalizeMarketPriceCents(market: Market) {
-  const value = Number.isFinite(market.price)
-    ? market.price * 100
-    : Number.isFinite(market.probability)
-      ? market.probability
-      : 0
-
-  return Math.max(0, Math.min(100, Math.round(value)))
-}
-
 function normalizeOutcomePriceCents(
   outcome: Outcome | null | undefined,
   market: Market,
   fallbackIsNoOutcome = false,
 ) {
-  if (outcome && Number.isFinite(outcome.buy_price)) {
-    const value = Number(outcome.buy_price) * 100
-    return Math.max(0, Math.min(100, Math.round(value)))
-  }
-
-  const yesPrice = normalizeMarketPriceCents(market)
-  return fallbackIsNoOutcome ? Math.max(0, 100 - yesPrice) : yesPrice
+  return resolveOutcomeSelectionPriceCents(market, outcome, {
+    fallbackIsNoOutcome,
+  }) ?? 50
 }
 
 function marketDisplayText(market: Market) {
@@ -1008,6 +1008,7 @@ function appendButton(
     key: buttonKey,
     conditionId: market.condition_id,
     outcomeIndex,
+    fallbackIsNoOutcome: isNoOutcome,
     label: payload.label,
     cents: normalizeOutcomePriceCents(selectedOutcome, market, isNoOutcome),
     color: payload.color,

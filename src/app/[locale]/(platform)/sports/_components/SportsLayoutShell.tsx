@@ -182,11 +182,16 @@ export default function SportsLayoutShell({
     && Boolean(context.sportSlug)
     && !context.isEventRoute
     && Boolean(sectionConfig?.gamesEnabled && sectionConfig?.propsEnabled)
-  const useIndependentColumns = context.mode === 'all'
-    && (context.section === 'games' || context.isEventRoute)
-  const headerInsideGamesCenter = context.mode === 'all'
-    && context.section === 'games'
-    && !context.isEventRoute
+  const useIndependentColumns = context.mode === 'live'
+    || (
+      context.mode === 'all'
+      && (context.section === 'games' || context.isEventRoute)
+    )
+  const headerInsideGamesCenter = !context.isEventRoute
+    && (
+      context.mode === 'live'
+      || (context.mode === 'all' && context.section === 'games')
+    )
   const showShellHeader = !headerInsideGamesCenter
   const showTitle = Boolean(context.title) && !context.isEventRoute
   const activeSection = context.section ?? 'games'
@@ -251,12 +256,15 @@ export default function SportsLayoutShell({
     <main
       className={cn(
         'container py-4',
-        useIndependentColumns && 'min-[1200px]:h-[calc(100dvh-5.5rem)] min-[1200px]:overflow-hidden',
+        useIndependentColumns && 'min-[1200px]:h-[calc(100dvh-7.25rem)] min-[1200px]:overflow-hidden',
       )}
     >
       <div
         className={cn(
-          'relative w-full lg:flex lg:items-start lg:gap-4',
+          `
+            relative w-full
+            lg:grid lg:grid-cols-[190px_minmax(0,1fr)] lg:[align-content:start] lg:[align-items:start] lg:gap-4
+          `,
           useIndependentColumns && 'min-[1200px]:h-full',
         )}
       >
@@ -266,6 +274,7 @@ export default function SportsLayoutShell({
           mode={context.mode}
           activeTagSlug={context.activeTagSlug}
           countByTagSlug={sportsCountsBySlug}
+          independentScroll={useIndependentColumns}
         />
         <div
           id="sports-layout-center-column"
