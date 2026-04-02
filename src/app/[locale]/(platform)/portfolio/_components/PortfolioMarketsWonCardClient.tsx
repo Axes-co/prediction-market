@@ -15,8 +15,8 @@ import { hashTypedData } from 'viem'
 import { useSignMessage } from 'wagmi'
 import { getSafeNonceAction, submitSafeTransactionAction } from '@/app/[locale]/(platform)/_actions/approve-tokens'
 import { useTradingOnboarding } from '@/app/[locale]/(platform)/_providers/TradingOnboardingProvider'
+import AppLink from '@/components/AppLink'
 import EventIconImage from '@/components/EventIconImage'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
 import SiteLogoIcon from '@/components/SiteLogoIcon'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -481,9 +481,9 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
 
             return href
               ? (
-                  <IntentPrefetchLink key={market.conditionId} href={href} className={itemClassName}>
+                  <AppLink intentPrefetch key={market.conditionId} href={href} className={itemClassName}>
                     {content}
-                  </IntentPrefetchLink>
+                  </AppLink>
                 )
               : (
                   <div key={market.conditionId} className={itemClassName} aria-disabled="true">

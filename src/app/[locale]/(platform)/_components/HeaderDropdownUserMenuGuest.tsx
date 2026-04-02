@@ -4,7 +4,7 @@ import { DownloadIcon, MenuIcon, TrophyIcon, UnplugIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
+import AppLink from '@/components/AppLink'
 import LocaleSwitcherMenuItem from '@/components/LocaleSwitcherMenuItem'
 import PwaInstallIosInstructions from '@/components/PwaInstallIosInstructions'
 import ThemeSelector from '@/components/ThemeSelector'
@@ -130,14 +130,15 @@ export default function HeaderDropdownUserMenuGuest() {
           onEscapeKeyDown={() => setMenuOpen(false)}
         >
           <DropdownMenuItem asChild className="py-2 text-sm font-semibold text-foreground">
-            <IntentPrefetchLink href="/leaderboard" className="flex w-full items-center gap-1.5">
+            <AppLink intentPrefetch href="/leaderboard" className="flex w-full items-center gap-1.5">
               <TrophyIcon className="size-4 text-amber-500" />
               {t('Leaderboard')}
-            </IntentPrefetchLink>
+            </AppLink>
           </DropdownMenuItem>
 
           <DropdownMenuItem asChild className="py-2 text-sm font-semibold text-foreground">
-            <IntentPrefetchLink
+            <AppLink
+              intentPrefetch
               href="/docs/api-reference"
               target="_blank"
               rel="noreferrer"
@@ -145,7 +146,7 @@ export default function HeaderDropdownUserMenuGuest() {
             >
               <UnplugIcon className="size-4 text-pink-500" />
               {t('APIs')}
-            </IntentPrefetchLink>
+            </AppLink>
           </DropdownMenuItem>
 
           {canShowInstallUi && (
@@ -171,10 +172,10 @@ export default function HeaderDropdownUserMenuGuest() {
           <DropdownMenuSeparator />
 
           <DropdownMenuItem asChild className="py-2 text-sm font-semibold text-muted-foreground">
-            <IntentPrefetchLink href="/docs/users" data-testid="header-docs-link">{t('Documentation')}</IntentPrefetchLink>
+            <AppLink intentPrefetch href="/docs/users" data-testid="header-docs-link">{t('Documentation')}</AppLink>
           </DropdownMenuItem>
           <DropdownMenuItem asChild className="py-2 text-sm font-semibold text-muted-foreground">
-            <IntentPrefetchLink href="/terms-of-use" data-testid="header-terms-link">{t('Terms of Use')}</IntentPrefetchLink>
+            <AppLink intentPrefetch href="/terms-of-use" data-testid="header-terms-link">{t('Terms of Use')}</AppLink>
           </DropdownMenuItem>
 
           <LocaleSwitcherMenuItem />

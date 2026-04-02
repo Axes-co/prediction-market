@@ -56,7 +56,7 @@ import {
   resolveSportsGamesCardVisibleMarketTypes,
   resolveSportsGamesHeaderMarketTypes,
 } from '@/app/[locale]/(platform)/sports/_utils/sports-games-data'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
+import AppLink from '@/components/AppLink'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -4541,7 +4541,8 @@ export default function SportsGamesCenter({
                 </Tooltip>
               )}
 
-              <IntentPrefetchLink
+              <AppLink
+                intentPrefetch
                 href={card.eventHref}
                 data-sports-card-control="true"
                 onClick={event => event.stopPropagation()}
@@ -4566,7 +4567,7 @@ export default function SportsGamesCenter({
                 )}
                 <span>Game View</span>
                 <ChevronRightIcon className="size-3.5" />
-              </IntentPrefetchLink>
+              </AppLink>
             </div>
           </div>
 
@@ -5082,7 +5083,7 @@ export default function SportsGamesCenter({
   return (
     <>
       <div className="
-        min-[1200px]:grid min-[1200px]:h-full min-[1200px]:grid-cols-[minmax(0,1fr)_21.25rem]
+        min-[1200px]:grid min-[1200px]:h-full min-[1200px]:min-h-0 min-[1200px]:grid-cols-[minmax(0,1fr)_21.25rem]
         min-[1200px]:[align-content:start] min-[1200px]:[align-items:start] min-[1200px]:gap-6
       "
       >
@@ -5090,7 +5091,8 @@ export default function SportsGamesCenter({
           data-sports-scroll-pane="center"
           className="
             min-w-0
-            min-[1200px]:min-h-0 min-[1200px]:overflow-y-auto min-[1200px]:overscroll-contain min-[1200px]:pr-1
+            min-[1200px]:min-h-0 min-[1200px]:self-stretch min-[1200px]:overflow-y-auto min-[1200px]:overscroll-contain
+            min-[1200px]:pr-1
             lg:ml-4
           "
         >

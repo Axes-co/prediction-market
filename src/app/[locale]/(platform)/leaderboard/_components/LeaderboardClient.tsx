@@ -14,10 +14,11 @@ import {
   resolveOrderApiValue,
   resolvePeriodApiValue,
 } from '@/app/[locale]/(platform)/leaderboard/_utils/leaderboardFilters'
+import AppLink from '@/components/AppLink'
 import ProfileLink from '@/components/ProfileLink'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Link, useRouter } from '@/i18n/navigation'
+import { useRouter } from '@/i18n/navigation'
 import { formatCurrency } from '@/lib/formatters'
 import { buildPublicProfilePath } from '@/lib/platform-routing'
 import { cn } from '@/lib/utils'
@@ -933,7 +934,7 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
                                 <span className="shrink-0">|</span>
                                 {eventHref
                                   ? (
-                                      <Link
+                                      <AppLink
                                         href={eventHref as Route}
                                         className={`
                                           block max-w-[20ch] truncate text-muted-foreground transition-colors
@@ -942,7 +943,7 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
                                         title={eventTitle}
                                       >
                                         {eventTitle}
-                                      </Link>
+                                      </AppLink>
                                     )
                                   : (
                                       <span className="block max-w-[23ch] truncate">{eventTitle}</span>

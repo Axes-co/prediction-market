@@ -36,6 +36,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { createPublicClient, formatUnits, getAddress, http, isAddress, keccak256, parseGwei, stringToHex, toHex } from 'viem'
 import { usePublicClient, useWalletClient } from 'wagmi'
+import AppLink from '@/components/AppLink'
 import EventIconImage from '@/components/EventIconImage'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -62,7 +63,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
-import { Link, useRouter } from '@/i18n/navigation'
+import { useRouter } from '@/i18n/navigation'
 import {
   buildAdminSportsDerivedContent,
   buildAdminSportsStepErrors,
@@ -6699,10 +6700,10 @@ export default function AdminCreateEventForm({
           </DialogHeader>
           <DialogFooter>
             <Button type="button" variant="outline" asChild>
-              <Link href="/admin/events/calendar">
+              <AppLink href="/admin/events/calendar">
                 <ArrowLeftIcon className="size-4" />
                 Back to calendar
-              </Link>
+              </AppLink>
             </Button>
           </DialogFooter>
         </DialogContent>

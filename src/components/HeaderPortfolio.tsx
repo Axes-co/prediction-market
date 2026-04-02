@@ -1,6 +1,6 @@
 import { ArrowDownIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
+import AppLink from '@/components/AppLink'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useBalance } from '@/hooks/useBalance'
@@ -31,7 +31,7 @@ export default function HeaderPortfolio() {
         className="flex h-11 flex-col items-center justify-center gap-0.5 rounded-[6px] px-2.5 py-1"
         asChild
       >
-        <IntentPrefetchLink href="/portfolio">
+        <AppLink intentPrefetch href="/portfolio">
           <div className="translate-y-px text-xs/tight font-medium text-muted-foreground">{t('Portfolio')}</div>
           <div className="-translate-y-px text-base/tight font-semibold text-yes">
             {isLoadingValue
@@ -45,7 +45,7 @@ export default function HeaderPortfolio() {
                     </>
                   )}
           </div>
-        </IntentPrefetchLink>
+        </AppLink>
       </Button>
 
       <Button
@@ -54,7 +54,7 @@ export default function HeaderPortfolio() {
         className="flex h-11 flex-col items-center justify-center gap-0.5 rounded-[6px] px-2.5 py-1"
         asChild
       >
-        <IntentPrefetchLink href="/portfolio">
+        <AppLink intentPrefetch href="/portfolio">
           <div className="flex translate-y-px items-center gap-1 text-xs/tight font-medium text-muted-foreground">
             <span>{t('Cash')}</span>
             {hasPendingDeposit && (
@@ -75,7 +75,7 @@ export default function HeaderPortfolio() {
                     </>
                   )}
           </div>
-        </IntentPrefetchLink>
+        </AppLink>
       </Button>
     </div>
   )

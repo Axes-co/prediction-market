@@ -1,8 +1,8 @@
 'use client'
 
 import type { Event } from '@/types'
+import AppLink from '@/components/AppLink'
 import EventIconImage from '@/components/EventIconImage'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { NewBadge } from '@/components/ui/new-badge'
@@ -85,7 +85,8 @@ function MentionsListItem({ event, currentTimestamp }: MentionsListItemProps) {
       )
 
   return (
-    <IntentPrefetchLink
+    <AppLink
+      intentPrefetch
       href={`/event/${event.slug}`}
       className={cn(
         'group relative flex flex-col gap-4 rounded-2xl border bg-background p-4 transition-all',
@@ -230,6 +231,6 @@ function MentionsListItem({ event, currentTimestamp }: MentionsListItemProps) {
           <span>Trade</span>
         </Button>
       </div>
-    </IntentPrefetchLink>
+    </AppLink>
   )
 }

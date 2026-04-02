@@ -163,11 +163,6 @@ export default function HydratedEventsGrid({
     filters.hideCrypto ? 'hide-crypto' : 'show-crypto',
     filters.hideEarnings ? 'hide-earnings' : 'show-earnings',
   ].join(':')
-  const initialSnapshotEvents = queryUserScope === 'guest' ? initialEvents : EMPTY_EVENTS
-  const [lastStableVisibleEvents, setLastStableVisibleEvents] = useState<Event[]>(
-    () => peekHydratedEventsSnapshot(snapshotKey) ?? initialSnapshotEvents,
-  )
-  const PAGE_SIZE = HOME_EVENTS_PAGE_SIZE
   const isRouteInitialState = filters.tag === routeTag
     && filters.mainTag === routeMainTag
     && filters.search === ''
@@ -177,6 +172,11 @@ export default function HydratedEventsGrid({
     && !filters.hideSports
     && !filters.hideCrypto
     && !filters.hideEarnings
+  const initialSnapshotEvents = isRouteInitialState ? initialEvents : EMPTY_EVENTS
+  const [lastStableVisibleEvents, setLastStableVisibleEvents] = useState<Event[]>(
+    () => peekHydratedEventsSnapshot(snapshotKey) ?? initialSnapshotEvents,
+  )
+  const PAGE_SIZE = HOME_EVENTS_PAGE_SIZE
   const shouldUseInitialData = isRouteInitialState
     && initialEvents.length > 0
     && queryUserScope === 'guest'

@@ -7,8 +7,8 @@ import { Loader2Icon, SquareArrowOutUpRightIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePlatformNavigationData } from '@/app/[locale]/(platform)/_providers/PlatformNavigationProvider'
+import AppLink from '@/components/AppLink'
 import EventIconImage from '@/components/EventIconImage'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
 import ProfileLink from '@/components/ProfileLink'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -566,7 +566,8 @@ export default function ActivityFeed() {
                 }}
               >
                 <div className="flex min-w-0 flex-1 items-start gap-3">
-                  <IntentPrefetchLink
+                  <AppLink
+                    intentPrefetch
                     href={eventHref}
                     onClick={event => event.stopPropagation()}
                     className="relative size-12 shrink-0 overflow-hidden rounded-md"
@@ -583,10 +584,11 @@ export default function ActivityFeed() {
                       : (
                           <div className="size-full" aria-hidden />
                         )}
-                  </IntentPrefetchLink>
+                  </AppLink>
 
                   <div className="min-w-0 flex-1 space-y-1">
-                    <IntentPrefetchLink
+                    <AppLink
+                      intentPrefetch
                       href={eventHref}
                       onClick={event => event.stopPropagation()}
                       className={`
@@ -596,7 +598,7 @@ export default function ActivityFeed() {
                       title={activity.market.title}
                     >
                       {activity.market.title}
-                    </IntentPrefetchLink>
+                    </AppLink>
 
                     <div
                       onClick={event => event.stopPropagation()}

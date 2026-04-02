@@ -5,8 +5,8 @@ import { usePlatformNavigationData } from '@/app/[locale]/(platform)/_providers/
 import EventBookmark from '@/app/[locale]/(platform)/event/[slug]/_components/EventBookmark'
 import EventEmbedWidget from '@/app/[locale]/(platform)/event/[slug]/_components/EventEmbedWidget'
 import EventShare from '@/app/[locale]/(platform)/event/[slug]/_components/EventShare'
+import AppLink from '@/components/AppLink'
 import EventIconImage from '@/components/EventIconImage'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
 import { isDynamicHomeCategorySlug } from '@/lib/platform-routing'
 import { cn } from '@/lib/utils'
 
@@ -93,13 +93,14 @@ function EventHeaderTaxonomyItem({
 }: EventHeaderTaxonomyItemData & { className?: string }) {
   if (href) {
     return (
-      <IntentPrefetchLink
+      <AppLink
+        intentPrefetch
         href={href}
         className={cn('block truncate transition-colors hover:text-foreground', className)}
         title={label}
       >
         {label}
-      </IntentPrefetchLink>
+      </AppLink>
     )
   }
 

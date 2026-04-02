@@ -1,7 +1,7 @@
 import type { Event, Market } from '@/types'
 import { useExtracted } from 'next-intl'
+import AppLink from '@/components/AppLink'
 import EventIconImage from '@/components/EventIconImage'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
 import { useOutcomeLabel } from '@/hooks/useOutcomeLabel'
 import { OUTCOME_INDEX } from '@/lib/constants'
 import { resolveEventPagePath } from '@/lib/events-routing'
@@ -48,7 +48,7 @@ export default function EventCardHeader({
 
   return (
     <div className="mb-3 flex items-start justify-between">
-      <IntentPrefetchLink href={eventHref} className="flex flex-1 items-center gap-2 pr-2">
+      <AppLink intentPrefetch href={eventHref} className="flex flex-1 items-center gap-2 pr-2">
         <div
           className="flex size-10 shrink-0 items-center justify-center self-start rounded-sm"
         >
@@ -70,7 +70,7 @@ export default function EventCardHeader({
         >
           {title}
         </h3>
-      </IntentPrefetchLink>
+      </AppLink>
 
       {isSingleMarket && !isResolvedEvent && (
         <div className="relative -mt-3 flex flex-col items-center">

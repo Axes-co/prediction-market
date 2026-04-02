@@ -1,7 +1,7 @@
 import type { Event, Market } from '@/types'
 import { CheckIcon, XIcon } from 'lucide-react'
 import { resolveBinaryOutcomeByIndex } from '@/app/[locale]/(platform)/(home)/_utils/eventCardResolvedOutcome'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
+import AppLink from '@/components/AppLink'
 import { Button } from '@/components/ui/button'
 import { useOutcomeLabel } from '@/hooks/useOutcomeLabel'
 import { OUTCOME_INDEX } from '@/lib/constants'
@@ -69,13 +69,14 @@ export default function EventCardMarketsList({
             key={market.condition_id}
             className="flex items-center justify-between"
           >
-            <IntentPrefetchLink
+            <AppLink
+              intentPrefetch
               href={resolveEventMarketPath(event, market.slug)}
               className="block min-w-0 flex-1 truncate text-[13px] underline-offset-2 hover:underline dark:text-white"
               title={market.short_title || market.title}
             >
               {market.short_title || market.title}
-            </IntentPrefetchLink>
+            </AppLink>
             <div className="ml-2 flex items-center gap-2">
               {isResolvedEvent
                 ? (
@@ -129,7 +130,8 @@ export default function EventCardMarketsList({
                               variant="yes"
                               className="group/yes h-7 w-10 px-2 py-1 text-xs"
                             >
-                              <IntentPrefetchLink
+                              <AppLink
+                                intentPrefetch
                                 href={resolveEventOutcomePath(event, {
                                   marketSlug: market.slug,
                                   outcomeIndex: yesOutcome.outcome_index,
@@ -142,7 +144,7 @@ export default function EventCardMarketsList({
                                   {displayChance}
                                   %
                                 </span>
-                              </IntentPrefetchLink>
+                              </AppLink>
                             </Button>
                             <Button
                               asChild
@@ -150,7 +152,8 @@ export default function EventCardMarketsList({
                               size="sm"
                               className="group/no h-auto w-11 px-2 py-1 text-xs"
                             >
-                              <IntentPrefetchLink
+                              <AppLink
+                                intentPrefetch
                                 href={resolveEventOutcomePath(event, {
                                   marketSlug: market.slug,
                                   outcomeIndex: noOutcome.outcome_index,
@@ -163,7 +166,7 @@ export default function EventCardMarketsList({
                                   {oppositeChance}
                                   %
                                 </span>
-                              </IntentPrefetchLink>
+                              </AppLink>
                             </Button>
                           </div>
                         </>

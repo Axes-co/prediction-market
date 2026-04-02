@@ -166,6 +166,44 @@ describe('hydratedEventsGrid', () => {
     expect(mocks.useInfiniteQuery.mock.calls.at(-1)?.[0].initialData).toBeUndefined()
   })
 
+  it('keeps server-rendered events visible while a logged-in query is still hydrating', () => {
+    mocks.useUser.mockReturnValue({ id: 'user-1' })
+    mocks.useInfiniteQuery.mockImplementation(() => ({
+      status: 'pending',
+      data: undefined,
+      dataUpdatedAt: 0,
+      isFetching: true,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isPending: true,
+      refetch: mocks.refetch,
+    }))
+
+    const view = render(
+      <HydratedEventsGrid
+        filters={{
+          tag: 'trending',
+          mainTag: 'trending',
+          search: '',
+          bookmarked: false,
+          frequency: 'all',
+          status: 'active',
+          hideSports: false,
+          hideCrypto: false,
+          hideEarnings: false,
+        }}
+        initialEvents={[{ id: 'event-1' } as any]}
+        initialCurrentTimestamp={Date.parse('2026-03-16T12:00:00.000Z')}
+        routeMainTag="trending"
+        routeTag="trending"
+      />,
+    )
+
+    expect(view.getByTestId('events-static-grid')).toBeTruthy()
+    expect(view.queryByTestId('events-grid-skeleton')).toBeNull()
+  })
+
   it('does not refetch active feeds when hydration only advances the clock by a small amount', async () => {
     const initialCurrentTimestamp = Date.parse('2026-03-16T12:00:00.000Z')
     const filters = {

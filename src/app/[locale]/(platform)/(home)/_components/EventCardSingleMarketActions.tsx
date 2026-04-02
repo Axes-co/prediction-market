@@ -1,7 +1,7 @@
 import type { Market, Outcome } from '@/types'
 import { CheckIcon, XIcon } from 'lucide-react'
 import { resolveBinaryOutcomeByIndex } from '@/app/[locale]/(platform)/(home)/_utils/eventCardResolvedOutcome'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
+import AppLink from '@/components/AppLink'
 import { Button } from '@/components/ui/button'
 import { useOutcomeLabel } from '@/hooks/useOutcomeLabel'
 import { OUTCOME_INDEX } from '@/lib/constants'
@@ -83,26 +83,28 @@ export default function EventCardSingleMarketActions({
         variant="yes"
         size="outcome"
       >
-        <IntentPrefetchLink
+        <AppLink
+          intentPrefetch
           href={resolveEventOutcomePath(event, {
             outcomeIndex: OUTCOME_INDEX.YES,
           })}
         >
           <span className="truncate">{normalizeOutcomeLabel(yesOutcome.outcome_text) ?? yesOutcome.outcome_text}</span>
-        </IntentPrefetchLink>
+        </AppLink>
       </Button>
       <Button
         asChild
         variant="no"
         size="outcome"
       >
-        <IntentPrefetchLink
+        <AppLink
+          intentPrefetch
           href={resolveEventOutcomePath(event, {
             outcomeIndex: OUTCOME_INDEX.NO,
           })}
         >
           <span className="truncate">{normalizeOutcomeLabel(noOutcome.outcome_text) ?? noOutcome.outcome_text}</span>
-        </IntentPrefetchLink>
+        </AppLink>
       </Button>
     </div>
   )

@@ -3,7 +3,7 @@
 import type { Route } from 'next'
 import type { PlatformNavigationTag } from '@/lib/platform-navigation'
 import { TrendingUpIcon } from 'lucide-react'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
+import AppLink from '@/components/AppLink'
 import { cn } from '@/lib/utils'
 
 interface NavigationTabProps {
@@ -25,7 +25,8 @@ export default function NavigationTab({
 }: NavigationTabProps) {
   return (
     <span ref={containerRef}>
-      <IntentPrefetchLink
+      <AppLink
+        intentPrefetch
         href={href}
         onClick={onClick}
         className={cn(
@@ -39,7 +40,7 @@ export default function NavigationTab({
       >
         {tag.slug === 'trending' && <TrendingUpIcon className="size-4" />}
         <span>{tag.name}</span>
-      </IntentPrefetchLink>
+      </AppLink>
     </span>
   )
 }

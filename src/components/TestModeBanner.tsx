@@ -2,7 +2,6 @@
 
 import { useExtracted } from 'next-intl'
 import Image from 'next/image'
-import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 interface TestModeBannerProps {
@@ -71,7 +70,7 @@ export default function TestModeBanner({
               <p className="text-sm/relaxed">
                 {message}
               </p>
-              <Link
+              <a
                 href={discordUrl}
                 target="_blank"
                 rel="noreferrer"
@@ -90,7 +89,7 @@ export default function TestModeBanner({
                   aria-hidden="true"
                 />
                 {t('Open Discord')}
-              </Link>
+              </a>
             </div>
           </div>
         </div>

@@ -13,6 +13,7 @@ import { updateEventSyncSettingsAction } from '@/app/[locale]/admin/events/_acti
 import { updateEventVisibilityAction } from '@/app/[locale]/admin/events/_actions/update-event-visibility'
 import { useAdminEventsColumns } from '@/app/[locale]/admin/events/_components/columns'
 import { useAdminEventsTable } from '@/app/[locale]/admin/events/_hooks/useAdminEvents'
+import AppLink from '@/components/AppLink'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -28,7 +29,6 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Link } from '@/i18n/navigation'
 
 interface AdminEventsTableProps {
   initialAutoDeployNewEventsEnabled: boolean
@@ -382,7 +382,7 @@ export default function AdminEventsTable({
 
   const createEventButton = (
     <Button asChild type="button" className="h-9">
-      <Link href="/admin/events/calendar">{t('Create Event')}</Link>
+      <AppLink href="/admin/events/calendar">{t('Create Event')}</AppLink>
     </Button>
   )
 

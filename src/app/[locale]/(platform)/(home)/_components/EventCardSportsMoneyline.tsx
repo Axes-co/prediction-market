@@ -5,7 +5,7 @@ import type { Event } from '@/types'
 import { CheckIcon } from 'lucide-react'
 import Image from 'next/image'
 import EventBookmark from '@/app/[locale]/(platform)/event/[slug]/_components/EventBookmark'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
+import AppLink from '@/components/AppLink'
 import { Card, CardContent } from '@/components/ui/card'
 import { ensureReadableTextColorOnDark } from '@/lib/color-contrast'
 import { resolveEventOutcomePath } from '@/lib/events-routing'
@@ -213,7 +213,8 @@ export default function EventCardSportsMoneyline({
         `)}
       >
         <div className="flex w-full flex-col gap-0.5">
-          <IntentPrefetchLink
+          <AppLink
+            intentPrefetch
             href={resolveButtonHref(model.team1Button)}
             className="group/team-row-1 flex h-8 items-center justify-between gap-2"
           >
@@ -239,8 +240,9 @@ export default function EventCardSportsMoneyline({
               {team1Chance}
               %
             </p>
-          </IntentPrefetchLink>
-          <IntentPrefetchLink
+          </AppLink>
+          <AppLink
+            intentPrefetch
             href={resolveButtonHref(model.team2Button)}
             className="group/team-row-2 flex h-8 items-center justify-between gap-2"
           >
@@ -266,7 +268,7 @@ export default function EventCardSportsMoneyline({
               {team2Chance}
               %
             </p>
-          </IntentPrefetchLink>
+          </AppLink>
         </div>
 
         <div className="flex flex-1 flex-col">
@@ -294,7 +296,8 @@ export default function EventCardSportsMoneyline({
                         const toneStyles = getButtonToneStyles(button)
 
                         return (
-                          <IntentPrefetchLink
+                          <AppLink
+                            intentPrefetch
                             key={`${button.conditionId}:${button.outcomeIndex}`}
                             href={resolveButtonHref(button)}
                             className={cn(
@@ -333,7 +336,7 @@ export default function EventCardSportsMoneyline({
                                   />
                                 )
                               : null}
-                          </IntentPrefetchLink>
+                          </AppLink>
                         )
                       })}
                   </div>

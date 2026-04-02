@@ -7,13 +7,13 @@ import Form from 'next/form'
 import { useActionState, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { updateMarketContextSettingsAction } from '@/app/[locale]/admin/market-context/_actions/update-market-context-settings'
+import AppLink from '@/components/AppLink'
 import { Button } from '@/components/ui/button'
 import { InputError } from '@/components/ui/input-error'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Link } from '@/i18n/navigation'
 import { cn } from '@/lib/utils'
 
 const initialState = {
@@ -157,9 +157,9 @@ export default function AdminMarketContextSettingsForm({
           <p className="text-xs text-muted-foreground">
             {t('You need to enable OpenRouter, the credentials and model selection are in')}
             {' '}
-            <Link href="/admin" className="underline underline-offset-4">
+            <AppLink href="/admin" className="underline underline-offset-4">
               {t('General Settings')}
-            </Link>
+            </AppLink>
             .
           </p>
         </div>

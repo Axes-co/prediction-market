@@ -13,8 +13,8 @@ vi.mock('next/image', () => ({
   },
 }))
 
-vi.mock('@/components/IntentPrefetchLink', () => ({
-  default: function MockIntentPrefetchLink({
+vi.mock('@/components/AppLink', () => ({
+  default: function MockAppLink({
     children,
     href,
     ...props

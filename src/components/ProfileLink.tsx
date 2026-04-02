@@ -3,7 +3,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import Image from 'next/image'
 import { useEffect, useMemo, useState } from 'react'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
+import AppLink from '@/components/AppLink'
 import ProfileActivityTooltipCard from '@/components/ProfileActivityTooltipCard'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -163,7 +163,7 @@ export default function ProfileLink({
     : null
 
   const avatarNode = (
-    <IntentPrefetchLink href={profileHref} data-avatar-wrapper="true" className="relative isolate shrink-0">
+    <AppLink href={profileHref} data-avatar-wrapper="true" className="relative isolate shrink-0">
       {!showPlaceholder && hasCustomAvatar
         ? (
             <Image
@@ -193,18 +193,18 @@ export default function ProfileLink({
           {position}
         </Badge>
       )}
-    </IntentPrefetchLink>
+    </AppLink>
   )
 
   const usernameNode = (
     <div className={usernameWrapperClassName}>
-      <IntentPrefetchLink
+      <AppLink
         href={profileHref}
         title={titleValue}
         className={usernameLinkClassName}
       >
         {displayUsername}
-      </IntentPrefetchLink>
+      </AppLink>
     </div>
   )
 

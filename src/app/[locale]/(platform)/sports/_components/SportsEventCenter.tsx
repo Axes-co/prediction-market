@@ -47,12 +47,12 @@ import {
   resolveSportsAuxiliaryMarketGroupKey,
   resolveSportsAuxiliaryMarketTitle,
 } from '@/app/[locale]/(platform)/sports/_utils/sports-games-data'
+import AppLink from '@/components/AppLink'
 import SiteLogoIcon from '@/components/SiteLogoIcon'
 import { Button } from '@/components/ui/button'
 import { useCurrentTimestamp } from '@/hooks/useCurrentTimestamp'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSiteIdentity } from '@/hooks/useSiteIdentity'
-import { Link } from '@/i18n/navigation'
 import { ensureReadableTextColorOnDark } from '@/lib/color-contrast'
 import { ORDER_SIDE, OUTCOME_INDEX } from '@/lib/constants'
 import { fetchUserPositionsForMarket } from '@/lib/data-api/user'
@@ -840,9 +840,9 @@ function SportsEventRelatedGames({
     <div className="grid gap-2.5">
       <p className="text-sm font-normal text-muted-foreground">
         {'More '}
-        <Link href={`${verticalConfig.basePath}/${sportSlug}/games`} className="underline-offset-2 hover:underline">
+        <AppLink href={`${verticalConfig.basePath}/${sportSlug}/games`} className="underline-offset-2 hover:underline">
           {sportLabel}
-        </Link>
+        </AppLink>
         {' Games'}
       </p>
 
@@ -856,10 +856,11 @@ function SportsEventRelatedGames({
           const team2 = relatedCard.teams[1] ?? null
 
           return (
-            <Link
+            <AppLink
+              intentPrefetch
               key={relatedCard.id}
               href={relatedCard.eventHref}
-              className={cn('block rounded-xl px-3 py-2.5 transition-colors hover:bg-card')}
+              className={cn(`block rounded-xl px-3 py-2.5 transition-colors hover:bg-card`)}
             >
               <p className="mb-2 text-xs font-normal text-muted-foreground">
                 {topLineDate}
@@ -928,7 +929,7 @@ function SportsEventRelatedGames({
                   </span>
                 </div>
               </div>
-            </Link>
+            </AppLink>
           )
         })}
       </div>
@@ -3267,7 +3268,7 @@ export default function SportsEventCenter({
         <SportsEventQuerySync onSelectionChange={handleQuerySelectionChange} />
       </Suspense>
       <div className="
-        min-[1200px]:grid min-[1200px]:h-full min-[1200px]:grid-cols-[minmax(0,1fr)_21.25rem]
+        min-[1200px]:grid min-[1200px]:h-full min-[1200px]:min-h-0 min-[1200px]:grid-cols-[minmax(0,1fr)_21.25rem]
         min-[1200px]:[align-content:start] min-[1200px]:[align-items:start] min-[1200px]:gap-6
       "
       >
@@ -3275,13 +3276,14 @@ export default function SportsEventCenter({
           data-sports-scroll-pane="center"
           className="
             min-w-0
-            min-[1200px]:min-h-0 min-[1200px]:overflow-y-auto min-[1200px]:overscroll-contain min-[1200px]:pr-1
+            min-[1200px]:min-h-0 min-[1200px]:self-stretch min-[1200px]:overflow-y-auto min-[1200px]:overscroll-contain
+            min-[1200px]:pr-1
             lg:ml-4
           "
         >
           <div className="mb-4">
             <div className="relative mb-1 flex min-h-9 items-center justify-center">
-              <Link
+              <AppLink
                 href={`${verticalConfig.basePath}/${sportSlug}/games`}
                 aria-label="Back to games"
                 className={cn(
@@ -3290,7 +3292,7 @@ export default function SportsEventCenter({
                 )}
               >
                 <ChevronLeftIcon className="size-4 text-foreground" />
-              </Link>
+              </AppLink>
 
               <div
                 className="
@@ -3298,13 +3300,16 @@ export default function SportsEventCenter({
                   sm:px-22
                 "
               >
-                <Link href={verticalConfig.livePath} className="hover:text-foreground">
+                <AppLink href={verticalConfig.livePath} className="hover:text-foreground">
                   {verticalConfig.label}
-                </Link>
+                </AppLink>
                 <span className="opacity-60">·</span>
-                <Link href={`${verticalConfig.basePath}/${sportSlug}/games`} className="truncate hover:text-foreground">
+                <AppLink
+                  href={`${verticalConfig.basePath}/${sportSlug}/games`}
+                  className="truncate hover:text-foreground"
+                >
                   {sportLabel}
-                </Link>
+                </AppLink>
               </div>
 
               <div className="absolute right-0 flex items-center gap-1 text-foreground">

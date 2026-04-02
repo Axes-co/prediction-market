@@ -282,7 +282,13 @@ function isSnapshotMessage(payload: any) {
   return Array.isArray(payload?.payload?.data) || Array.isArray(payload?.data)
 }
 
-function buildAxis(values: number[]) {
+function buildAxis(values: number[], fractionDigits = 2) {
+  const resolvedFractionDigits = Math.max(0, Math.min(6, Math.floor(fractionDigits)))
+  const visibleStep = 1 / 10 ** resolvedFractionDigits
+  function roundAxisValue(value: number) {
+    return Number(value.toFixed(resolvedFractionDigits))
+  }
+
   if (!values.length) {
     return { min: 0, max: 1, ticks: [0, 1] }
   }
@@ -291,10 +297,10 @@ function buildAxis(values: number[]) {
   const maxValue = Math.max(...values)
   const midpoint = (minValue + maxValue) / 2
 
-  if (maxValue - minValue < 0.005 && Math.abs(midpoint) >= 50) {
-    const center = Number(midpoint.toFixed(2))
-    const axisMin = Number((center - 0.01).toFixed(2))
-    const axisMax = Number((center + 0.01).toFixed(2))
+  if (maxValue - minValue < visibleStep / 2 && Math.abs(midpoint) >= 50) {
+    const center = roundAxisValue(midpoint)
+    const axisMin = roundAxisValue(center - visibleStep)
+    const axisMax = roundAxisValue(center + visibleStep)
     return { min: axisMin, max: axisMax, ticks: [axisMin, center, axisMax] }
   }
 
@@ -309,7 +315,7 @@ function buildAxis(values: number[]) {
   const magnitude = 10 ** Math.floor(Math.log10(rawStep))
   const stepRatio = rawStep / magnitude
   const stepMultiplier = stepRatio >= 5 ? 5 : stepRatio >= 2 ? 2 : 1
-  const initialStep = stepMultiplier * magnitude
+  const initialStep = Math.max(stepMultiplier * magnitude, visibleStep)
 
   function nextNiceStep(currentStep: number) {
     const currentMagnitude = 10 ** Math.floor(Math.log10(currentStep))
@@ -348,10 +354,23 @@ function buildAxis(values: number[]) {
     attempts += 1
   }
 
+  const ticks: number[] = []
+  const seenTicks = new Set<number>()
+
+  for (const value of axis.ticks) {
+    const roundedValue = roundAxisValue(value)
+    if (seenTicks.has(roundedValue)) {
+      continue
+    }
+
+    seenTicks.add(roundedValue)
+    ticks.push(roundedValue)
+  }
+
   return {
-    min: Number(axis.axisMin.toFixed(2)),
-    max: Number(axis.axisMax.toFixed(2)),
-    ticks: axis.ticks.map(value => Number(value.toFixed(2))),
+    min: roundAxisValue(axis.axisMin),
+    max: roundAxisValue(axis.axisMax),
+    ticks,
   }
 }
 
@@ -1173,8 +1192,8 @@ export default function EventLiveSeriesChart({
       values.push(currentPrice)
     }
 
-    return buildAxis(values)
-  }, [axisSourceData, currentPrice])
+    return buildAxis(values, priceDisplayDigits)
+  }, [axisSourceData, currentPrice, priceDisplayDigits])
   const axisValues = rawAxisValues
   const currentLineTop = useMemo(() => {
     if (currentPrice == null) {

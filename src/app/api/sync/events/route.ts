@@ -1,5 +1,5 @@
 import { and, eq, inArray, lt, ne, or } from 'drizzle-orm'
-import { updateTag } from 'next/cache'
+import { revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { loadAllowedMarketCreatorWallets } from '@/lib/allowed-market-creators-server'
 import { isCronAuthorized } from '@/lib/auth-cron'
@@ -108,6 +108,61 @@ interface SyncRuntimeState {
   eventTagSlugsByEventId: Map<string, Set<string>>
 }
 
+const PNL_CONDITIONS_PAGE_QUERY = `
+  query PnlConditionsPage($creators: [String!]!, $pageSize: Int!) {
+    conditions(
+      first: $pageSize
+      orderBy: updatedAt
+      orderDirection: asc
+      where: { creator_in: $creators }
+    ) {
+      id
+      oracle
+      questionId
+      resolved
+      metadataHash
+      creator
+      creationTimestamp
+      updatedAt
+    }
+  }
+`
+
+const PNL_CONDITIONS_PAGE_SINCE_QUERY = `
+  query PnlConditionsPage($creators: [String!]!, $pageSize: Int!, $lastUpdatedAt: BigInt!, $lastConditionId: String!) {
+    conditions(
+      first: $pageSize
+      orderBy: updatedAt
+      orderDirection: asc
+      where: {
+        and: [
+          { creator_in: $creators }
+          {
+            or: [
+              { updatedAt_gt: $lastUpdatedAt }
+              {
+                and: [
+                  { updatedAt: $lastUpdatedAt }
+                  { id_gt: $lastConditionId }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ) {
+      id
+      oracle
+      questionId
+      resolved
+      metadataHash
+      creator
+      creationTimestamp
+      updatedAt
+    }
+  }
+`
+
 async function getAllowedCreators(): Promise<string[]> {
   const { data, error } = await loadAllowedMarketCreatorWallets()
   if (error || !data) {
@@ -200,6 +255,20 @@ export async function GET(request: Request) {
 }
 
 async function syncMarkets(allowedCreators: Set<string>, options: SyncOptions): Promise<SyncStats> {
+  const trackedCreators = Array.from(allowedCreators)
+    .map(creator => creator.trim().toLowerCase())
+    .filter(Boolean)
+
+  if (trackedCreators.length === 0) {
+    return {
+      fetchedCount: 0,
+      processedCount: 0,
+      skippedCreatorCount: 0,
+      errors: [],
+      timeLimitReached: false,
+    }
+  }
+
   const syncStartedAt = Date.now()
   let cursor = await getLastPnLCursor()
 
@@ -217,12 +286,13 @@ async function syncMarkets(allowedCreators: Set<string>, options: SyncOptions): 
   const errors: { conditionId: string, error: string }[] = []
   let timeLimitReached = false
   const eventIdsNeedingStatusUpdate = new Set<string>()
+  const eventIdsNeedingCacheInvalidation = new Set<string>()
   const runtimeState: SyncRuntimeState = {
     eventTagSlugsByEventId: new Map(),
   }
 
   while (Date.now() - syncStartedAt < SYNC_TIME_LIMIT_MS) {
-    const page = await fetchPnLConditionsPage(cursor)
+    const page = await fetchPnLConditionsPage(trackedCreators, cursor)
 
     if (page.conditions.length === 0) {
       console.log('📦 PnL subgraph returned no additional conditions')
@@ -270,6 +340,7 @@ async function syncMarkets(allowedCreators: Set<string>, options: SyncOptions): 
         const eventIdForStatusUpdate = await processMarket(condition, options, runtimeState)
         if (eventIdForStatusUpdate) {
           eventIdsNeedingStatusUpdate.add(eventIdForStatusUpdate)
+          eventIdsNeedingCacheInvalidation.add(eventIdForStatusUpdate)
         }
         processedCount++
         lastPersistableCursor = conditionCursor
@@ -308,7 +379,6 @@ async function syncMarkets(allowedCreators: Set<string>, options: SyncOptions): 
     if (eventIdsNeedingStatusUpdate.size > 0) {
       const eventIdsToRefresh = Array.from(eventIdsNeedingStatusUpdate)
       await updateEventStatusesFromMarketsBatch(eventIdsToRefresh)
-      await invalidateEventCaches(eventIdsToRefresh)
       eventIdsNeedingStatusUpdate.clear()
     }
 
@@ -325,8 +395,13 @@ async function syncMarkets(allowedCreators: Set<string>, options: SyncOptions): 
   if (eventIdsNeedingStatusUpdate.size > 0) {
     const eventIdsToRefresh = Array.from(eventIdsNeedingStatusUpdate)
     await updateEventStatusesFromMarketsBatch(eventIdsToRefresh)
-    await invalidateEventCaches(eventIdsToRefresh)
     eventIdsNeedingStatusUpdate.clear()
+  }
+
+  if (eventIdsNeedingCacheInvalidation.size > 0) {
+    await invalidateEventCaches(Array.from(eventIdsNeedingCacheInvalidation), {
+      includeGlobal: true,
+    })
   }
 
   return {
@@ -369,61 +444,56 @@ async function getLastPnLCursor(): Promise<SyncCursor | null> {
 
 async function updatePnLCursor(cursor: SyncCursor) {
   try {
-    const payload = {
-      service_name: 'market_sync',
-      subgraph_name: 'pnl',
+    const cursorPayload = {
       cursor_updated_at: BigInt(cursor.updatedAt),
       cursor_id: cursor.conditionId,
     }
 
-    await db
-      .insert(subgraph_syncs)
-      .values(payload)
-      .onConflictDoUpdate({
-        target: [subgraph_syncs.service_name, subgraph_syncs.subgraph_name],
-        set: payload,
-      })
+    const updatedRows = await db
+      .update(subgraph_syncs)
+      .set(cursorPayload)
+      .where(and(
+        eq(subgraph_syncs.service_name, 'market_sync'),
+        eq(subgraph_syncs.subgraph_name, 'pnl'),
+      ))
+      .returning({ id: subgraph_syncs.id })
+
+    if (updatedRows.length === 0) {
+      console.error('Failed to update market sync cursor: missing sync state row for market_sync/pnl')
+    }
   }
   catch (error) {
     console.error('Failed to update market sync cursor:', error)
   }
 }
 
-async function fetchPnLConditionsPage(afterCursor: SyncCursor | null): Promise<{ conditions: SubgraphCondition[] }> {
-  const cursorUpdatedAt = afterCursor?.updatedAt
-  const cursorConditionId = afterCursor?.conditionId
-
-  let whereClause = ''
-  if (cursorUpdatedAt !== undefined && cursorConditionId !== undefined) {
-    const timestampLiteral = JSON.stringify(cursorUpdatedAt.toString())
-    const conditionIdLiteral = JSON.stringify(cursorConditionId)
-    whereClause = `, where: { or: [{ updatedAt_gt: ${timestampLiteral} }, { updatedAt: ${timestampLiteral}, id_gt: ${conditionIdLiteral} }] }`
+async function fetchPnLConditionsPage(
+  creators: string[],
+  afterCursor: SyncCursor | null,
+): Promise<{ conditions: SubgraphCondition[] }> {
+  if (creators.length === 0) {
+    return { conditions: [] }
   }
 
-  const query = `
-    {
-      conditions(
-        first: ${PNL_PAGE_SIZE},
-        orderBy: updatedAt,
-        orderDirection: asc${whereClause}
-      ) {
-        id
-        oracle
-        questionId
-        resolved
-        metadataHash
-        creator
-        creationTimestamp
-        updatedAt
+  const hasCursor = afterCursor != null
+  const query = hasCursor ? PNL_CONDITIONS_PAGE_SINCE_QUERY : PNL_CONDITIONS_PAGE_QUERY
+  const variables = hasCursor
+    ? {
+        creators,
+        pageSize: PNL_PAGE_SIZE,
+        lastUpdatedAt: afterCursor.updatedAt.toString(),
+        lastConditionId: afterCursor.conditionId,
       }
-    }
-  `
+    : {
+        creators,
+        pageSize: PNL_PAGE_SIZE,
+      }
 
   const response = await fetch(PNL_SUBGRAPH_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     keepalive: true,
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, variables }),
   })
 
   if (!response.ok) {
@@ -506,6 +576,12 @@ async function processCondition(market: SubgraphCondition, timestamps: MarketTim
     throw new Error(`Market ${market.id} missing required metadataHash field`)
   }
 
+  const resolutionPayload = market.resolved
+    ? {
+        resolution_status: 'resolved' as const,
+      }
+    : {}
+
   const payload = {
     id: market.id,
     oracle: market.oracle,
@@ -515,6 +591,7 @@ async function processCondition(market: SubgraphCondition, timestamps: MarketTim
     creator: market.creator!,
     created_at: new Date(timestamps.createdAtIso),
     updated_at: new Date(timestamps.updatedAtIso),
+    ...resolutionPayload,
   }
 
   await db
@@ -1059,7 +1136,10 @@ async function updateEventStatusesFromMarketsBatch(eventIds: string[]) {
   }
 }
 
-async function invalidateEventCaches(eventIds: string[]) {
+async function invalidateEventCaches(
+  eventIds: string[],
+  options: { includeGlobal?: boolean } = {},
+) {
   const uniqueEventIds = Array.from(new Set(eventIds.filter(Boolean)))
   if (uniqueEventIds.length === 0) {
     return
@@ -1072,10 +1152,12 @@ async function invalidateEventCaches(eventIds: string[]) {
     .from(eventsTable)
     .where(inArray(eventsTable.id, uniqueEventIds))
 
-  updateTag(cacheTags.eventsGlobal)
+  if (options.includeGlobal) {
+    revalidateTag(cacheTags.eventsGlobal, 'max')
+  }
   for (const row of rows) {
     if (row.slug) {
-      updateTag(cacheTags.event(row.slug))
+      revalidateTag(cacheTags.event(row.slug), 'max')
     }
   }
 }
@@ -1900,72 +1982,23 @@ async function tryAcquireSyncLock(): Promise<boolean> {
     if (claimedRows.length > 0) {
       return true
     }
-  }
-  catch (claimError: any) {
-    if (isMissingColumnError(claimError, 'status')) {
-      return tryAcquireLegacySyncLock()
-    }
-    throw new Error(`Failed to claim sync lock: ${claimError?.message ?? String(claimError)}`)
-  }
-
-  try {
-    const insertedRows = await db
-      .insert(subgraph_syncs)
-      .values(runningPayload)
-      .onConflictDoNothing()
-      .returning({ id: subgraph_syncs.id })
-
-    return insertedRows.length > 0
-  }
-  catch (insertError: any) {
-    if (isMissingColumnError(insertError, 'status')) {
-      return tryAcquireLegacySyncLock()
-    }
-    throw new Error(`Failed to initialize sync lock: ${insertError?.message ?? String(insertError)}`)
-  }
-}
-
-function isMissingColumnError(error: { message?: string } | null | undefined, column: string): boolean {
-  const message = error?.message ?? ''
-  return message.includes(`column subgraph_syncs.${column} does not exist`)
-}
-
-async function tryAcquireLegacySyncLock(): Promise<boolean> {
-  const legacyPayload = {
-    service_name: 'market_sync',
-    subgraph_name: 'pnl',
-    error_message: null,
-  }
-
-  try {
-    const updatedRows = await db
-      .update(subgraph_syncs)
-      .set(legacyPayload)
+    const existingRows = await db
+      .select({ id: subgraph_syncs.id })
+      .from(subgraph_syncs)
       .where(and(
         eq(subgraph_syncs.service_name, 'market_sync'),
         eq(subgraph_syncs.subgraph_name, 'pnl'),
       ))
-      .returning({ id: subgraph_syncs.id })
+      .limit(1)
 
-    if (updatedRows.length > 0) {
-      return true
+    if (existingRows.length > 0) {
+      return false
     }
-  }
-  catch (updateError: any) {
-    throw new Error(`Failed to claim legacy sync lock: ${updateError?.message ?? String(updateError)}`)
-  }
 
-  try {
-    const insertedRows = await db
-      .insert(subgraph_syncs)
-      .values(legacyPayload)
-      .onConflictDoNothing()
-      .returning({ id: subgraph_syncs.id })
-
-    return insertedRows.length > 0
+    throw new Error('Missing sync state row for market_sync/pnl. Run the latest database migrations.')
   }
-  catch (insertError: any) {
-    throw new Error(`Failed to initialize legacy sync lock: ${insertError?.message ?? String(insertError)}`)
+  catch (claimError: any) {
+    throw new Error(`Failed to claim sync lock: ${claimError?.message ?? String(claimError)}`)
   }
 }
 
@@ -1989,18 +2022,20 @@ async function updateSyncStatus(
   }
 
   try {
-    await db
-      .insert(subgraph_syncs)
-      .values(updateData)
-      .onConflictDoUpdate({
-        target: [subgraph_syncs.service_name, subgraph_syncs.subgraph_name],
-        set: updateData,
-      })
+    const updatedRows = await db
+      .update(subgraph_syncs)
+      .set(updateData)
+      .where(and(
+        eq(subgraph_syncs.service_name, 'market_sync'),
+        eq(subgraph_syncs.subgraph_name, 'pnl'),
+      ))
+      .returning({ id: subgraph_syncs.id })
+
+    if (updatedRows.length === 0) {
+      console.error('Failed to update sync status: missing sync state row for market_sync/pnl')
+    }
   }
   catch (error: any) {
-    if (isMissingColumnError(error, 'status')) {
-      return
-    }
     console.error(`Failed to update sync status to ${status}:`, error)
   }
 }

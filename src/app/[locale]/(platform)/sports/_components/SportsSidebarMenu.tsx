@@ -11,7 +11,7 @@ import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
 import { ChevronDownIcon, MoreHorizontalIcon } from 'lucide-react'
 import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
+import AppLink from '@/components/AppLink'
 import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer'
 import { getSportsVerticalConfig } from '@/lib/sports-vertical'
 import { cn } from '@/lib/utils'
@@ -362,7 +362,8 @@ function SportsMobileQuickLink({
   const isActive = isMenuLinkActive({ entry, vertical, mode, activeTagSlug })
 
   return (
-    <IntentPrefetchLink
+    <AppLink
+      intentPrefetch
       href={entry.href as Route}
       aria-current={isActive ? 'page' : undefined}
       className={cn(
@@ -386,7 +387,7 @@ function SportsMobileQuickLink({
       <span className="w-full truncate text-[11px] leading-tight font-medium text-foreground">
         {entry.label}
       </span>
-    </IntentPrefetchLink>
+    </AppLink>
   )
 }
 
@@ -415,7 +416,8 @@ function SportsMobileSheetLink({
   const displayCount = resolveLinkEventsCount(entry, countByTagSlug)
 
   return (
-    <IntentPrefetchLink
+    <AppLink
+      intentPrefetch
       href={entry.href as Route}
       aria-current={isActive ? 'page' : undefined}
       onClick={() => onActionComplete?.()}
@@ -452,7 +454,7 @@ function SportsMobileSheetLink({
           )
         </span>
       )}
-    </IntentPrefetchLink>
+    </AppLink>
   )
 }
 
@@ -482,7 +484,8 @@ function SportsMenuLink({
 
   if (nested) {
     return (
-      <IntentPrefetchLink
+      <AppLink
+        intentPrefetch
         href={entry.href as Route}
         aria-current={isActive ? 'page' : undefined}
         onClick={() => onActionComplete?.()}
@@ -518,12 +521,13 @@ function SportsMenuLink({
             </span>
           )}
         </div>
-      </IntentPrefetchLink>
+      </AppLink>
     )
   }
 
   return (
-    <IntentPrefetchLink
+    <AppLink
+      intentPrefetch
       href={entry.href as Route}
       aria-current={isActive ? 'page' : undefined}
       onClick={() => onActionComplete?.()}
@@ -554,7 +558,7 @@ function SportsMenuLink({
           {displayCount}
         </span>
       )}
-    </IntentPrefetchLink>
+    </AppLink>
   )
 }
 
@@ -704,7 +708,8 @@ export default function SportsSidebarMenu({
 
       return (
         <div key={entry.id}>
-          <IntentPrefetchLink
+          <AppLink
+            intentPrefetch
             href={entry.href as Route}
             aria-current={isCurrentPage ? 'page' : undefined}
             onClick={(event) => {
@@ -740,7 +745,7 @@ export default function SportsSidebarMenu({
                 isExpanded ? 'rotate-180' : 'rotate-0',
               )}
             />
-          </IntentPrefetchLink>
+          </AppLink>
 
           <div
             aria-hidden={!isExpanded}

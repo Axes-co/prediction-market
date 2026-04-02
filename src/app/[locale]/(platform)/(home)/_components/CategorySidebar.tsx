@@ -9,7 +9,7 @@ import type {
 } from '@/lib/platform-navigation'
 import { useExtracted } from 'next-intl'
 import Image from 'next/image'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
+import AppLink from '@/components/AppLink'
 import { cn } from '@/lib/utils'
 
 interface CategorySidebarProps {
@@ -262,7 +262,8 @@ function SidebarLinkIcon({ icon }: { icon?: PlatformCategorySidebarIconKey }) {
 
 function CategorySidebarLink({ children, count, href, icon, isActive, onClick }: CategorySidebarLinkProps) {
   return (
-    <IntentPrefetchLink
+    <AppLink
+      intentPrefetch
       href={href}
       aria-current={isActive ? 'page' : undefined}
       onClick={onClick}
@@ -286,7 +287,7 @@ function CategorySidebarLink({ children, count, href, icon, isActive, onClick }:
           {count}
         </span>
       )}
-    </IntentPrefetchLink>
+    </AppLink>
   )
 }
 

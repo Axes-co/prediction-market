@@ -15,8 +15,8 @@ import { useCommentMetrics } from '@/app/[locale]/(platform)/event/[slug]/_hooks
 import { resolveResolvedOrderPanelDisplay } from '@/app/[locale]/(platform)/event/[slug]/_utils/resolved-order-panel-market'
 import PredictionResultsFilters from '@/app/[locale]/(platform)/predictions/[slug]/_components/PredictionResultsFilters'
 import PredictionResultsSearchParamsSync from '@/app/[locale]/(platform)/predictions/[slug]/_components/PredictionResultsSearchParamsSync'
+import AppLink from '@/components/AppLink'
 import EventIconImage from '@/components/EventIconImage'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
 import { Button } from '@/components/ui/button'
 import {
   Drawer,
@@ -696,7 +696,8 @@ function PredictionResultRow({
 
   return (
     <div className="group relative py-4">
-      <IntentPrefetchLink
+      <AppLink
+        intentPrefetch
         href={eventPath as Route}
         aria-label={event.title}
         className="absolute inset-0 z-0 rounded-2xl"
@@ -737,12 +738,13 @@ function PredictionResultRow({
                     ? (
                         <div key={`${event.id}-${tag.slug}`} className="flex items-center gap-2">
                           {index > 0 && <span className="text-muted-foreground/80">·</span>}
-                          <IntentPrefetchLink
+                          <AppLink
+                            intentPrefetch
                             href={tagPath as Route}
                             className="font-medium text-muted-foreground transition-colors hover:text-foreground"
                           >
                             {tag.name}
-                          </IntentPrefetchLink>
+                          </AppLink>
                         </div>
                       )
                     : null
@@ -750,14 +752,15 @@ function PredictionResultRow({
               </div>
             )}
 
-            <IntentPrefetchLink
+            <AppLink
+              intentPrefetch
               href={eventPath as Route}
               className="pointer-events-auto relative z-20 block rounded-sm focus-visible:outline-none"
             >
               <h2 className="line-clamp-3 text-lg/snug font-medium text-foreground group-hover:underline">
                 {event.title}
               </h2>
-            </IntentPrefetchLink>
+            </AppLink>
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               <span className="flex items-center gap-1 whitespace-nowrap">
                 <span>

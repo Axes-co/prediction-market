@@ -3,8 +3,8 @@ import { setRequestLocale } from 'next-intl/server'
 import { connection } from 'next/server'
 import { Suspense } from 'react'
 import AdminCreateEventForm from '@/app/[locale]/admin/events/calendar/_components/AdminCreateEventForm'
+import AppLink from '@/components/AppLink'
 import { Button } from '@/components/ui/button'
-import { Link } from '@/i18n/navigation'
 import { buildAdminSportsSlugCatalog, EMPTY_ADMIN_SPORTS_SLUG_CATALOG } from '@/lib/admin-sports-create'
 import { normalizeDateTimeLocalValue } from '@/lib/datetime-local'
 import { EventCreationRepository } from '@/lib/db/queries/event-creations'
@@ -85,10 +85,10 @@ async function AdminCreateEventNewContent({
           <p className="text-sm text-muted-foreground">{description}</p>
         </div>
         <Button type="button" variant="outline" asChild>
-          <Link href="/admin/events/calendar">
+          <AppLink href="/admin/events/calendar">
             <ArrowLeftIcon className="size-4" />
             Back to calendar
-          </Link>
+          </AppLink>
         </Button>
       </div>
 
@@ -130,10 +130,10 @@ export default async function AdminCreateEventNewPage({
                 <p className="text-sm text-muted-foreground">Loading event form...</p>
               </div>
               <Button type="button" variant="outline" asChild>
-                <Link href="/admin/events/calendar">
+                <AppLink href="/admin/events/calendar">
                   <ArrowLeftIcon className="size-4" />
                   Back to calendar
-                </Link>
+                </AppLink>
               </Button>
             </div>
 

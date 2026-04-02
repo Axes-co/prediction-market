@@ -1,9 +1,10 @@
-import { and, eq, inArray, isNull, lt, ne, or } from 'drizzle-orm'
-import { updateTag } from 'next/cache'
+import { and, eq, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm'
+import { revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { isCronAuthorized } from '@/lib/auth-cron'
 import { cacheTags } from '@/lib/cache-tags'
 import {
+  allowed_market_creators,
   conditions as conditionsTable,
   events as eventsTable,
   markets as marketsTable,
@@ -47,6 +48,14 @@ interface MarketContext {
   negRisk: boolean
 }
 
+interface ResolutionLookupRow {
+  condition_id: string
+  event_id: string | null
+  neg_risk: boolean | null
+  question_id: string
+  neg_risk_request_id: string | null
+}
+
 interface SyncStats {
   fetchedCount: number
   processedCount: number
@@ -54,6 +63,63 @@ interface SyncStats {
   errors: { questionId: string, error: string }[]
   timeLimitReached: boolean
 }
+
+const RESOLUTION_PAGE_QUERY = `
+  query ResolutionPage($authors: [Bytes!]!, $pageSize: Int!) {
+    marketResolutions(
+      first: $pageSize
+      orderBy: lastUpdateTimestamp
+      orderDirection: asc
+      where: { author_in: $authors }
+    ) {
+      id
+      status
+      flagged
+      paused
+      wasDisputed
+      approved
+      lastUpdateTimestamp
+      price
+      liveness
+    }
+  }
+`
+
+const RESOLUTION_PAGE_SINCE_QUERY = `
+  query ResolutionPage($authors: [Bytes!]!, $pageSize: Int!, $lastTimestamp: BigInt!, $lastId: ID!) {
+    marketResolutions(
+      first: $pageSize
+      orderBy: lastUpdateTimestamp
+      orderDirection: asc
+      where: {
+        and: [
+          { author_in: $authors }
+          {
+            or: [
+              { lastUpdateTimestamp_gt: $lastTimestamp }
+              {
+                and: [
+                  { lastUpdateTimestamp: $lastTimestamp }
+                  { id_gt: $lastId }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ) {
+      id
+      status
+      flagged
+      paused
+      wasDisputed
+      approved
+      lastUpdateTimestamp
+      price
+      liveness
+    }
+  }
+`
 
 export async function GET(request: Request) {
   const auth = request.headers.get('authorization')
@@ -128,76 +194,23 @@ async function tryAcquireSyncLock(): Promise<boolean> {
     if (claimedRows.length > 0) {
       return true
     }
-  }
-  catch (error: any) {
-    if (isMissingColumnError(error, 'status')) {
-      return tryAcquireLegacySyncLock()
-    }
-    throw new Error(`Failed to claim sync lock: ${error?.message ?? String(error)}`)
-  }
-
-  try {
-    const insertedRows = await db
-      .insert(subgraph_syncs)
-      .values(runningPayload)
-      .onConflictDoNothing()
-      .returning({ id: subgraph_syncs.id })
-
-    if (insertedRows.length > 0) {
-      return true
-    }
-
-    return false
-  }
-  catch (error: any) {
-    if (isMissingColumnError(error, 'status')) {
-      return tryAcquireLegacySyncLock()
-    }
-    throw new Error(`Failed to initialize sync lock: ${error?.message ?? String(error)}`)
-  }
-}
-
-function isMissingColumnError(error: { message?: string } | null | undefined, column: string): boolean {
-  const message = error?.message ?? ''
-  return message.includes(`column subgraph_syncs.${column} does not exist`)
-}
-
-async function tryAcquireLegacySyncLock(): Promise<boolean> {
-  const legacyPayload = {
-    service_name: 'resolution_sync',
-    subgraph_name: 'resolution',
-    error_message: null,
-  }
-
-  try {
-    const updatedRows = await db
-      .update(subgraph_syncs)
-      .set(legacyPayload)
+    const existingRows = await db
+      .select({ id: subgraph_syncs.id })
+      .from(subgraph_syncs)
       .where(and(
         eq(subgraph_syncs.service_name, 'resolution_sync'),
         eq(subgraph_syncs.subgraph_name, 'resolution'),
       ))
-      .returning({ id: subgraph_syncs.id })
+      .limit(1)
 
-    if (updatedRows.length > 0) {
-      return true
+    if (existingRows.length > 0) {
+      return false
     }
+
+    throw new Error('Missing sync state row for resolution_sync/resolution. Run the latest database migrations.')
   }
   catch (error: any) {
-    throw new Error(`Failed to claim legacy sync lock: ${error?.message ?? String(error)}`)
-  }
-
-  try {
-    const insertedRows = await db
-      .insert(subgraph_syncs)
-      .values(legacyPayload)
-      .onConflictDoNothing()
-      .returning({ id: subgraph_syncs.id })
-
-    return insertedRows.length > 0
-  }
-  catch (error: any) {
-    throw new Error(`Failed to initialize legacy sync lock: ${error?.message ?? String(error)}`)
+    throw new Error(`Failed to claim sync lock: ${error?.message ?? String(error)}`)
   }
 }
 
@@ -221,24 +234,37 @@ async function updateSyncStatus(
   }
 
   try {
-    await db
-      .insert(subgraph_syncs)
-      .values(updateData)
-      .onConflictDoUpdate({
-        target: [subgraph_syncs.service_name, subgraph_syncs.subgraph_name],
-        set: updateData,
-      })
+    const updatedRows = await db
+      .update(subgraph_syncs)
+      .set(updateData)
+      .where(and(
+        eq(subgraph_syncs.service_name, 'resolution_sync'),
+        eq(subgraph_syncs.subgraph_name, 'resolution'),
+      ))
+      .returning({ id: subgraph_syncs.id })
+
+    if (updatedRows.length === 0) {
+      console.error('Failed to update sync status: missing sync state row for resolution_sync/resolution')
+    }
   }
   catch (error: any) {
-    if (isMissingColumnError(error, 'status')) {
-      return
-    }
     console.error(`Failed to update sync status to ${status}:`, error)
   }
 }
 
 async function syncResolutions(): Promise<SyncStats> {
   const syncStartedAt = Date.now()
+  const trackedAuthors = await loadTrackedResolutionAuthors()
+  if (trackedAuthors.length === 0) {
+    return {
+      fetchedCount: 0,
+      processedCount: 0,
+      skippedCount: 0,
+      errors: [],
+      timeLimitReached: false,
+    }
+  }
+
   let cursor = await getLastResolutionCursor()
 
   let fetchedCount = 0
@@ -247,9 +273,11 @@ async function syncResolutions(): Promise<SyncStats> {
   const errors: { questionId: string, error: string }[] = []
   let timeLimitReached = false
   const eventIdsNeedingStatusUpdate = new Set<string>()
+  const eventIdsNeedingCacheInvalidation = new Set<string>()
+  const eventIdsNeedingGlobalCacheInvalidation = new Set<string>()
 
   while (Date.now() - syncStartedAt < SYNC_TIME_LIMIT_MS) {
-    const page = await fetchResolutionPage(cursor)
+    const page = await fetchResolutionPage(trackedAuthors, cursor)
 
     if (page.resolutions.length === 0) {
       break
@@ -259,77 +287,18 @@ async function syncResolutions(): Promise<SyncStats> {
 
     const resolutionIds = page.resolutions.map(resolution => resolution.id.toLowerCase())
     const conditionIdByResolutionId = new Map<string, string>()
-
-    let conditions: { id: string, question_id: string }[] = []
-    if (resolutionIds.length > 0) {
-      conditions = await db
-        .select({
-          id: conditionsTable.id,
-          question_id: conditionsTable.question_id,
-        })
-        .from(conditionsTable)
-        .where(inArray(conditionsTable.question_id, resolutionIds))
-    }
-
-    for (const condition of conditions) {
-      if (condition.question_id) {
-        conditionIdByResolutionId.set(condition.question_id.toLowerCase(), condition.id)
-      }
-    }
-
-    let negRiskRequestMatches: {
-      condition_id: string
-      event_id: string | null
-      neg_risk: boolean | null
-      neg_risk_request_id: string | null
-    }[] = []
-    if (resolutionIds.length > 0) {
-      negRiskRequestMatches = await db
-        .select({
-          condition_id: marketsTable.condition_id,
-          event_id: marketsTable.event_id,
-          neg_risk: marketsTable.neg_risk,
-          neg_risk_request_id: marketsTable.neg_risk_request_id,
-        })
-        .from(marketsTable)
-        .where(inArray(marketsTable.neg_risk_request_id, resolutionIds))
-    }
-
-    for (const market of negRiskRequestMatches) {
-      if (market.neg_risk_request_id) {
-        conditionIdByResolutionId.set(market.neg_risk_request_id.toLowerCase(), market.condition_id)
-      }
-    }
-
-    const conditionIds = Array.from(new Set([
-      ...conditions.map(condition => condition.id),
-      ...negRiskRequestMatches.map(market => market.condition_id),
-    ]))
-
-    let marketRows: { condition_id: string, event_id: string | null, neg_risk: boolean | null }[] = []
-    if (conditionIds.length > 0) {
-      marketRows = await db
-        .select({
-          condition_id: marketsTable.condition_id,
-          event_id: marketsTable.event_id,
-          neg_risk: marketsTable.neg_risk,
-        })
-        .from(marketsTable)
-        .where(inArray(marketsTable.condition_id, conditionIds))
-    }
-
     const marketContextMap = new Map<string, MarketContext>()
-    for (const market of marketRows) {
-      marketContextMap.set(market.condition_id, {
-        eventId: market.event_id ?? null,
-        negRisk: Boolean(market.neg_risk),
-      })
-    }
-    for (const market of negRiskRequestMatches) {
-      const current = marketContextMap.get(market.condition_id)
-      marketContextMap.set(market.condition_id, {
-        eventId: current?.eventId ?? market.event_id ?? null,
-        negRisk: current?.negRisk ?? Boolean(market.neg_risk),
+    const resolutionTargets = await loadResolutionTargets(resolutionIds)
+    for (const target of resolutionTargets) {
+      const resolutionLookupId = getResolutionLookupId(target)
+      if (!resolutionLookupId) {
+        continue
+      }
+
+      conditionIdByResolutionId.set(resolutionLookupId, target.condition_id)
+      marketContextMap.set(target.condition_id, {
+        eventId: target.event_id ?? null,
+        negRisk: Boolean(target.neg_risk),
       })
     }
 
@@ -370,6 +339,7 @@ async function syncResolutions(): Promise<SyncStats> {
         )
         if (eventId) {
           eventIdsNeedingStatusUpdate.add(eventId)
+          eventIdsNeedingCacheInvalidation.add(eventId)
         }
         processedCount++
         lastPersistableCursor = nextCursor
@@ -404,7 +374,10 @@ async function syncResolutions(): Promise<SyncStats> {
     }
 
     if (eventIdsNeedingStatusUpdate.size > 0) {
-      await updateEventStatusesFromMarketsBatch(Array.from(eventIdsNeedingStatusUpdate))
+      const changedEventIds = await updateEventStatusesFromMarketsBatch(Array.from(eventIdsNeedingStatusUpdate))
+      for (const eventId of changedEventIds) {
+        eventIdsNeedingGlobalCacheInvalidation.add(eventId)
+      }
       eventIdsNeedingStatusUpdate.clear()
     }
 
@@ -414,7 +387,16 @@ async function syncResolutions(): Promise<SyncStats> {
   }
 
   if (eventIdsNeedingStatusUpdate.size > 0) {
-    await updateEventStatusesFromMarketsBatch(Array.from(eventIdsNeedingStatusUpdate))
+    const changedEventIds = await updateEventStatusesFromMarketsBatch(Array.from(eventIdsNeedingStatusUpdate))
+    for (const eventId of changedEventIds) {
+      eventIdsNeedingGlobalCacheInvalidation.add(eventId)
+    }
+  }
+
+  if (eventIdsNeedingCacheInvalidation.size > 0) {
+    await invalidateEventCaches(Array.from(eventIdsNeedingCacheInvalidation), {
+      includeGlobal: eventIdsNeedingGlobalCacheInvalidation.size > 0,
+    })
   }
 
   return {
@@ -424,6 +406,54 @@ async function syncResolutions(): Promise<SyncStats> {
     errors,
     timeLimitReached,
   }
+}
+
+async function loadTrackedResolutionAuthors(): Promise<string[]> {
+  const rows = await db.execute(
+    sql`
+      SELECT DISTINCT LOWER(${allowed_market_creators.wallet_address}) AS creator
+      FROM ${allowed_market_creators}
+      ORDER BY LOWER(${allowed_market_creators.wallet_address})
+    `,
+  ) as Array<{ creator?: string | null }>
+
+  return rows
+    .map(row => normalizeResolutionId(row.creator))
+    .filter((creator): creator is string => Boolean(creator))
+}
+
+async function loadResolutionTargets(resolutionIds: string[]): Promise<ResolutionLookupRow[]> {
+  if (resolutionIds.length === 0) {
+    return []
+  }
+
+  return await db
+    .select({
+      condition_id: marketsTable.condition_id,
+      event_id: marketsTable.event_id,
+      neg_risk: marketsTable.neg_risk,
+      question_id: conditionsTable.question_id,
+      neg_risk_request_id: marketsTable.neg_risk_request_id,
+    })
+    .from(marketsTable)
+    .innerJoin(conditionsTable, eq(conditionsTable.id, marketsTable.condition_id))
+    .where(or(
+      inArray(conditionsTable.question_id, resolutionIds),
+      inArray(marketsTable.neg_risk_request_id, resolutionIds),
+    ))
+}
+
+function getResolutionLookupId(target: ResolutionLookupRow) {
+  if (target.neg_risk) {
+    return normalizeResolutionId(target.neg_risk_request_id)
+  }
+
+  return normalizeResolutionId(target.question_id)
+}
+
+function normalizeResolutionId(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase()
+  return normalized || null
 }
 
 async function getLastResolutionCursor(): Promise<ResolutionCursor | null> {
@@ -459,62 +489,56 @@ async function getLastResolutionCursor(): Promise<ResolutionCursor | null> {
 
 async function updateResolutionCursor(cursor: ResolutionCursor) {
   try {
-    const payload = {
-      service_name: 'resolution_sync',
-      subgraph_name: 'resolution',
+    const cursorPayload = {
       cursor_updated_at: BigInt(cursor.lastUpdateTimestamp),
       cursor_id: cursor.id,
     }
 
-    await db
-      .insert(subgraph_syncs)
-      .values(payload)
-      .onConflictDoUpdate({
-        target: [subgraph_syncs.service_name, subgraph_syncs.subgraph_name],
-        set: payload,
-      })
+    const updatedRows = await db
+      .update(subgraph_syncs)
+      .set(cursorPayload)
+      .where(and(
+        eq(subgraph_syncs.service_name, 'resolution_sync'),
+        eq(subgraph_syncs.subgraph_name, 'resolution'),
+      ))
+      .returning({ id: subgraph_syncs.id })
+
+    if (updatedRows.length === 0) {
+      console.error('Failed to update resolution cursor: missing sync state row for resolution_sync/resolution')
+    }
   }
   catch (error) {
     console.error('Failed to update resolution cursor:', error)
   }
 }
 
-async function fetchResolutionPage(afterCursor: ResolutionCursor | null): Promise<{ resolutions: SubgraphResolution[] }> {
-  const cursorTimestamp = afterCursor?.lastUpdateTimestamp
-  const cursorId = afterCursor?.id
-
-  let whereClause = ''
-  if (cursorTimestamp !== undefined && cursorId) {
-    const timestampLiteral = JSON.stringify(cursorTimestamp.toString())
-    const idLiteral = JSON.stringify(cursorId)
-    whereClause = `, where: { or: [{ lastUpdateTimestamp_gt: ${timestampLiteral} }, { lastUpdateTimestamp: ${timestampLiteral}, id_gt: ${idLiteral} }] }`
+async function fetchResolutionPage(
+  authors: string[],
+  afterCursor: ResolutionCursor | null,
+): Promise<{ resolutions: SubgraphResolution[] }> {
+  if (authors.length === 0) {
+    return { resolutions: [] }
   }
 
-  const query = `
-    {
-      marketResolutions(
-        first: ${RESOLUTION_PAGE_SIZE},
-        orderBy: lastUpdateTimestamp,
-        orderDirection: asc${whereClause}
-      ) {
-        id
-        status
-        flagged
-        paused
-        wasDisputed
-        approved
-        lastUpdateTimestamp
-        price
-        liveness
+  const hasCursor = afterCursor != null
+  const query = hasCursor ? RESOLUTION_PAGE_SINCE_QUERY : RESOLUTION_PAGE_QUERY
+  const variables = hasCursor
+    ? {
+        authors,
+        pageSize: RESOLUTION_PAGE_SIZE,
+        lastTimestamp: afterCursor.lastUpdateTimestamp.toString(),
+        lastId: afterCursor.id,
       }
-    }
-  `
+    : {
+        authors,
+        pageSize: RESOLUTION_PAGE_SIZE,
+      }
 
   const response = await fetch(RESOLUTION_SUBGRAPH_URL!, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     keepalive: true,
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, variables }),
   })
 
   if (!response.ok) {
@@ -738,9 +762,10 @@ async function updateOutcomePayouts(conditionId: string, price: number) {
 async function updateEventStatusesFromMarketsBatch(eventIds: string[]) {
   const uniqueEventIds = Array.from(new Set(eventIds.filter(Boolean)))
   if (uniqueEventIds.length === 0) {
-    return
+    return []
   }
   const failedUpdates: string[] = []
+  const changedEventIds: string[] = []
 
   const [currentEvents, marketRows] = await Promise.all([
     db
@@ -831,6 +856,7 @@ async function updateEventStatusesFromMarketsBatch(eventIds: string[]) {
         .update(eventsTable)
         .set({ status: nextStatus, resolved_at: resolvedAtUpdate })
         .where(eq(eventsTable.id, eventId))
+      changedEventIds.push(eventId)
     }
     catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -839,17 +865,39 @@ async function updateEventStatusesFromMarketsBatch(eventIds: string[]) {
     }
   }
 
-  updateTag(cacheTags.eventsGlobal)
-  for (const currentEvent of currentEvents) {
-    if (currentEvent.slug) {
-      updateTag(cacheTags.event(currentEvent.slug))
-    }
-  }
-
   if (failedUpdates.length > 0) {
     const sample = failedUpdates.slice(0, 3).join('; ')
     throw new Error(
       `Failed to update ${failedUpdates.length} event status record(s). Example failures: ${sample}`,
     )
+  }
+
+  return changedEventIds
+}
+
+async function invalidateEventCaches(
+  eventIds: string[],
+  options: { includeGlobal?: boolean } = {},
+) {
+  const uniqueEventIds = Array.from(new Set(eventIds.filter(Boolean)))
+  if (uniqueEventIds.length === 0) {
+    return
+  }
+
+  const rows = await db
+    .select({
+      slug: eventsTable.slug,
+    })
+    .from(eventsTable)
+    .where(inArray(eventsTable.id, uniqueEventIds))
+
+  if (options.includeGlobal) {
+    revalidateTag(cacheTags.eventsGlobal, 'max')
+  }
+
+  for (const row of rows) {
+    if (row.slug) {
+      revalidateTag(cacheTags.event(row.slug), 'max')
+    }
   }
 }
