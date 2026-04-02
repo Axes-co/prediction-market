@@ -5,6 +5,7 @@ import { useExtracted } from 'next-intl'
 import { useMemo, useState } from 'react'
 import FooterLocaleSwitcher from '@/app/[locale]/(platform)/_components/FooterLocaleSwitcher'
 import { usePlatformNavigationData } from '@/app/[locale]/(platform)/_providers/PlatformNavigationProvider'
+import AppLink from '@/components/AppLink'
 import {
   DiscordIcon,
   FacebookIcon,
@@ -17,7 +18,6 @@ import {
   WhatsAppIcon,
   YouTubeIcon,
 } from '@/components/icons/social'
-import IntentPrefetchLink from '@/components/IntentPrefetchLink'
 import SiteLogoIcon from '@/components/SiteLogoIcon'
 import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 
@@ -70,7 +70,7 @@ export default function Footer({ year }: { year: number }) {
 
           {/* Logo & Description */}
           <div className="flex flex-col items-start gap-2">
-            <IntentPrefetchLink href="/" className="block">
+            <AppLink href="/" className="block">
               <SiteLogoIcon
                 logoSvg={site.logoSvg}
                 logoImageUrl={site.logoImageUrl}
@@ -79,7 +79,7 @@ export default function Footer({ year }: { year: number }) {
                 imageClassName="size-8 object-contain"
                 size={32}
               />
-            </IntentPrefetchLink>
+            </AppLink>
             <p className="text-base font-medium text-foreground">{site.description}</p>
           </div>
 
@@ -94,12 +94,12 @@ export default function Footer({ year }: { year: number }) {
                 </h3>
                 <div className="grid grid-cols-2 gap-x-12 gap-y-3 lg:grid-cols-3">
                   {visibleCategories.map(tag => (
-                    <IntentPrefetchLink key={tag.slug} href={`/${tag.slug}`} className={LINK_CLASS}>
+                    <AppLink key={tag.slug} href={`/${tag.slug}`} className={LINK_CLASS}>
                       {tag.name}
                       <span className="block text-xs text-muted-foreground/60">
                         {t('Predictions')}
                       </span>
-                    </IntentPrefetchLink>
+                    </AppLink>
                   ))}
                   {hasMoreCategories && !showAllCategories && (
                     <button
@@ -125,9 +125,9 @@ export default function Footer({ year }: { year: number }) {
                 {t('Support & Social')}
               </h3>
               <div className="flex flex-col gap-3">
-                <IntentPrefetchLink href="/docs/users" className={LINK_CLASS}>
+                <AppLink href="/docs/users" className={LINK_CLASS}>
                   {t('Documentation')}
-                </IntentPrefetchLink>
+                </AppLink>
                 {activeSocials.map(({ field, label }) => (
                   <a
                     key={field}
@@ -153,21 +153,21 @@ export default function Footer({ year }: { year: number }) {
                 {site.name}
               </h3>
               <div className="flex flex-col gap-3">
-                <IntentPrefetchLink href="/leaderboard" className={LINK_CLASS}>
+                <AppLink href="/leaderboard" className={LINK_CLASS}>
                   {t('Leaderboard')}
-                </IntentPrefetchLink>
-                <IntentPrefetchLink href="/docs/api-reference" className={LINK_CLASS}>
+                </AppLink>
+                <AppLink href="/docs/api-reference" className={LINK_CLASS}>
                   {t('APIs')}
-                </IntentPrefetchLink>
-                <IntentPrefetchLink href="/activity" className={LINK_CLASS}>
+                </AppLink>
+                <AppLink href="/activity" className={LINK_CLASS}>
                   {t('Activity')}
-                </IntentPrefetchLink>
-                <IntentPrefetchLink href="/docs/users" className={LINK_CLASS}>
+                </AppLink>
+                <AppLink href="/docs/users" className={LINK_CLASS}>
                   {t('Documentation')}
-                </IntentPrefetchLink>
-                <IntentPrefetchLink href="/terms-of-use" className={LINK_CLASS}>
+                </AppLink>
+                <AppLink href="/terms-of-use" className={LINK_CLASS}>
                   {t('Terms of Use')}
-                </IntentPrefetchLink>
+                </AppLink>
               </div>
             </div>
           </div>
@@ -200,13 +200,13 @@ export default function Footer({ year }: { year: number }) {
                   {`${site.name} \u00A9 ${year}`}
                 </span>
                 <span className="text-muted-foreground/40">&middot;</span>
-                <IntentPrefetchLink href="/terms-of-use" className={MUTED_LINK_CLASS}>
+                <AppLink href="/terms-of-use" className={MUTED_LINK_CLASS}>
                   {t('Terms of Use')}
-                </IntentPrefetchLink>
+                </AppLink>
                 <span className="text-muted-foreground/40">&middot;</span>
-                <IntentPrefetchLink href="/docs/users" className={MUTED_LINK_CLASS}>
+                <AppLink href="/docs/users" className={MUTED_LINK_CLASS}>
                   {t('Documentation')}
-                </IntentPrefetchLink>
+                </AppLink>
               </div>
 
               {/* Language Switcher */}
