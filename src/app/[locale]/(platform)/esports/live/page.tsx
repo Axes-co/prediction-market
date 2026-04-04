@@ -18,6 +18,7 @@ export default async function EsportsLivePage({ params }: { params: Promise<{ lo
   const [{ data: events }, { data: layoutData }] = await Promise.all([
     EventRepository.listEvents({
       tag: 'esports',
+      sportsVertical: 'esports',
       search: '',
       userId: '',
       bookmarked: false,
@@ -34,8 +35,8 @@ export default async function EsportsLivePage({ params }: { params: Promise<{ lo
       <SportsGamesCenter
         cards={cards}
         sportSlug="live"
-        sportTitle="LIVE"
-        pageMode="live"
+        sportTitle="Live"
+        pageMode="liveAndSoon"
         categoryTitleBySlug={layoutData?.h1TitleBySlug ?? {}}
         vertical="esports"
       />

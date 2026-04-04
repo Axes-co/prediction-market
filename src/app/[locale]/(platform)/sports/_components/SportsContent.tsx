@@ -1,6 +1,7 @@
 'use cache'
 
 import type { SupportedLocale } from '@/i18n/locales'
+import type { SportsVertical } from '@/lib/sports-vertical'
 import type { Event } from '@/types'
 import { cacheTag } from 'next/cache'
 import SportsClient from '@/app/[locale]/(platform)/sports/_components/SportsClient'
@@ -33,6 +34,9 @@ export default async function SportsContent({
   let initialEvents: Event[] = []
   const normalizedSportsSportSlug = sportsSportSlug?.trim().toLowerCase() || ''
   const normalizedSportsSection = sportsSection?.trim().toLowerCase() || ''
+  const sportsVertical: SportsVertical | '' = initialTag === 'sports' || initialTag === 'esports'
+    ? initialTag
+    : ''
   const resolvedSportsSection: SportsSection | '' = normalizedSportsSection === 'games' || normalizedSportsSection === 'props'
     ? normalizedSportsSection
     : ''
@@ -44,6 +48,7 @@ export default async function SportsContent({
       userId: '',
       bookmarked: false,
       locale: resolvedLocale,
+      sportsVertical,
       sportsSportSlug: normalizedSportsSportSlug,
       sportsSection: resolvedSportsSection,
     })
@@ -65,6 +70,7 @@ export default async function SportsContent({
       initialTag={initialTag}
       mainTag={mainTag}
       initialMode={initialMode}
+      sportsVertical={sportsVertical || null}
       sportsSportSlug={normalizedSportsSportSlug || null}
       sportsSection={resolvedSportsSection || null}
     />

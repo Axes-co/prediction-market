@@ -23,7 +23,7 @@ interface SportsLayoutShellProps {
 
 interface SportsPathContext {
   isEventRoute: boolean
-  mode: 'all' | 'live' | 'futures'
+  mode: 'all' | 'live' | 'soon' | 'futures'
   activeTagSlug: string | null
   sportSlug: string | null
   section: 'games' | 'props' | null
@@ -114,8 +114,20 @@ function getSportsPathContext(params: {
     }
   }
 
+  if (second === 'soon') {
+    return {
+      isEventRoute: false,
+      mode: 'soon',
+      activeTagSlug: null,
+      sportSlug: null,
+      section: null,
+      title: resolveMenuLabelByHref(menuEntries, `/${vertical}/soon`),
+    }
+  }
+
   if (second === verticalConfig.futurePathSegment) {
     const canonicalSportSlug = resolveCanonicalSlugFromAlias(canonicalSlugByAliasKey, third)
+    const futureTitle = resolveMenuLabelByHref(menuEntries, verticalConfig.futurePath)
 
     return {
       isEventRoute: false,
@@ -125,7 +137,7 @@ function getSportsPathContext(params: {
       section: null,
       title: canonicalSportSlug
         ? h1TitleBySlug[canonicalSportSlug] ?? ''
-        : resolveMenuLabelByHref(menuEntries, verticalConfig.futurePath),
+        : futureTitle,
     }
   }
 
@@ -183,6 +195,7 @@ export default function SportsLayoutShell({
     && !context.isEventRoute
     && Boolean(sectionConfig?.gamesEnabled && sectionConfig?.propsEnabled)
   const useIndependentColumns = context.mode === 'live'
+    || context.mode === 'soon'
     || (
       context.mode === 'all'
       && (context.section === 'games' || context.isEventRoute)
@@ -190,6 +203,7 @@ export default function SportsLayoutShell({
   const headerInsideGamesCenter = !context.isEventRoute
     && (
       context.mode === 'live'
+      || context.mode === 'soon'
       || (context.mode === 'all' && context.section === 'games')
     )
   const showShellHeader = !headerInsideGamesCenter
@@ -263,7 +277,8 @@ export default function SportsLayoutShell({
         className={cn(
           `
             relative w-full
-            lg:grid lg:grid-cols-[190px_minmax(0,1fr)] lg:[align-content:start] lg:[align-items:start] lg:gap-4
+            min-[1200px]:grid min-[1200px]:grid-cols-[190px_minmax(0,1fr)] min-[1200px]:[align-content:start]
+            min-[1200px]:[align-items:start] min-[1200px]:gap-4
           `,
           useIndependentColumns && 'min-[1200px]:h-full',
         )}
@@ -287,7 +302,7 @@ export default function SportsLayoutShell({
             <div id="sports-layout-center-header" className="flow-root">
               {showTitle && (
                 <div className={cn(
-                  'mb-3 flex items-center justify-between gap-3 lg:mt-2 lg:ml-4',
+                  'mb-3 flex items-center justify-between gap-3 min-[1200px]:mt-2 min-[1200px]:ml-4',
                   centerColumnHeaderClass,
                 )}
                 >
@@ -296,13 +311,13 @@ export default function SportsLayoutShell({
                   </h1>
                   <div
                     id="sports-title-row-actions"
-                    className="ml-auto flex min-h-11 min-w-22 items-center justify-end gap-2 lg:mr-2"
+                    className="ml-auto flex min-h-11 min-w-22 items-center justify-end gap-2 min-[1200px]:mr-2"
                   />
                 </div>
               )}
               {showSportSectionPills && context.sportSlug && (
                 <div className={cn(
-                  'mb-4 flex items-center gap-3 lg:ml-4',
+                  'mb-3 flex items-center gap-3 min-[1200px]:ml-4',
                   centerColumnHeaderClass,
                 )}
                 >

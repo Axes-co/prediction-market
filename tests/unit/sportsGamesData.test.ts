@@ -735,6 +735,22 @@ describe('sportsGamesData', () => {
       card?.buttons.filter(button => button.marketType === 'binary').map(button => button.conditionId),
     ))
     expect(binaryConditionIds).toHaveLength(5)
+    expect(card?.buttons.filter(button => button.marketType === 'binary')).toHaveLength(10)
+
+    const binaryLabelsByConditionId = new Map<string, string[]>(
+      binaryConditionIds.map(conditionId => [
+        conditionId,
+        card?.buttons
+          .filter(button => button.marketType === 'binary' && button.conditionId === conditionId)
+          .map(button => button.label) ?? [],
+      ]),
+    )
+
+    expect(binaryLabelsByConditionId.get('go-distance')).toEqual(['YES', 'NO'])
+    expect(binaryLabelsByConditionId.get('fight-ko')).toEqual(['YES', 'NO'])
+    expect(binaryLabelsByConditionId.get('sousa-ko')).toEqual(['YES', 'NO'])
+    expect(binaryLabelsByConditionId.get('oki-ko')).toEqual(['YES', 'NO'])
+    expect(binaryLabelsByConditionId.get('submission')).toEqual(['YES', 'NO'])
 
     expect(
       card?.detailMarkets
@@ -748,6 +764,80 @@ describe('sportsGamesData', () => {
       'ufc-man15-bol-2026-03-14-oki-win-by-ko-tko',
       'ufc-man15-bol-2026-03-14-win-by-submission',
     ].sort())
+  })
+
+  it('matches surname-only combat moneyline outcomes to the correct teams', () => {
+    const event = buildSportsEvent({
+      id: 'combat-surname-composite',
+      slug: 'zuffa-magsa-mccro-2026-04-05',
+      title: 'Mark Magsayo vs. Feargal McCrory',
+      sportsSportSlug: 'boxing',
+      sportsTeams: [
+        { name: 'Mark Magsayo', abbreviation: 'MAGSA', host_status: 'home' },
+        { name: 'Feargal McCrory', abbreviation: 'MCCRO', host_status: 'away' },
+      ],
+      markets: [
+        buildMoneylineMarket({
+          eventId: 'combat-surname-composite',
+          slug: 'zuffa-magsa-mccro-2026-04-05',
+          title: 'Zuffa Boxing 5: Magsayo vs. McCrory (Lightweight, Main)',
+          outcomes: ['Magsayo', 'McCrory'],
+        }),
+      ],
+    })
+
+    const groups = buildSportsGamesCardGroups([event])
+    const card = groups[0]?.primaryCard
+
+    expect(card).toBeTruthy()
+    expect(card?.buttons.filter(button => button.marketType === 'moneyline').map(button => button.label)).toEqual([
+      'MAGSA',
+      'MCCRO',
+    ])
+  })
+
+  it('matches surname-only separated combat markets as moneyline buttons', () => {
+    const event = buildSportsEvent({
+      id: 'combat-surname-separated',
+      slug: 'zuffa-magsa-mccro-split',
+      title: 'Mark Magsayo vs. Feargal McCrory',
+      sportsSportSlug: 'boxing',
+      sportsTeams: [
+        { name: 'Mark Magsayo', abbreviation: 'MAGSA', host_status: 'home' },
+        { name: 'Feargal McCrory', abbreviation: 'MCCRO', host_status: 'away' },
+      ],
+      markets: [
+        {
+          ...buildBinaryMarket({
+            conditionId: 'magsayo-market',
+            eventId: 'combat-surname-separated',
+            slug: 'zuffa-magsa-home',
+            title: 'Magsayo',
+            marketType: 'moneyline',
+          }),
+          sports_market_type: null,
+        },
+        {
+          ...buildBinaryMarket({
+            conditionId: 'mccrory-market',
+            eventId: 'combat-surname-separated',
+            slug: 'zuffa-mccro-away',
+            title: 'McCrory',
+            marketType: 'moneyline',
+          }),
+          sports_market_type: null,
+        },
+      ],
+    })
+
+    const groups = buildSportsGamesCardGroups([event])
+    const card = groups[0]?.primaryCard
+    const moneylineButtons = card?.buttons.filter(button => button.marketType === 'moneyline') ?? []
+
+    expect(card).toBeTruthy()
+    expect(moneylineButtons).toHaveLength(2)
+    expect(moneylineButtons.map(button => button.label)).toEqual(['MAGSA', 'MCCRO'])
+    expect(moneylineButtons.map(button => button.conditionId)).toEqual(['magsayo-market', 'mccrory-market'])
   })
 
   it('classifies yes/no props with totals-style metadata as binary markets', () => {

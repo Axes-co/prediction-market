@@ -54,6 +54,7 @@ interface EventSitemapRow {
   updated_at: Date
   has_esports_tag: boolean
   sports_sport_slug: string | null
+  sports_league_slug: string | null
   sports_series_slug: string | null
   sports_event_slug: string | null
   sports_tags: unknown
@@ -66,6 +67,7 @@ interface PredictionSitemapRow {
   updated_at: Date
   has_esports_tag: boolean
   sports_sport_slug: string | null
+  sports_league_slug: string | null
   sports_series_slug: string | null
   sports_event_slug: string | null
   sports_tags: unknown
@@ -235,6 +237,7 @@ async function getPredictionSitemapEntries(): Promise<SitemapRouteEntry[]> {
         updated_at: markets.updated_at,
         has_esports_tag: hasEsportsTag,
         sports_sport_slug: event_sports.sports_sport_slug,
+        sports_league_slug: event_sports.sports_league_slug,
         sports_series_slug: event_sports.sports_series_slug,
         sports_event_slug: event_sports.sports_event_slug,
         sports_tags: event_sports.sports_tags,
@@ -267,6 +270,7 @@ async function getPredictionSitemapEntries(): Promise<SitemapRouteEntry[]> {
         slug: row.event_slug,
         tags: row.has_esports_tag ? [{ slug: 'esports' }] : undefined,
         sports_sport_slug: canonicalSportsSportSlug,
+        sports_league_slug: row.sports_league_slug,
         sports_event_slug: row.sports_event_slug,
       }, row.market_slug)
 
@@ -322,6 +326,7 @@ async function getDynamicEventSitemaps(): Promise<DynamicEventSitemaps> {
         updated_at: events.updated_at,
         has_esports_tag: hasEsportsTag,
         sports_sport_slug: event_sports.sports_sport_slug,
+        sports_league_slug: event_sports.sports_league_slug,
         sports_series_slug: event_sports.sports_series_slug,
         sports_event_slug: event_sports.sports_event_slug,
         sports_tags: event_sports.sports_tags,
@@ -367,6 +372,7 @@ function groupEventRowsBySitemap(rows: EventSitemapRow[], sportsSlugResolver: Aw
       slug: row.slug,
       tags: row.has_esports_tag ? [{ slug: 'esports' }] : undefined,
       sports_sport_slug: canonicalSportsSportSlug,
+      sports_league_slug: row.sports_league_slug,
       sports_event_slug: row.sports_event_slug,
     })
     const eventLastModified = formatDateForSitemap(row.updated_at)

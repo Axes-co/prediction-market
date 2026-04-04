@@ -8,9 +8,10 @@ import { useOrder } from '@/stores/useOrder'
 
 interface EventMarketContextProps {
   event: Event
+  marketConditionId?: string | null
 }
 
-export default function EventMarketContext({ event }: EventMarketContextProps) {
+export default function EventMarketContext({ event, marketConditionId = null }: EventMarketContextProps) {
   const t = useExtracted()
   const state = useOrder()
   const [isExpanded, setIsExpanded] = useState(false)
@@ -25,7 +26,8 @@ export default function EventMarketContext({ event }: EventMarketContextProps) {
   const isContentExpanded = isExpanded || Boolean(error)
 
   async function generateMarketContext() {
-    if (!state.market) {
+    const resolvedMarketConditionId = marketConditionId ?? state.market?.condition_id ?? null
+    if (!resolvedMarketConditionId) {
       return
     }
     if (isPending) {
@@ -38,7 +40,7 @@ export default function EventMarketContext({ event }: EventMarketContextProps) {
       try {
         const response = await generateMarketContextAction({
           slug: event.slug,
-          marketConditionId: state.market?.condition_id,
+          marketConditionId: resolvedMarketConditionId,
         })
 
         if (response?.error) {
@@ -192,7 +194,7 @@ export default function EventMarketContext({ event }: EventMarketContextProps) {
                 `,
                 { 'rounded-b-none': isContentExpanded },
               )}
-              disabled={isPending || !state.market}
+              disabled={isPending || !(marketConditionId ?? state.market?.condition_id)}
             >
               <span className="text-base font-medium">{t('Market Context')}</span>
               <span

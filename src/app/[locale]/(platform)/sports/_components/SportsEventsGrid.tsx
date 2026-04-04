@@ -2,6 +2,7 @@
 
 import type { FilterState } from '@/app/[locale]/(platform)/_providers/FilterProvider'
 import type { SportsSidebarMode } from '@/app/[locale]/(platform)/sports/_components/SportsSidebarMenu'
+import type { SportsVertical } from '@/lib/sports-vertical'
 import type { Event } from '@/types'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { useLocale } from 'next-intl'
@@ -27,6 +28,7 @@ interface SportsEventsGridProps {
   initialEvents: Event[]
   initialMode?: SportsSidebarMode
   mainTag: string
+  sportsVertical?: SportsVertical | null
   sportsSportSlug?: string | null
   sportsSection?: 'games' | 'props' | null
 }
@@ -95,6 +97,7 @@ async function fetchEvents({
   filters,
   locale,
   mainTag,
+  sportsVertical,
   sportsSportSlug,
   sportsSection,
 }: {
@@ -103,6 +106,7 @@ async function fetchEvents({
   filters: FilterState
   locale: string
   mainTag: string
+  sportsVertical: SportsVertical | null
   sportsSportSlug: string | null
   sportsSection: 'games' | 'props' | null
 }): Promise<Event[]> {
@@ -115,6 +119,7 @@ async function fetchEvents({
     offset: pageParam,
     locale,
     mainTag,
+    sportsVertical,
     hideSports: filters.hideSports,
     hideCrypto: filters.hideCrypto,
     hideEarnings: filters.hideEarnings,
@@ -129,6 +134,7 @@ export default function SportsEventsGrid({
   initialEvents = EMPTY_EVENTS,
   initialMode = 'all',
   mainTag,
+  sportsVertical = null,
   sportsSportSlug = null,
   sportsSection = null,
 }: SportsEventsGridProps) {
@@ -172,6 +178,7 @@ export default function SportsEventsGrid({
       eventTag,
       locale,
       mainTag,
+      sportsVertical,
       userCacheKey,
       normalizedSportsSportSlug,
       sportsSection,
@@ -182,6 +189,7 @@ export default function SportsEventsGrid({
       filters,
       locale,
       mainTag,
+      sportsVertical,
       sportsSportSlug: normalizedSportsSportSlug,
       sportsSection,
     }),
@@ -229,6 +237,7 @@ export default function SportsEventsGrid({
     filters.status,
     locale,
     mainTag,
+    sportsVertical,
     normalizedSportsSportSlug,
     sportsMode,
     sportsSection,

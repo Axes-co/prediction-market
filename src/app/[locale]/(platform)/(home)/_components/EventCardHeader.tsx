@@ -45,6 +45,7 @@ export default function EventCardHeader({
     ? (normalizeOutcomeLabel(leadingOutcomeLabel) || t('chance'))
     : t('chance')
   const eventHref = resolveEventPagePath(event)
+  const isSportsEvent = Boolean(event.sports_event_id || event.sports_sport_slug || event.sports_event_slug)
 
   return (
     <div className="mb-3 flex items-start justify-between">
@@ -61,12 +62,13 @@ export default function EventCardHeader({
         </div>
 
         <h3
-          className={
+          className={cn(
             `
-              line-clamp-3 w-full text-sm/5 font-semibold underline-offset-2 transition-colors duration-200
+              w-full text-sm/5 font-semibold underline-offset-2 transition-colors duration-200
               hover:text-foreground hover:underline
-            `
-          }
+            `,
+            isSportsEvent ? 'line-clamp-2' : 'line-clamp-3',
+          )}
         >
           {title}
         </h3>

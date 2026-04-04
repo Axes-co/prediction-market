@@ -13,6 +13,7 @@ import {
 } from '@/app/[locale]/(platform)/sports/_utils/sports-games-data'
 import EventStructuredData from '@/components/seo/EventStructuredData'
 import { redirect } from '@/i18n/navigation'
+import { loadMarketContextSettings } from '@/lib/ai/market-context-config'
 import { EventRepository } from '@/lib/db/queries/event'
 import { SportsMenuRepository } from '@/lib/db/queries/sports-menu'
 import { buildEventPageMetadata } from '@/lib/event-open-graph'
@@ -113,10 +114,11 @@ export default async function SportsEventMarketPage({
   const resolvedSportSlug = canonicalSportSlug
     || targetCard.event.sports_sport_slug
     || sport
-  const [{ data: layoutData }, { data: relatedEventsResult }, runtimeTheme] = await Promise.all([
+  const [{ data: layoutData }, { data: relatedEventsResult }, runtimeTheme, marketContextSettings] = await Promise.all([
     SportsMenuRepository.getLayoutData('sports'),
     EventRepository.listEvents({
       tag: 'sports',
+      sportsVertical: 'sports',
       search: '',
       userId: '',
       bookmarked: false,
@@ -126,6 +128,7 @@ export default async function SportsEventMarketPage({
       sportsSection: 'games',
     }),
     loadRuntimeThemeState(),
+    loadMarketContextSettings(),
   ])
 
   const relatedCards = buildSportsGamesCards(relatedEventsResult ?? [])
@@ -139,6 +142,7 @@ export default async function SportsEventMarketPage({
     .slice(0, 3)
 
   const sportLabel = layoutData?.h1TitleBySlug[resolvedSportSlug] ?? resolvedSportSlug.toUpperCase()
+  const marketContextEnabled = marketContextSettings.enabled && Boolean(marketContextSettings.apiKey)
   return (
     <>
       <EventStructuredData
@@ -157,6 +161,7 @@ export default async function SportsEventMarketPage({
           sportLabel={sportLabel}
           initialMarketSlug={market}
           initialMarketViewKey={resolveSportsEventMarketViewKey(canonicalEventSlug)}
+          marketContextEnabled={marketContextEnabled}
           vertical="sports"
           key={`is-bookmarked-${targetCard.event.is_bookmarked}`}
         />

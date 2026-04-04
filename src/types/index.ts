@@ -18,6 +18,8 @@ export interface Event {
   sports_parent_event_id?: number | null
   sports_event_slug?: string | null
   sports_sport_slug?: string | null
+  sports_series_slug?: string | null
+  sports_league_slug?: string | null
   sports_section?: 'games' | 'props' | null
   sports_start_time?: string | null
   sports_event_week?: number | null
@@ -59,6 +61,7 @@ export interface EventSeriesEntry {
   created_at: string
   sports_event_slug?: string | null
   sports_sport_slug?: string | null
+  sports_league_slug?: string | null
   resolved_direction?: 'up' | 'down' | null
 }
 

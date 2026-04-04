@@ -1,5 +1,6 @@
 'use client'
 
+import type { SportsVertical } from '@/lib/sports-vertical'
 import type { Event } from '@/types'
 import { useEffect, useRef } from 'react'
 import { useFilters } from '@/app/[locale]/(platform)/_providers/FilterProvider'
@@ -13,6 +14,7 @@ interface SportsClientProps {
   initialTag?: string
   mainTag?: string
   initialMode?: SportsPageMode
+  sportsVertical?: SportsVertical | null
   sportsSportSlug?: string | null
   sportsSection?: SportsSection | null
 }
@@ -22,6 +24,7 @@ export default function SportsClient({
   initialTag,
   mainTag,
   initialMode = 'all',
+  sportsVertical = null,
   sportsSportSlug = null,
   sportsSection = null,
 }: SportsClientProps) {
@@ -46,6 +49,7 @@ export default function SportsClient({
       filters={filters}
       initialEvents={initialEvents}
       initialMode={initialMode}
+      sportsVertical={sportsVertical}
       sportsSportSlug={sportsSportSlug}
       sportsSection={sportsSection}
     />

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type { EventOrderPanelOutcomeSelectedAccent } from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelOutcomeButton'
 import type { OddsFormat } from '@/lib/odds-format'
 import type { Event, Market, Outcome } from '@/types'
 import { DialogTitle } from '@radix-ui/react-dialog'
@@ -26,6 +27,8 @@ interface EventMobileOrderPanelProps {
   primaryOutcomeIndex?: number | null
   oddsFormat?: OddsFormat
   outcomeButtonStyleVariant?: 'default' | 'sports3d'
+  outcomeLabelOverrides?: Partial<Record<number, string>>
+  outcomeAccentOverrides?: Partial<Record<number, EventOrderPanelOutcomeSelectedAccent>>
   optimisticallyClaimedConditionIds?: Record<string, true>
 }
 
@@ -38,6 +41,8 @@ export default function EventOrderPanelMobile({
   primaryOutcomeIndex = null,
   oddsFormat = 'price',
   outcomeButtonStyleVariant = 'default',
+  outcomeLabelOverrides = {},
+  outcomeAccentOverrides = {},
   optimisticallyClaimedConditionIds,
 }: EventMobileOrderPanelProps) {
   const t = useExtracted()
@@ -68,12 +73,14 @@ export default function EventOrderPanelMobile({
   const noPrice = activeLiveNoPrice ?? resolveFallbackOutcomeUnitPrice(activeMarket, noOutcome)
   const buyYesOutcome = yesOutcome ?? activeMarket?.outcomes[0] ?? null
   const buyNoOutcome = noOutcome ?? activeMarket?.outcomes[1] ?? null
-  const buyYesOutcomeLabel = buyYesOutcome?.outcome_text
-    ? (normalizeOutcomeLabel(buyYesOutcome.outcome_text) ?? buyYesOutcome.outcome_text)
-    : t('Yes')
-  const buyNoOutcomeLabel = buyNoOutcome?.outcome_text
-    ? (normalizeOutcomeLabel(buyNoOutcome.outcome_text) ?? buyNoOutcome.outcome_text)
-    : t('No')
+  const buyYesOutcomeLabel = outcomeLabelOverrides[OUTCOME_INDEX.YES]?.trim()
+    || (buyYesOutcome?.outcome_text
+      ? (normalizeOutcomeLabel(buyYesOutcome.outcome_text) ?? buyYesOutcome.outcome_text)
+      : t('Yes'))
+  const buyNoOutcomeLabel = outcomeLabelOverrides[OUTCOME_INDEX.NO]?.trim()
+    || (buyNoOutcome?.outcome_text
+      ? (normalizeOutcomeLabel(buyNoOutcome.outcome_text) ?? buyNoOutcome.outcome_text)
+      : t('No'))
   const shouldShowDefaultTrigger = showDefaultTrigger && isSingleMarket
   const yesPriceLabel = oddsFormat === 'price'
     ? formatCentsLabel(yesPrice)
@@ -158,6 +165,8 @@ export default function EventOrderPanelMobile({
           primaryOutcomeIndex={primaryOutcomeIndex}
           oddsFormat={oddsFormat}
           outcomeButtonStyleVariant={outcomeButtonStyleVariant}
+          outcomeLabelOverrides={outcomeLabelOverrides}
+          outcomeAccentOverrides={outcomeAccentOverrides}
           optimisticallyClaimedConditionIds={optimisticallyClaimedConditionIds}
         />
         <EventOrderPanelTermsDisclaimer />

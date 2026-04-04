@@ -38,30 +38,32 @@ export default function EventTabSelector({
   ]), [formattedCommentsCount, t])
 
   return (
-    <div className="mt-3 flex items-center justify-between border-b border-border">
-      <ul className="flex h-8 gap-8 text-sm font-medium">
-        {eventTabs.map((tab, index) => (
-          <li
-            key={tab.key}
-            className={index === 0 ? '' : undefined}
-          >
-            <button
-              type="button"
-              className={cn(
-                'h-full border-b-2 pb-2 transition-colors duration-200',
-                activeTab === tab.key
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-              onClick={() => setActiveTab(tab.key)}
+    <div className="mt-3 flex items-center gap-2 border-b border-border">
+      <div className="flex w-0 flex-1 overflow-x-auto">
+        <ul className="flex h-8 min-w-max gap-8 text-sm font-medium">
+          {eventTabs.map((tab, index) => (
+            <li
+              key={tab.key}
+              className={index === 0 ? '' : undefined}
             >
-              {tab.label}
-            </button>
-          </li>
-        ))}
-      </ul>
-      {activeTab === 'comments' && <ConnectionStatusIndicator status={liveCommentsStatus} />}
-      {activeTab === 'activity' && <ConnectionStatusIndicator status={marketChannelStatus} />}
+              <button
+                type="button"
+                className={cn(
+                  'h-full border-b-2 pb-2 whitespace-nowrap transition-colors duration-200',
+                  activeTab === tab.key
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+                onClick={() => setActiveTab(tab.key)}
+              >
+                {tab.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+      {activeTab === 'comments' && <ConnectionStatusIndicator className="-mt-2 shrink-0" status={liveCommentsStatus} />}
+      {activeTab === 'activity' && <ConnectionStatusIndicator className="-mt-2 shrink-0" status={marketChannelStatus} />}
     </div>
   )
 }

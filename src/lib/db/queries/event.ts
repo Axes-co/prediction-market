@@ -3,6 +3,7 @@ import type { SupportedLocale } from '@/i18n/locales'
 import type { conditions } from '@/lib/db/schema/events/tables'
 import type { EventListSortBy, EventListStatusFilter } from '@/lib/event-list-filters'
 import type { SportsSlugResolver } from '@/lib/sports-slug-mapping'
+import type { SportsVertical } from '@/lib/sports-vertical'
 import type { ConditionChangeLogEntry, Event, EventLiveChartConfig, EventSeriesEntry, QueryResult } from '@/types'
 import { and, asc, count, desc, eq, exists, ilike, inArray, or, sql } from 'drizzle-orm'
 import { cacheTag } from 'next/cache'
@@ -374,6 +375,7 @@ interface ListEventsProps {
   locale?: SupportedLocale
   sportsSportSlug?: string
   sportsSection?: 'games' | 'props' | ''
+  sportsVertical?: SportsVertical | ''
 }
 
 interface RelatedEventOptions {
@@ -388,6 +390,7 @@ interface ListEventMarketSlugsProps {
   sportsSection?: 'games' | 'props' | ''
   sportsSportSlug?: string
   status?: EventListStatusFilter
+  sportsVertical?: SportsVertical | ''
 }
 
 interface ListAdminEventsParams {
@@ -450,6 +453,7 @@ interface RelatedEvent {
   icon_url: string
   sports_event_slug?: string | null
   sports_sport_slug?: string | null
+  sports_league_slug?: string | null
   sports_section?: 'games' | 'props' | null
   common_tags_count: number
   chance: number | null
@@ -534,6 +538,7 @@ async function hydrateSportsAuxiliaryEventContext(
     || currentSports.sports_tags == null
     || currentSports.sports_teams == null
     || currentSports.sports_team_logo_urls == null
+    || currentSports.sports_league_slug == null
   )
   if (!shouldLoadBaseSports) {
     return eventResult
@@ -552,6 +557,7 @@ async function hydrateSportsAuxiliaryEventContext(
       sports_start_time: event_sports.sports_start_time,
       sports_event_week: event_sports.sports_event_week,
       sports_sport_slug: event_sports.sports_sport_slug,
+      sports_league_slug: event_sports.sports_league_slug,
       sports_series_slug: event_sports.sports_series_slug,
     })
     .from(events)
@@ -579,6 +585,7 @@ async function hydrateSportsAuxiliaryEventContext(
       sports_start_time: currentSports.sports_start_time ?? baseSports.sports_start_time,
       sports_event_week: currentSports.sports_event_week ?? baseSports.sports_event_week,
       sports_sport_slug: currentSports.sports_sport_slug ?? baseSports.sports_sport_slug,
+      sports_league_slug: currentSports.sports_league_slug ?? baseSports.sports_league_slug,
       sports_series_slug: currentSports.sports_series_slug ?? baseSports.sports_series_slug,
     },
   }
@@ -621,6 +628,7 @@ function hydrateGroupedSportsAuxiliaryEventContexts(
         sports_start_time: currentSports.sports_start_time ?? baseSports.sports_start_time,
         sports_event_week: currentSports.sports_event_week ?? baseSports.sports_event_week,
         sports_sport_slug: currentSports.sports_sport_slug ?? baseSports.sports_sport_slug,
+        sports_league_slug: currentSports.sports_league_slug ?? baseSports.sports_league_slug,
         sports_series_slug: currentSports.sports_series_slug ?? baseSports.sports_series_slug,
       },
     }
@@ -749,6 +757,51 @@ function buildSportsTagsMatchCondition(sportsSportSlugCandidates: string[]) {
       WHERE LOWER(TRIM(sports_tag.value)) IN (${candidatesSql})
     )
   `
+}
+
+function buildSportsSlugMatchCondition(sportsSportSlugCandidates: string[]) {
+  if (sportsSportSlugCandidates.length === 0) {
+    return null
+  }
+
+  const normalizedSportsSportSlugColumn = sql<string>`
+    LOWER(TRIM(COALESCE(${event_sports.sports_sport_slug}, '')))
+  `
+  const normalizedSportsSeriesSlugColumn = sql<string>`
+    LOWER(TRIM(COALESCE(${event_sports.sports_series_slug}, '')))
+  `
+  const sportsSportSlugCondition = sportsSportSlugCandidates.length === 1
+    ? eq(normalizedSportsSportSlugColumn, sportsSportSlugCandidates[0]!)
+    : inArray(normalizedSportsSportSlugColumn, sportsSportSlugCandidates)
+  const sportsSeriesSlugCondition = sportsSportSlugCandidates.length === 1
+    ? eq(normalizedSportsSeriesSlugColumn, sportsSportSlugCandidates[0]!)
+    : inArray(normalizedSportsSeriesSlugColumn, sportsSportSlugCandidates)
+  const sportsDirectSlugCondition = or(sportsSportSlugCondition, sportsSeriesSlugCondition)
+  const sportsTagsMatchCondition = buildSportsTagsMatchCondition(sportsSportSlugCandidates)
+
+  return sportsTagsMatchCondition
+    ? or(sportsDirectSlugCondition, sportsTagsMatchCondition)
+    : sportsDirectSlugCondition
+}
+
+function buildSportsVerticalTagCondition(sportsVertical: SportsVertical | '' | undefined) {
+  if (sportsVertical !== 'sports' && sportsVertical !== 'esports') {
+    return null
+  }
+
+  const hasEsportsTag = exists(
+    db.select()
+      .from(event_tags)
+      .innerJoin(tags, eq(event_tags.tag_id, tags.id))
+      .where(and(
+        eq(event_tags.event_id, events.id),
+        eq(tags.slug, 'esports'),
+      )),
+  )
+
+  return sportsVertical === 'esports'
+    ? hasEsportsTag
+    : sql`NOT ${hasEsportsTag}`
 }
 
 function toOptionalIsoString(value: unknown): string | null {
@@ -882,6 +935,7 @@ function eventResource(
   const normalizedSportsTeamLogoUrls = toOptionalStringArray(event.sports?.sports_team_logo_urls)
     ?.map(logoPath => getPublicAssetUrl(logoPath) || logoPath)
     ?? null
+  const sportsLeagueSlug = event.sports?.sports_league_slug ?? null
 
   return {
     id: event.id || '',
@@ -907,6 +961,8 @@ function eventResource(
       sportsSeriesSlug: event.sports?.sports_series_slug ?? null,
       sportsTags: normalizedSportsTags,
     }),
+    sports_league_slug: sportsLeagueSlug,
+    sports_series_slug: event.sports?.sports_series_slug ?? null,
     sports_section: resolveSportsSection({ tags: tagRecords }),
     sports_start_time: event.sports?.sports_start_time?.toISOString() ?? null,
     sports_event_week: toOptionalNumber(event.sports?.sports_event_week),
@@ -1119,6 +1175,7 @@ async function buildEventListQueryContext({
   status = 'active',
   sportsSportSlug = '',
   sportsSection = '',
+  sportsVertical = '',
   hideSports = false,
   hideCrypto = false,
   hideEarnings = false,
@@ -1192,16 +1249,14 @@ async function buildEventListQueryContext({
     }
   }
   if (sportsSportSlugCandidates.length > 0) {
-    const normalizedSportsSportSlugColumn = sql<string>`
-      LOWER(TRIM(COALESCE(${event_sports.sports_sport_slug}, '')))
-    `
-    const sportsSportSlugCondition = sportsSportSlugCandidates.length === 1
-      ? eq(normalizedSportsSportSlugColumn, sportsSportSlugCandidates[0]!)
-      : inArray(normalizedSportsSportSlugColumn, sportsSportSlugCandidates)
-    const sportsTagsMatchCondition = buildSportsTagsMatchCondition(sportsSportSlugCandidates)
-    const sportsSlugOrTagCondition = sportsTagsMatchCondition
-      ? or(sportsSportSlugCondition, sportsTagsMatchCondition)
-      : sportsSportSlugCondition
+    const sportsSlugOrTagCondition = buildSportsSlugMatchCondition(sportsSportSlugCandidates)
+    if (!sportsSlugOrTagCondition) {
+      return {
+        baseWhere: undefined,
+        empty: true,
+        sportsSlugResolver,
+      }
+    }
     whereConditions.push(
       exists(
         db.select({ event_id: event_sports.event_id })
@@ -1230,6 +1285,11 @@ async function buildEventListQueryContext({
           )),
       ),
     )
+  }
+
+  const sportsVerticalCondition = buildSportsVerticalTagCondition(sportsVertical)
+  if (sportsVerticalCondition) {
+    whereConditions.push(sportsVerticalCondition)
   }
 
   if (tag && tag !== 'trending' && tag !== 'new') {
@@ -1378,6 +1438,7 @@ export const EventRepository = {
     locale = DEFAULT_LOCALE,
     sportsSportSlug = '',
     sportsSection = '',
+    sportsVertical = '',
   }: ListEventsProps): Promise<QueryResult<Event[]>> {
     'use cache'
     cacheTag(cacheTags.events(userId || 'guest'))
@@ -1441,16 +1502,10 @@ export const EventRepository = {
         return { data: [], error: null }
       }
       if (sportsSportSlugCandidates.length > 0) {
-        const normalizedSportsSportSlugColumn = sql<string>`
-          LOWER(TRIM(COALESCE(${event_sports.sports_sport_slug}, '')))
-        `
-        const sportsSportSlugCondition = sportsSportSlugCandidates.length === 1
-          ? eq(normalizedSportsSportSlugColumn, sportsSportSlugCandidates[0]!)
-          : inArray(normalizedSportsSportSlugColumn, sportsSportSlugCandidates)
-        const sportsTagsMatchCondition = buildSportsTagsMatchCondition(sportsSportSlugCandidates)
-        const sportsSlugOrTagCondition = sportsTagsMatchCondition
-          ? or(sportsSportSlugCondition, sportsTagsMatchCondition)
-          : sportsSportSlugCondition
+        const sportsSlugOrTagCondition = buildSportsSlugMatchCondition(sportsSportSlugCandidates)
+        if (!sportsSlugOrTagCondition) {
+          return { data: [], error: null }
+        }
         whereConditions.push(
           exists(
             db.select({ event_id: event_sports.event_id })
@@ -1479,6 +1534,11 @@ export const EventRepository = {
               )),
           ),
         )
+      }
+
+      const sportsVerticalCondition = buildSportsVerticalTagCondition(sportsVertical)
+      if (sportsVerticalCondition) {
+        whereConditions.push(sportsVerticalCondition)
       }
 
       if (tag && tag !== 'trending' && tag !== 'new') {
@@ -1765,6 +1825,7 @@ export const EventRepository = {
     sportsSection = '',
     sportsSportSlug = '',
     status = 'active',
+    sportsVertical = '',
   }: ListEventMarketSlugsProps): Promise<QueryResult<string[]>> {
     'use cache'
     cacheTag(cacheTags.eventsGlobal)
@@ -1776,6 +1837,7 @@ export const EventRepository = {
         locale,
         sportsSportSlug,
         sportsSection,
+        sportsVertical,
       })
 
       if (empty) {
@@ -2389,6 +2451,7 @@ export const EventRepository = {
   async getCanonicalEventSlugBySportsPath(
     sportsSportSlug: string,
     sportsEventSlug: string,
+    sportsLeagueSlug?: string | null,
   ): Promise<QueryResult<{ slug: string }>> {
     return runQuery(async () => {
       const sportsSlugResolver = await getSportsSlugResolverFromDb()
@@ -2396,41 +2459,45 @@ export const EventRepository = {
         sportsSportSlug,
         sportsTags: null,
       })
+      const sportsSportSlugCandidates = resolveSportsSportSlugQueryCandidates(
+        sportsSlugResolver,
+        sportsSportSlug,
+      )
       const normalizedSportsEventSlug = sportsEventSlug.trim().toLowerCase()
+      const normalizedSportsLeagueSlug = sportsLeagueSlug?.trim().toLowerCase() ?? ''
 
-      if (!requestedCanonicalSportsSlug || !normalizedSportsEventSlug) {
+      if (!requestedCanonicalSportsSlug || !normalizedSportsEventSlug || sportsSportSlugCandidates.length === 0) {
+        throw new Error('Event not found')
+      }
+
+      const sportsSlugMatchCondition = buildSportsSlugMatchCondition(sportsSportSlugCandidates)
+      if (!sportsSlugMatchCondition) {
         throw new Error('Event not found')
       }
 
       const normalizedSportsEventSlugColumn = sql<string>`
         LOWER(TRIM(COALESCE(${event_sports.sports_event_slug}, '')))
       `
+
       const result = await db
         .select({
           slug: events.slug,
           created_at: events.created_at,
-          sports_sport_slug: event_sports.sports_sport_slug,
-          sports_series_slug: event_sports.sports_series_slug,
-          sports_tags: event_sports.sports_tags,
         })
         .from(event_sports)
         .innerJoin(events, eq(event_sports.event_id, events.id))
         .where(and(
           eq(normalizedSportsEventSlugColumn, normalizedSportsEventSlug),
           eq(events.is_hidden, false),
+          buildPublicEventListVisibilityCondition(events.id),
+          sportsSlugMatchCondition,
+          normalizedSportsLeagueSlug
+            ? eq(event_sports.sports_league_slug, normalizedSportsLeagueSlug)
+            : undefined,
         ))
         .orderBy(desc(events.created_at))
 
       const matchingRow = result
-        .filter((row) => {
-          const canonicalSportsSlug = resolveCanonicalSportsSportSlug(sportsSlugResolver, {
-            sportsSportSlug: row.sports_sport_slug,
-            sportsSeriesSlug: row.sports_series_slug,
-            sportsTags: toOptionalStringArray(row.sports_tags),
-          })
-
-          return canonicalSportsSlug === requestedCanonicalSportsSlug
-        })
         .sort((left, right) => {
           const leftIsAuxiliary = isSportsAuxiliaryEventSlug(left.slug)
           const rightIsAuxiliary = isSportsAuxiliaryEventSlug(right.slug)
@@ -2509,6 +2576,7 @@ export const EventRepository = {
   async getEventRouteBySlug(slug: string): Promise<QueryResult<{
     slug: string
     sports_sport_slug: string | null
+    sports_league_slug: string | null
     sports_event_slug: string | null
     sports_section: 'games' | 'props' | null
     tags: Array<{ slug: string }>
@@ -2519,66 +2587,62 @@ export const EventRepository = {
 
     return runQuery(async () => {
       interface EventRouteRow {
+        id: string
         slug: string
-        eventTags: Array<{
-          tag: {
-            slug: string
-          }
-        }>
-        sports: {
-          sports_sport_slug: string | null
-          sports_series_slug: string | null
-          sports_event_slug: string | null
-          sports_tags: unknown
-        } | null
+        sports_sport_slug: string | null
+        sports_league_slug: string | null
+        sports_series_slug: string | null
+        sports_event_slug: string | null
+        sports_tags: unknown
       }
 
-      const result = await db.query.events.findFirst({
-        where: and(
+      const result = await db
+        .select({
+          id: events.id,
+          slug: events.slug,
+          sports_sport_slug: event_sports.sports_sport_slug,
+          sports_league_slug: event_sports.sports_league_slug,
+          sports_series_slug: event_sports.sports_series_slug,
+          sports_event_slug: event_sports.sports_event_slug,
+          sports_tags: event_sports.sports_tags,
+        })
+        .from(events)
+        .leftJoin(event_sports, eq(event_sports.event_id, events.id))
+        .where(and(
           eq(events.slug, slug),
           eq(events.is_hidden, false),
-        ),
-        columns: { slug: true },
-        with: {
-          eventTags: {
-            with: {
-              tag: {
-                columns: {
-                  slug: true,
-                },
-              },
-            },
-          },
-          sports: {
-            columns: {
-              sports_sport_slug: true,
-              sports_series_slug: true,
-              sports_event_slug: true,
-              sports_tags: true,
-            },
-          },
-        },
-      }) as EventRouteRow | undefined
+        ))
+        .limit(1) as EventRouteRow[]
 
-      if (!result) {
+      const eventRow = result[0]
+      if (!eventRow) {
         throw new Error('Event not found')
       }
 
+      const tagRows = await db
+        .select({
+          slug: tags.slug,
+        })
+        .from(event_tags)
+        .innerJoin(tags, eq(event_tags.tag_id, tags.id))
+        .where(eq(event_tags.event_id, eventRow.id))
+
       const sportsSlugResolver = await getSportsSlugResolverFromDb()
-      const normalizedSportsTags = toOptionalStringArray(result.sports?.sports_tags)
+      const normalizedSportsTags = toOptionalStringArray(eventRow.sports_tags)
 
       return {
         data: {
-          slug: result.slug,
+          slug: eventRow.slug,
           sports_sport_slug: resolveCanonicalSportsSportSlug(sportsSlugResolver, {
-            sportsSportSlug: result.sports?.sports_sport_slug ?? null,
-            sportsSeriesSlug: result.sports?.sports_series_slug ?? null,
+            sportsSportSlug: eventRow.sports_sport_slug,
+            sportsSeriesSlug: eventRow.sports_series_slug,
             sportsTags: normalizedSportsTags,
           }),
-          sports_event_slug: result.sports?.sports_event_slug ?? null,
-          sports_section: resolveSportsSection({ tags: result.eventTags.map(eventTag => eventTag.tag) }),
-          tags: result.eventTags.map(eventTag => ({
-            slug: eventTag.tag.slug,
+          sports_league_slug: eventRow.sports_league_slug ?? null,
+          sports_event_slug: eventRow.sports_event_slug ?? null,
+          sports_section: resolveSportsSection({ tags: tagRows }),
+          tags: tagRows.map(tagRow => ({
+            slug: tagRow.slug,
           })),
         },
         error: null,
@@ -2911,6 +2975,7 @@ export const EventRepository = {
           created_at: events.created_at,
           sports_event_slug: event_sports.sports_event_slug,
           sports_sport_slug: event_sports.sports_sport_slug,
+          sports_league_slug: event_sports.sports_league_slug,
           sports_series_slug: event_sports.sports_series_slug,
           sports_tags: event_sports.sports_tags,
         })
@@ -3006,6 +3071,7 @@ export const EventRepository = {
           sportsSeriesSlug: row.sports_series_slug ?? null,
           sportsTags: toOptionalStringArray(row.sports_tags),
         }),
+        sports_league_slug: row.sports_league_slug ?? null,
         resolved_direction: outcomeDirectionByEventId.get(row.id) ?? null,
       }))
 
@@ -3091,6 +3157,7 @@ export const EventRepository = {
           icon_url: markets.icon_url,
           sports_event_slug: event_sports.sports_event_slug,
           sports_sport_slug: event_sports.sports_sport_slug,
+          sports_league_slug: event_sports.sports_league_slug,
           sports_series_slug: event_sports.sports_series_slug,
           sports_tags: event_sports.sports_tags,
           common_tags_count: commonTagsCount,
@@ -3118,6 +3185,7 @@ export const EventRepository = {
           markets.icon_url,
           event_sports.sports_event_slug,
           event_sports.sports_sport_slug,
+          event_sports.sports_league_slug,
           event_sports.sports_series_slug,
           event_sports.sports_tags,
         )
@@ -3204,6 +3272,7 @@ export const EventRepository = {
             sportsSeriesSlug: row.sports_series_slug ?? null,
             sportsTags: toOptionalStringArray(row.sports_tags),
           }),
+          sports_league_slug: row.sports_league_slug ?? null,
           sports_section: resolveSportsSection({ tags: tagSlugsByEventId.get(row.id) ?? [] }),
           common_tags_count: Number(row.common_tags_count),
           chance,

@@ -1,4 +1,5 @@
 import type { EventListSortBy, EventListStatusFilter } from '@/lib/event-list-filters'
+import type { SportsVertical } from '@/lib/sports-vertical'
 import type { Event } from '@/types'
 
 export type EventListFrequency = 'all' | 'daily' | 'weekly' | 'monthly'
@@ -19,6 +20,7 @@ export interface BuildEventsApiSearchParamsOptions {
   sort?: EventListSortBy
   sportsSection?: 'games' | 'props' | '' | null
   sportsSportSlug?: string | null
+  sportsVertical?: SportsVertical | '' | null
   status?: EventListStatusFilter
 }
 
@@ -38,6 +40,7 @@ export function buildEventsApiSearchParams({
   sort,
   sportsSection = null,
   sportsSportSlug = null,
+  sportsVertical = null,
   status = 'active',
 }: BuildEventsApiSearchParamsOptions) {
   const params = new URLSearchParams({
@@ -90,6 +93,10 @@ export function buildEventsApiSearchParams({
 
   if (sportsSection === 'games' || sportsSection === 'props') {
     params.set('sportsSection', sportsSection)
+  }
+
+  if (sportsVertical === 'sports' || sportsVertical === 'esports') {
+    params.set('sportsVertical', sportsVertical)
   }
 
   return params

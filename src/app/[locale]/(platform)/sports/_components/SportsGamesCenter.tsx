@@ -7,6 +7,8 @@ import type {
   MouseEvent as ReactMouseEvent,
   MouseEvent as ReactMouseEventType,
 } from 'react'
+import type { EventOrderPanelOutcomeSelectedAccent }
+  from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelOutcomeButton'
 import type { SportsGamesButton, SportsGamesCard } from '@/app/[locale]/(platform)/sports/_utils/sports-games-data'
 import type { OddsFormat } from '@/lib/odds-format'
 import type { NormalizedBookLevel } from '@/lib/order-panel-utils'
@@ -20,7 +22,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   EqualIcon,
-  ExternalLinkIcon,
   RadioIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -42,12 +43,10 @@ import EventOrderPanelForm from '@/app/[locale]/(platform)/event/[slug]/_compone
 import EventOrderPanelMobile from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelMobile'
 import EventOrderPanelTermsDisclaimer
   from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelTermsDisclaimer'
-import EventRules from '@/app/[locale]/(platform)/event/[slug]/_components/EventRules'
-import ResolutionTimelinePanel from '@/app/[locale]/(platform)/event/[slug]/_components/ResolutionTimelinePanel'
 import { TIME_RANGES, useEventPriceHistory } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useEventPriceHistory'
 import { loadStoredChartSettings, storeChartSettings } from '@/app/[locale]/(platform)/event/[slug]/_utils/chartSettingsStorage'
 import { fetchOrderBookSummaries } from '@/app/[locale]/(platform)/event/[slug]/_utils/EventOrderBookUtils'
-import { shouldDisplayResolutionTimeline } from '@/app/[locale]/(platform)/event/[slug]/_utils/resolution-timeline-builder'
+import SportsEventAboutPanel from '@/app/[locale]/(platform)/sports/_components/SportsEventAboutPanel'
 import SportsLivestreamFloatingPlayer
   from '@/app/[locale]/(platform)/sports/_components/SportsLivestreamFloatingPlayer'
 import {
@@ -69,10 +68,8 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useIsMobile } from '@/hooks/useIsMobile'
-import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 import { useWindowSize } from '@/hooks/useWindowSize'
 import { useRouter } from '@/i18n/navigation'
-import { ensureReadableTextColorOnDark } from '@/lib/color-contrast'
 import { MICRO_UNIT, ORDER_SIDE, ORDER_TYPE, OUTCOME_INDEX } from '@/lib/constants'
 import { fetchUserPositionsForMarket } from '@/lib/data-api/user'
 import {
@@ -96,8 +93,7 @@ import {
   resolveSportsTeamFallbackOverlayStyle,
 } from '@/lib/sports-team-colors'
 import { shouldUseCroppedSportsTeamLogo } from '@/lib/sports-team-logo'
-import { getSportsVerticalConfig } from '@/lib/sports-vertical'
-import { buildUmaProposeUrl, buildUmaSettledUrl } from '@/lib/uma'
+import { getSportsVerticalConfig, resolveSportsVerticalFromTags } from '@/lib/sports-vertical'
 import { cn } from '@/lib/utils'
 import { useOrder } from '@/stores/useOrder'
 import { useSportsLivestream } from '@/stores/useSportsLivestream'
@@ -107,10 +103,11 @@ interface SportsGamesCenterProps {
   cards: SportsGamesCard[]
   sportSlug: string
   sportTitle: string
-  pageMode?: 'games' | 'live'
+  pageMode?: 'games' | 'live' | 'liveAndSoon' | 'soon'
   categoryTitleBySlug?: Record<string, string>
   initialWeek?: number | null
   vertical?: SportsVertical
+  showHeading?: boolean
 }
 
 type DetailsTab = 'orderBook' | 'graph' | 'about'
@@ -166,6 +163,7 @@ const tradeFlowTextStrokeStyle = {
   `,
 } as const
 const GENERIC_SPORTS_CATEGORY_LABELS = new Set([
+  'esports',
   'sports',
   'games',
   'live',
@@ -180,7 +178,7 @@ const PredictionChart = dynamic<PredictionChartProps>(
   { ssr: false },
 )
 
-interface SportsLinePickerOption {
+export interface SportsLinePickerOption {
   conditionId: string
   label: string
   lineValue: number
@@ -403,6 +401,18 @@ function normalizeHexColor(value: string | null | undefined) {
   return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(withHash) ? withHash : null
 }
 
+function resolveMoneylineButtonGridClass(buttonCount: number) {
+  if (buttonCount <= 1) {
+    return 'grid-cols-1'
+  }
+
+  if (buttonCount === 2) {
+    return 'grid-cols-2'
+  }
+
+  return 'grid-cols-3'
+}
+
 export function resolveButtonStyle(
   color: string | null,
   tone?: SportsGamesButton['tone'],
@@ -526,6 +536,70 @@ export function resolveSelectedMarket(card: SportsGamesCard, selectedButtonKey: 
   return card.detailMarkets[0] ?? null
 }
 
+export function resolveOrderPanelOutcomeLabelOverrides(
+  card: SportsGamesCard,
+  market: Market | null | undefined,
+): Partial<Record<number, string>> {
+  if (!market) {
+    return {}
+  }
+
+  const hasDrawMoneylineOption = card.buttons.some(button =>
+    button.marketType === 'moneyline' && button.tone === 'draw',
+  )
+  const isMoneylineCondition = card.buttons.some(button =>
+    button.conditionId === market.condition_id && button.marketType === 'moneyline',
+  )
+  if (hasDrawMoneylineOption && isMoneylineCondition) {
+    return {}
+  }
+
+  const labels: Partial<Record<number, string>> = {}
+  card.buttons.forEach((button) => {
+    if (button.conditionId !== market.condition_id || button.tone === 'draw') {
+      return
+    }
+
+    const label = button.label?.trim()
+    if (!label || labels[button.outcomeIndex]) {
+      return
+    }
+
+    labels[button.outcomeIndex] = label
+  })
+
+  return labels
+}
+
+export function resolveOrderPanelOutcomeAccentOverrides(
+  card: SportsGamesCard,
+  market: Market | null | undefined,
+): Partial<Record<number, EventOrderPanelOutcomeSelectedAccent>> {
+  if (!market) {
+    return {}
+  }
+
+  const accents: Partial<Record<number, EventOrderPanelOutcomeSelectedAccent>> = {}
+  card.buttons.forEach((button) => {
+    if (
+      button.conditionId !== market.condition_id
+      || (button.outcomeIndex !== OUTCOME_INDEX.YES && button.outcomeIndex !== OUTCOME_INDEX.NO)
+      || (button.tone !== 'team1' && button.tone !== 'team2')
+      || accents[button.outcomeIndex]
+    ) {
+      return
+    }
+
+    accents[button.outcomeIndex] = {
+      buttonStyle: resolveButtonStyle(button.color, button.tone),
+      depthStyle: resolveButtonDepthStyle(button.color, button.tone),
+      overlayStyle: resolveButtonOverlayStyle(button.color, button.tone),
+    }
+  })
+
+  return accents
+}
+
 function resolveActiveMarketType(card: SportsGamesCard, selectedButtonKey: string | null): SportsGamesMarketType {
   if (selectedButtonKey) {
     const selectedButton = card.buttons.find(button => button.key === selectedButtonKey)
@@ -637,7 +711,7 @@ function resolveMarketLineValue(market: Market | null, marketType: LinePickerMar
     : lineValue
 }
 
-function buildLinePickerOptions(card: SportsGamesCard, marketType: LinePickerMarketType): SportsLinePickerOption[] {
+export function buildLinePickerOptions(card: SportsGamesCard, marketType: LinePickerMarketType): SportsLinePickerOption[] {
   const sourceButtons = card.buttons.filter(button => button.marketType === marketType)
   if (sourceButtons.length === 0) {
     return []
@@ -677,6 +751,33 @@ function buildLinePickerOptions(card: SportsGamesCard, marketType: LinePickerMar
       }
       return a.firstIndex - b.firstIndex
     })
+}
+
+export function resolvePreferredLinePickerButton(
+  buttons: SportsGamesButton[],
+  selectedButton: SportsGamesButton | null | undefined,
+) {
+  if (buttons.length === 0) {
+    return null
+  }
+
+  if (!selectedButton) {
+    return buttons[0] ?? null
+  }
+
+  if (selectedButton.tone !== 'neutral') {
+    const toneMatch = buttons.find(button => button.tone === selectedButton.tone)
+    if (toneMatch) {
+      return toneMatch
+    }
+  }
+
+  const outcomeIndexMatch = buttons.find(button => button.outcomeIndex === selectedButton.outcomeIndex)
+  if (outcomeIndexMatch) {
+    return outcomeIndexMatch
+  }
+
+  return buttons[0] ?? null
 }
 
 function resolveGraphSeriesName(card: SportsGamesCard, button: SportsGamesButton | undefined, market: Market) {
@@ -805,13 +906,24 @@ function resolveTotalButtonLabel(button: SportsGamesButton, selectedOutcome: Out
   return line ? `${sideLabel} ${line}` : sideLabel
 }
 
-function resolveSelectedTradeLabel(button: SportsGamesButton | null, selectedOutcome: Outcome | null) {
+function resolveSelectedTradeLabel(
+  card: SportsGamesCard,
+  button: SportsGamesButton | null,
+  selectedOutcome: Outcome | null,
+) {
   if (!button) {
     return selectedOutcome?.outcome_text?.trim().toUpperCase() || 'YES'
   }
 
   if (button.marketType === 'total') {
     return resolveTotalButtonLabel(button, selectedOutcome)
+  }
+
+  if (button.marketType === 'moneyline' && (button.tone === 'team1' || button.tone === 'team2')) {
+    const teamName = resolveTeamByTone(card, button.tone)?.name?.trim()
+    if (teamName) {
+      return teamName
+    }
   }
 
   return button.label.trim().toUpperCase()
@@ -946,6 +1058,15 @@ function formatCategoryFromSlug(value: string) {
     .join(' ')
 }
 
+function resolveCategoryFromSportSlugs(card: SportsGamesCard) {
+  const categorySlug = card.event.sports_sport_slug?.trim() || card.event.sports_series_slug?.trim()
+  if (!categorySlug) {
+    return null
+  }
+
+  return formatCategoryFromSlug(categorySlug)
+}
+
 function resolveCategoryFromEventSlug(card: SportsGamesCard) {
   const eventSlug = card.event.sports_event_slug?.trim() || card.event.series_slug?.trim()
   if (!eventSlug) {
@@ -992,29 +1113,38 @@ function resolveCardCategoryLabel(
   card: SportsGamesCard,
   categoryTitleBySlug: Record<string, string> = {},
 ) {
-  const normalizedSportSlug = card.event.sports_sport_slug?.trim().toLowerCase()
-  const mappedCategoryTitle = normalizedSportSlug
-    ? categoryTitleBySlug[normalizedSportSlug]
-    : null
-  if (
-    mappedCategoryTitle
-    && !isGenericSportsCategoryLabel(mappedCategoryTitle, normalizedSportSlug)
-  ) {
-    return mappedCategoryTitle
+  const categorySlugCandidates = [
+    card.event.sports_series_slug,
+    card.event.series_slug,
+    card.event.sports_sport_slug,
+  ]
+    .map(value => value?.trim().toLowerCase() ?? '')
+    .filter(Boolean)
+
+  for (const slug of categorySlugCandidates) {
+    const mappedCategoryTitle = categoryTitleBySlug[slug]
+    if (
+      mappedCategoryTitle
+      && !isGenericSportsCategoryLabel(mappedCategoryTitle, slug)
+    ) {
+      return mappedCategoryTitle
+    }
   }
 
-  const sportSlug = card.event.sports_sport_slug
+  const genericSlug = categorySlugCandidates[0] ?? card.event.sports_sport_slug
   const candidateTags = card.event.sports_tags
     ?.map(tag => tag?.trim() ?? '')
     .filter(Boolean)
-    .filter(tag => !isGenericSportsCategoryLabel(tag, sportSlug))
+    .filter(tag => !isGenericSportsCategoryLabel(tag, genericSlug))
     ?? []
 
   if (candidateTags.length > 0) {
     return [...candidateTags].sort((a, b) => b.length - a.length)[0]!
   }
 
-  return resolveCategoryFromEventSlug(card) ?? 'Other'
+  return resolveCategoryFromSportSlugs(card)
+    ?? resolveCategoryFromEventSlug(card)
+    ?? 'Other'
 }
 
 function resolveSwitchTooltip(market: Market | null, nextOutcome: Outcome | null) {
@@ -1890,6 +2020,137 @@ function resolveTeamShortLabel(name: string | null | undefined, abbreviation: st
   return compactName.slice(0, 3)
 }
 
+const FRANCHISE_MULTI_WORD_NICKNAME_PREFIXES = new Set([
+  'blue',
+  'golden',
+  'maple',
+  'red',
+  'trail',
+  'white',
+])
+
+function resolveFranchiseTradeHeaderTeamLabel(
+  name: string | null | undefined,
+  abbreviation: string | null | undefined,
+) {
+  const trimmedName = name?.trim()
+  if (!trimmedName) {
+    return resolveTeamShortLabel(name, abbreviation)
+  }
+
+  const nameTokens = trimmedName.split(/\s+/).filter(Boolean)
+  if (nameTokens.length <= 1) {
+    return trimmedName
+  }
+
+  const lastToken = nameTokens.at(-1)
+  const secondToLastToken = nameTokens.at(-2)
+  if (!lastToken) {
+    return resolveTeamShortLabel(name, abbreviation)
+  }
+
+  if (
+    secondToLastToken
+    && FRANCHISE_MULTI_WORD_NICKNAME_PREFIXES.has(normalizeComparableText(secondToLastToken))
+  ) {
+    return `${secondToLastToken} ${lastToken}`
+  }
+
+  return lastToken
+}
+
+function resolveEsportsTradeHeaderTeamLabel(
+  name: string | null | undefined,
+  abbreviation: string | null | undefined,
+) {
+  const trimmedAbbreviation = abbreviation?.trim()
+  if (trimmedAbbreviation) {
+    return trimmedAbbreviation
+      .toUpperCase()
+      .replace(/[_-]+/g, ' ')
+      .replace(/([A-Z]+)(\d+)$/u, '$1 $2')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  return resolveTeamShortLabel(name, abbreviation)
+}
+
+const COMPACT_COMBAT_TRADE_HEADER_SPORT_SLUGS = new Set([
+  'boxing',
+  'chess',
+  'mma',
+  'ufc',
+  'zuffa',
+])
+
+const COMPACT_FRANCHISE_TRADE_HEADER_SPORT_SLUGS = new Set([
+  'mlb',
+  'nba',
+  'nfl',
+  'nhl',
+  'wnba',
+])
+
+function resolveTradeHeaderSportSlugCandidates(card: SportsGamesCard) {
+  return [
+    card.event.sports_sport_slug,
+    card.event.sports_series_slug,
+  ]
+    .map(value => normalizeComparableText(value))
+    .filter((value): value is string => Boolean(value))
+}
+
+function isCompactCricketTradeHeaderSportSlug(slug: string) {
+  return slug === 'cricket' || slug === 'crint' || slug.startsWith('cric')
+}
+
+function shouldUseFranchiseTradeHeaderTeamLabels(sportSlugs: string[]) {
+  return sportSlugs.some(slug => COMPACT_FRANCHISE_TRADE_HEADER_SPORT_SLUGS.has(slug))
+}
+
+function hasDrawMoneylineOption(card: SportsGamesCard) {
+  return card.buttons.some(button =>
+    button.marketType === 'moneyline' && button.tone === 'draw',
+  )
+}
+
+function resolveCompactTradeHeaderTitle(
+  card: SportsGamesCard,
+  resolveTeamLabel: (
+    name: string | null | undefined,
+    abbreviation: string | null | undefined,
+  ) => string | null,
+) {
+  const team1 = card.teams[0] ?? null
+  const team2 = card.teams[1] ?? null
+  const leftLabel = resolveTeamLabel(team1?.name, team1?.abbreviation)
+  const rightLabel = resolveTeamLabel(team2?.name, team2?.abbreviation)
+
+  if (!leftLabel || !rightLabel) {
+    return null
+  }
+
+  return `${leftLabel} vs ${rightLabel}`
+}
+
+function shouldUseCompactTradeHeaderTitle(card: SportsGamesCard, vertical: SportsVertical | null) {
+  if (vertical === 'esports') {
+    return true
+  }
+
+  if (hasDrawMoneylineOption(card)) {
+    return true
+  }
+
+  const sportSlugs = resolveTradeHeaderSportSlugCandidates(card)
+
+  return sportSlugs.some(slug =>
+    COMPACT_COMBAT_TRADE_HEADER_SPORT_SLUGS.has(slug)
+    || COMPACT_FRANCHISE_TRADE_HEADER_SPORT_SLUGS.has(slug)
+    || isCompactCricketTradeHeaderSportSlug(slug))
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -1941,17 +2202,32 @@ function resolveTradeHeaderTitle({
     return 'Over vs Under'
   }
 
-  if (selectedButton.tone === 'draw') {
-    return 'DRAW'
-  }
-
   const team1 = card.teams[0] ?? null
   const team2 = card.teams[1] ?? null
-  const team1Label = resolveTeamShortLabel(team1?.name, team1?.abbreviation)
-  const team2Label = resolveTeamShortLabel(team2?.name, team2?.abbreviation)
+  const vertical = resolveSportsVerticalFromTags({
+    tags: card.event.tags,
+    mainTag: card.event.main_tag,
+  })
+  if (shouldUseCompactTradeHeaderTitle(card, vertical)) {
+    const sportSlugs = resolveTradeHeaderSportSlugCandidates(card)
+    const compactTitle = resolveCompactTradeHeaderTitle(
+      card,
+      vertical === 'esports'
+        ? resolveEsportsTradeHeaderTeamLabel
+        : shouldUseFranchiseTradeHeaderTeamLabels(sportSlugs)
+          ? resolveFranchiseTradeHeaderTeamLabel
+          : resolveTeamShortLabel,
+    )
+    if (compactTitle) {
+      return compactTitle
+    }
+  }
 
-  if (team1Label && team2Label) {
-    return `${team1Label} vs ${team2Label}`
+  const fullMatchupTitle = card.title?.trim()
+    || [team1?.name?.trim(), team2?.name?.trim()].filter(Boolean).join(' vs ')
+
+  if (fullMatchupTitle) {
+    return fullMatchupTitle
   }
 
   return selectedButton.label.trim().toUpperCase() || card.title
@@ -1980,11 +2256,10 @@ function resolveTradeHeaderBadgeAccent(button: SportsGamesButton) {
     && normalizedTeamColor
   ) {
     const rgbComponents = resolveHexToRgbComponents(normalizedTeamColor)
-    const readableTeamColor = ensureReadableTextColorOnDark(normalizedTeamColor)
     return {
-      className: '',
+      className: 'dark:mix-blend-plus-lighter',
       style: {
-        color: readableTeamColor ?? normalizedTeamColor,
+        color: normalizedTeamColor,
         backgroundColor: rgbComponents ? `rgb(${rgbComponents} / 0.10)` : undefined,
       } as CSSProperties,
     }
@@ -2211,7 +2486,7 @@ export function SportsOrderPanelMarketInfo({
   marketType: SportsGamesMarketType
 }) {
   const selectedMarket = resolveSelectedMarket(card, selectedButton.key)
-  const badgeLabel = resolveSelectedTradeLabel(selectedButton, selectedOutcome)
+  const badgeLabel = resolveSelectedTradeLabel(card, selectedButton, selectedOutcome)
   const headerTitle = resolveTradeHeaderTitle({
     card,
     selectedButton,
@@ -2264,79 +2539,6 @@ export function SportsOrderPanelMarketInfo({
   )
 }
 
-function SportsEventAboutPanel({
-  event,
-  market,
-}: {
-  event: SportsGamesCard['event']
-  market: Market | null
-}) {
-  const t = useExtracted()
-  const siteIdentity = useSiteIdentity()
-  const aboutRulesEvent = useMemo(() => {
-    if (!market) {
-      return event
-    }
-
-    return {
-      ...event,
-      markets: [
-        market,
-        ...event.markets.filter(item => item.condition_id !== market.condition_id),
-      ],
-    }
-  }, [event, market])
-  const shouldShowResolution = useMemo(
-    () => Boolean(market && shouldDisplayResolutionTimeline(market)),
-    [market],
-  )
-  const resolutionDetailsUrl = useMemo(
-    () => market
-      ? (buildUmaSettledUrl(market.condition, siteIdentity.name) ?? buildUmaProposeUrl(market.condition, siteIdentity.name))
-      : null,
-    [market, siteIdentity.name],
-  )
-
-  return (
-    <div className="grid gap-3 pb-2">
-      <EventRules event={aboutRulesEvent} mode="inline" showEndDate />
-
-      {market && shouldShowResolution && (
-        <section className="grid gap-2">
-          <h4 className="text-base font-medium text-foreground">{t('Resolution')}</h4>
-          <div className={cn(
-            'grid gap-2',
-            resolutionDetailsUrl && 'sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-4',
-          )}
-          >
-            <ResolutionTimelinePanel
-              market={market}
-              settledUrl={null}
-              showLink={false}
-              className="min-w-0"
-            />
-            {resolutionDetailsUrl && (
-              <a
-                href={resolutionDetailsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="
-                  inline-flex items-center gap-1.5 justify-self-start text-sm font-medium text-muted-foreground
-                  hover:underline
-                  sm:justify-self-end
-                "
-              >
-                <span>{t('View details')}</span>
-                <ExternalLinkIcon className="size-3.5" />
-              </a>
-            )}
-          </div>
-        </section>
-      )}
-    </div>
-  )
-}
-
 interface SportsGameDetailsPanelProps {
   card: SportsGamesCard
   activeDetailsTab: DetailsTab
@@ -2347,9 +2549,11 @@ interface SportsGameDetailsPanelProps {
   positionsTitle?: string
   showAboutTab?: boolean
   aboutEvent?: SportsGamesCard['event'] | null
+  rulesEvent?: SportsGamesCard['event'] | null
   showRedeemInPositions?: boolean
   onOpenRedeemForCondition?: ((conditionId: string) => void) | null
   oddsFormat?: OddsFormat
+  marketContextEnabled?: boolean
   onChangeTab: (tab: DetailsTab) => void
   onSelectButton: (
     buttonKey: string,
@@ -2367,9 +2571,11 @@ export function SportsGameDetailsPanel({
   positionsTitle,
   showAboutTab = false,
   aboutEvent = null,
+  rulesEvent = null,
   showRedeemInPositions = false,
   onOpenRedeemForCondition = null,
   oddsFormat = 'price',
+  marketContextEnabled = true,
   onChangeTab,
   onSelectButton,
 }: SportsGameDetailsPanelProps) {
@@ -2379,6 +2585,7 @@ export function SportsGameDetailsPanel({
   const linePickerScrollerRef = useRef<HTMLDivElement | null>(null)
   const linePickerButtonsRef = useRef<Record<string, HTMLButtonElement | null>>({})
   const linePickerScrollSettleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const linePickerSuppressScrollSyncUntilRef = useRef(0)
   const [linePickerStartSpacer, setLinePickerStartSpacer] = useState(0)
   const [linePickerEndSpacer, setLinePickerEndSpacer] = useState(0)
   const [cashOutPayload, setCashOutPayload] = useState<SportsCashOutModalPayload | null>(null)
@@ -2752,8 +2959,8 @@ export function SportsGameDetailsPanel({
   }, [card.buttons, nextOutcome, selectedMarket])
 
   const tradeSelectionLabel = useMemo(
-    () => resolveSelectedTradeLabel(selectedButton, selectedOutcome),
-    [selectedButton, selectedOutcome],
+    () => resolveSelectedTradeLabel(card, selectedButton, selectedOutcome),
+    [card, selectedButton, selectedOutcome],
   )
 
   const switchTooltip = useMemo(() => {
@@ -2859,6 +3066,10 @@ export function SportsGameDetailsPanel({
     form?.requestSubmit()
   }, [setOrderAmount])
 
+  const suppressLinePickerScrollSync = useCallback((durationMs = 220) => {
+    linePickerSuppressScrollSyncUntilRef.current = Date.now() + durationMs
+  }, [])
+
   const pickLineOption = useCallback((optionIndex: number) => {
     if (!selectedButton) {
       return
@@ -2869,14 +3080,14 @@ export function SportsGameDetailsPanel({
       return
     }
 
-    const preferredButton = option.buttons.find(button => button.outcomeIndex === selectedButton.outcomeIndex)
-      ?? option.buttons[0]
+    const preferredButton = resolvePreferredLinePickerButton(option.buttons, selectedButton)
     if (!preferredButton) {
       return
     }
 
+    suppressLinePickerScrollSync()
     onSelectButton(preferredButton.key, { panelMode: 'preserve' })
-  }, [linePickerOptions, onSelectButton, selectedButton])
+  }, [linePickerOptions, onSelectButton, selectedButton, suppressLinePickerScrollSync])
 
   const handlePickPreviousLine = useCallback(() => {
     if (activeLineOptionIndex <= 0) {
@@ -2939,12 +3150,13 @@ export function SportsGameDetailsPanel({
       return
     }
 
+    suppressLinePickerScrollSync()
     const targetLeft = activeButton.offsetLeft - ((scroller.clientWidth - activeButton.offsetWidth) / 2)
     scroller.scrollTo({
       left: Math.max(0, targetLeft),
       behavior,
     })
-  }, [activeLineOptionIndex, linePickerOptions])
+  }, [activeLineOptionIndex, linePickerOptions, suppressLinePickerScrollSync])
 
   const updateLinePickerSpacers = useCallback(() => {
     const scroller = linePickerScrollerRef.current
@@ -3035,6 +3247,10 @@ export function SportsGameDetailsPanel({
     }
 
     function handleScroll() {
+      if (Date.now() < linePickerSuppressScrollSyncUntilRef.current) {
+        return
+      }
+
       if (linePickerScrollSettleTimeoutRef.current) {
         clearTimeout(linePickerScrollSettleTimeoutRef.current)
       }
@@ -3329,7 +3545,12 @@ export function SportsGameDetailsPanel({
           )}
 
           {resolvedActiveDetailsTab === 'about' && aboutEvent && (
-            <SportsEventAboutPanel event={aboutEvent} market={selectedMarket} />
+            <SportsEventAboutPanel
+              event={aboutEvent}
+              rulesEvent={rulesEvent}
+              market={selectedMarket}
+              marketContextEnabled={marketContextEnabled}
+            />
           )}
         </>
       )}
@@ -3622,6 +3843,7 @@ export default function SportsGamesCenter({
   categoryTitleBySlug = {},
   initialWeek = null,
   vertical = 'sports',
+  showHeading = true,
 }: SportsGamesCenterProps) {
   const verticalConfig = getSportsVerticalConfig(vertical)
   const router = useRouter()
@@ -3649,6 +3871,9 @@ export default function SportsGamesCenter({
   const orderMarketConditionId = useOrder(state => state.market?.condition_id ?? null)
   const orderOutcomeIndex = useOrder(state => state.outcome?.outcome_index ?? null)
   const isLivePage = pageMode === 'live'
+  const isLiveAndSoonPage = pageMode === 'liveAndSoon'
+  const isSoonPage = pageMode === 'soon'
+  const isFeedPage = isLivePage || isLiveAndSoonPage || isSoonPage
   const normalizedCategoryTitleBySlug = useMemo(() => {
     return Object.fromEntries(
       Object.entries(categoryTitleBySlug).map(([slug, title]) => [slug.trim().toLowerCase(), title]),
@@ -3730,15 +3955,27 @@ export default function SportsGamesCenter({
   }, [showSpreadsAndTotals])
 
   const visibleCards = useMemo(() => {
-    if (isLivePage) {
+    if (isFeedPage) {
       return cards
     }
 
     return cards.filter(card => !isSportsGamesCardResolved(card))
-  }, [cards, isLivePage])
+  }, [cards, isFeedPage])
+
+  const pageCards = useMemo(() => {
+    if (isLivePage) {
+      return visibleCards.filter(card => isCardLiveNow(card, currentTimestampMs))
+    }
+
+    if (isSoonPage) {
+      return visibleCards.filter(card => isCardFuture(card, currentTimestampMs))
+    }
+
+    return visibleCards
+  }, [currentTimestampMs, isLivePage, isSoonPage, visibleCards])
 
   const weekOptions = useMemo(() => {
-    if (isLivePage) {
+    if (isFeedPage) {
       return []
     }
 
@@ -3749,14 +3986,14 @@ export default function SportsGamesCenter({
     ))
 
     return weeks.sort((a, b) => a - b)
-  }, [isLivePage, visibleCards])
+  }, [isFeedPage, visibleCards])
 
   const requestedWeekOption = useMemo(() => {
-    if (isLivePage || initialWeek == null || !Number.isFinite(initialWeek)) {
+    if (isFeedPage || initialWeek == null || !Number.isFinite(initialWeek)) {
       return null
     }
     return String(initialWeek)
-  }, [initialWeek, isLivePage])
+  }, [initialWeek, isFeedPage])
 
   const latestWeekOption = useMemo(
     () => (weekOptions.length > 0 ? String(weekOptions.at(-1)) : 'all'),
@@ -3769,7 +4006,7 @@ export default function SportsGamesCenter({
   )
 
   useEffect(() => {
-    if (isLivePage) {
+    if (isFeedPage) {
       setSelectedWeek('all')
       return
     }
@@ -3788,11 +4025,11 @@ export default function SportsGamesCenter({
         ? requestedWeekOption!
         : latestWeekOption)
     }
-  }, [isLivePage, latestWeekOption, requestedWeekOption, selectedWeek, weekOptions])
+  }, [isFeedPage, latestWeekOption, requestedWeekOption, selectedWeek, weekOptions])
 
   const weekFilteredCards = useMemo(() => {
-    if (isLivePage) {
-      return visibleCards
+    if (isFeedPage) {
+      return pageCards
     }
 
     if (selectedWeek === 'all') {
@@ -3801,7 +4038,7 @@ export default function SportsGamesCenter({
 
     const week = Number(selectedWeek)
     return visibleCards.filter(card => card.week === week)
-  }, [isLivePage, selectedWeek, visibleCards])
+  }, [isFeedPage, pageCards, selectedWeek, visibleCards])
 
   useEffect(() => {
     if (!isSearchOpen) {
@@ -3916,9 +4153,13 @@ export default function SportsGamesCenter({
 
   const emptyStateLabel = normalizedSearchQuery
     ? 'No games found for this search.'
-    : isLivePage
+    : isLiveAndSoonPage
       ? 'No live or upcoming games available.'
-      : 'No games available for this week.'
+      : isLivePage
+        ? 'No live games available.'
+        : isSoonPage
+          ? 'No upcoming games available.'
+          : 'No games available for this week.'
 
   useEffect(() => {
     if (openCardId && !filteredCards.some(card => card.id === openCardId)) {
@@ -4130,6 +4371,13 @@ export default function SportsGamesCenter({
           .sort((left, right) => left.label.localeCompare(right.label)),
       }))
   }, [dateLabelFormatter, resolveCardCategory, sortedFutureCards])
+  const hasFeedResults = isLiveAndSoonPage
+    ? liveCardsByCategory.length > 0 || startingSoonGroupsByDate.length > 0
+    : isLivePage
+      ? liveCardsByCategory.length > 0
+      : isSoonPage
+        ? startingSoonGroupsByDate.length > 0
+        : false
 
   const activeTradeContext = useMemo<SportsActiveTradeContext | null>(() => {
     if (filteredCards.length === 0) {
@@ -4217,6 +4465,24 @@ export default function SportsGamesCenter({
       outcome: matchedOutcome,
     }
   }, [activeTradeContext, orderMarketConditionId, orderOutcomeIndex])
+  const orderPanelOutcomeLabelOverrides = useMemo(
+    () => activeTradeContext
+      ? resolveOrderPanelOutcomeLabelOverrides(
+          activeTradeHeaderContext?.card ?? activeTradeContext.card,
+          activeTradeHeaderContext?.market ?? activeTradeContext.market,
+        )
+      : {},
+    [activeTradeContext, activeTradeHeaderContext],
+  )
+  const orderPanelOutcomeAccentOverrides = useMemo(
+    () => activeTradeContext
+      ? resolveOrderPanelOutcomeAccentOverrides(
+          activeTradeHeaderContext?.card ?? activeTradeContext.card,
+          activeTradeHeaderContext?.market ?? activeTradeContext.market,
+        )
+      : {},
+    [activeTradeContext, activeTradeHeaderContext],
+  )
 
   useEffect(() => {
     if (!activeTradeContext) {
@@ -4465,8 +4731,8 @@ export default function SportsGamesCenter({
             }
           }}
         >
-          <div className="mb-2 flex flex-col items-stretch justify-between gap-2.5 sm:flex-row sm:items-center">
-            <div className="flex min-w-0 items-center gap-2">
+          <div className="mb-2 flex items-start justify-between gap-2 sm:items-center">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               {options.topBadgeMode === 'live'
                 ? isFinalizedCard
                   ? (
@@ -4509,7 +4775,7 @@ export default function SportsGamesCenter({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 self-end sm:self-auto">
+            <div className="flex shrink-0 items-start gap-2 sm:items-center">
               {canWatchLivestream && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -4548,9 +4814,9 @@ export default function SportsGamesCenter({
                 onClick={event => event.stopPropagation()}
                 className={cn(
                   `
-                    hidden items-center gap-1 rounded-lg bg-secondary/80 px-2.5 py-1.5 text-xs font-semibold
+                    inline-flex shrink-0 items-center gap-1 rounded-lg bg-secondary/80 px-2 py-1.5 text-xs font-semibold
                     text-foreground transition-colors
-                    min-[1024px]:inline-flex
+                    sm:px-2.5
                   `,
                   'hover:bg-secondary hover:ring-1 hover:ring-border',
                 )}
@@ -4801,7 +5067,12 @@ export default function SportsGamesCenter({
                       key={`${card.id}-${column.key}`}
                       className={cn(
                         'w-full gap-2',
-                        isMoneylineOnlyLayout ? 'flex flex-wrap justify-end' : 'flex flex-col',
+                        isMoneylineOnlyLayout
+                          ? cn(
+                              'grid sm:flex sm:flex-wrap sm:justify-end',
+                              resolveMoneylineButtonGridClass(renderedButtons.length),
+                            )
+                          : 'flex flex-col',
                       )}
                     >
                       {renderedButtons.map((button) => {
@@ -4820,7 +5091,9 @@ export default function SportsGamesCenter({
                             key={button.key}
                             className={cn(
                               'relative overflow-hidden rounded-lg pb-1.25',
-                              isMoneylineOnlyLayout ? 'min-w-[88px] shrink-0 sm:min-w-[104px]' : 'w-full',
+                              isMoneylineOnlyLayout
+                                ? 'w-full min-w-0 sm:w-auto sm:min-w-[104px] sm:shrink-0'
+                                : 'w-full',
                             )}
                           >
                             <div
@@ -4949,7 +5222,7 @@ export default function SportsGamesCenter({
       <div
         ref={searchShellRef}
         className={cn(
-          'relative flex items-center',
+          'relative isolate z-0 flex items-center',
           isPillVariant ? 'h-12' : 'h-11',
           className,
         )}
@@ -5016,7 +5289,7 @@ export default function SportsGamesCenter({
           }}
           className={cn(
             headerIconButtonClass,
-            'relative z-20',
+            'relative',
             isSearchOpen && 'pointer-events-none opacity-0',
             isPillVariant && 'size-12 rounded-sm border-0 bg-transparent text-foreground hover:bg-card',
           )}
@@ -5084,36 +5357,50 @@ export default function SportsGamesCenter({
     <>
       <div className="
         min-[1200px]:grid min-[1200px]:h-full min-[1200px]:min-h-0 min-[1200px]:grid-cols-[minmax(0,1fr)_21.25rem]
-        min-[1200px]:[align-content:start] min-[1200px]:[align-items:start] min-[1200px]:gap-6
+        min-[1200px]:grid-rows-[minmax(0,1fr)] min-[1200px]:[align-content:start] min-[1200px]:items-stretch
+        min-[1200px]:gap-6
       "
       >
         <section
           data-sports-scroll-pane="center"
           className="
             min-w-0
-            min-[1200px]:min-h-0 min-[1200px]:self-stretch min-[1200px]:overflow-y-auto min-[1200px]:overscroll-contain
-            min-[1200px]:pr-1
-            lg:ml-4
+            min-[1200px]:ml-4 min-[1200px]:min-h-0 min-[1200px]:self-stretch min-[1200px]:overflow-y-auto
+            min-[1200px]:overscroll-contain min-[1200px]:pr-1
           "
         >
-          <div className="mb-4">
-            <div className={cn(
-              'mb-3 flex items-start justify-between gap-3',
-              !isLivePage && 'lg:mt-2',
-            )}
-            >
-              <h1 className="text-3xl font-semibold tracking-tight text-foreground">
+          <div className="mb-3">
+            {showHeading
+              ? (
+                  <div className={cn(
+                    'mb-3 flex items-start justify-between gap-3',
+                    !isFeedPage && 'min-[1200px]:mt-2',
+                  )}
+                  >
+                    <h1 className="text-3xl font-semibold tracking-tight text-foreground">
+                      {sportTitle}
+                    </h1>
+
+                    <div className="flex items-center gap-2">
+                      {isFeedPage && renderSearchControl()}
+                      {renderSettingsMenu()}
+                    </div>
+                  </div>
+                )
+              : (
+                  <div className="mb-3 flex items-center justify-end gap-2">
+                    {isFeedPage && renderSearchControl()}
+                    {renderSettingsMenu()}
+                  </div>
+                )}
+            {!showHeading && !isFeedPage && (
+              <div className="sr-only">
                 {sportTitle}
-              </h1>
-
-              <div className="flex items-center gap-2">
-                {isLivePage && renderSearchControl()}
-                {renderSettingsMenu()}
               </div>
-            </div>
+            )}
 
-            {!isLivePage && (
-              <div className="mb-4 flex flex-wrap items-center gap-3">
+            {!isFeedPage && (
+              <div className="mb-3 flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
@@ -5143,19 +5430,19 @@ export default function SportsGamesCenter({
             )}
           </div>
 
-          {!isLivePage && groupedCards.length === 0 && (
+          {!isFeedPage && groupedCards.length === 0 && (
             <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
               {emptyStateLabel}
             </div>
           )}
 
-          {isLivePage && liveCardsByCategory.length === 0 && startingSoonGroupsByDate.length === 0 && (
+          {isFeedPage && !hasFeedResults && (
             <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
               {emptyStateLabel}
             </div>
           )}
 
-          {!isLivePage
+          {!isFeedPage
             ? (
                 <div className="space-y-5">
                   {groupedCards.map(group => (
@@ -5181,42 +5468,35 @@ export default function SportsGamesCenter({
                   ))}
                 </div>
               )
-            : (
-                <div className="space-y-6">
-                  {liveCardsByCategory.length > 0
-                    ? (
-                        <div className="space-y-5">
-                          {liveCardsByCategory.map(categoryGroup => (
-                            <div key={`live-${categoryGroup.key}`}>
-                              <div className="mb-2 flex items-end justify-between gap-3">
-                                <p className="text-base font-semibold text-foreground">
-                                  {categoryGroup.label}
-                                </p>
-                                {renderMarketColumnsHeader(`live-${categoryGroup.key}`, categoryGroup.cards)}
-                              </div>
+            : isLivePage
+              ? (
+                  <div className="space-y-5">
+                    {liveCardsByCategory.map(categoryGroup => (
+                      <div key={`live-${categoryGroup.key}`}>
+                        <div className="mb-2 flex items-end justify-between gap-3">
+                          <p className="text-base font-semibold text-foreground">
+                            {categoryGroup.label}
+                          </p>
+                          {renderMarketColumnsHeader(`live-${categoryGroup.key}`, categoryGroup.cards)}
+                        </div>
 
-                              <div className="space-y-2">
-                                {categoryGroup.cards.map(card => (
-                                  <div key={card.id}>
-                                    {renderCard(card, {
-                                      topBadgeMode: 'live',
-                                      categoryLabel: categoryGroup.label,
-                                    })}
-                                  </div>
-                                ))}
-                              </div>
+                        <div className="space-y-2">
+                          {categoryGroup.cards.map(card => (
+                            <div key={card.id}>
+                              {renderCard(card, {
+                                topBadgeMode: 'live',
+                                categoryLabel: categoryGroup.label,
+                              })}
                             </div>
                           ))}
                         </div>
-                      )
-                    : null}
-
-                  {startingSoonGroupsByDate.length > 0 && (
+                      </div>
+                    ))}
+                  </div>
+                )
+              : isSoonPage
+                ? (
                     <div className="space-y-3">
-                      <h2 className="text-2xl font-semibold tracking-tight text-foreground">
-                        Upcoming Games
-                      </h2>
-
                       {startingSoonGroupsByDate.map(dateGroup => (
                         <div key={`soon-${dateGroup.key}`} className="space-y-2.5">
                           <p className="text-lg font-semibold text-foreground">
@@ -5252,9 +5532,81 @@ export default function SportsGamesCenter({
                         </div>
                       ))}
                     </div>
+                  )
+                : (
+                    <div className="space-y-6">
+                      {liveCardsByCategory.length > 0
+                        ? (
+                            <div className="space-y-5">
+                              {liveCardsByCategory.map(categoryGroup => (
+                                <div key={`live-${categoryGroup.key}`}>
+                                  <div className="mb-2 flex items-end justify-between gap-3">
+                                    <p className="text-base font-semibold text-foreground">
+                                      {categoryGroup.label}
+                                    </p>
+                                    {renderMarketColumnsHeader(`live-${categoryGroup.key}`, categoryGroup.cards)}
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    {categoryGroup.cards.map(card => (
+                                      <div key={card.id}>
+                                        {renderCard(card, {
+                                          topBadgeMode: 'live',
+                                          categoryLabel: categoryGroup.label,
+                                        })}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )
+                        : null}
+
+                      {startingSoonGroupsByDate.length > 0 && (
+                        <div className="space-y-3">
+                          <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+                            Upcoming Games
+                          </h2>
+
+                          {startingSoonGroupsByDate.map(dateGroup => (
+                            <div key={`soon-${dateGroup.key}`} className="space-y-2.5">
+                              <p className="text-lg font-semibold text-foreground">
+                                {dateGroup.label}
+                              </p>
+
+                              <div className="space-y-3">
+                                {dateGroup.categories.map(categoryGroup => (
+                                  <div key={`soon-${dateGroup.key}-${categoryGroup.key}`}>
+                                    <div className="mb-1.5 flex items-end justify-between gap-3">
+                                      <p className="text-base font-semibold text-foreground">
+                                        {categoryGroup.label}
+                                      </p>
+                                      {renderMarketColumnsHeader(
+                                        `soon-${dateGroup.key}-${categoryGroup.key}`,
+                                        categoryGroup.cards,
+                                      )}
+                                    </div>
+
+                                    <div className="space-y-2">
+                                      {categoryGroup.cards.map(card => (
+                                        <div key={card.id}>
+                                          {renderCard(card, {
+                                            topBadgeMode: 'time',
+                                            categoryLabel: categoryGroup.label,
+                                          })}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
         </section>
 
         <aside
@@ -5273,6 +5625,8 @@ export default function SportsGamesCenter({
                     event={activeTradeContext.card.event}
                     oddsFormat={oddsFormat}
                     outcomeButtonStyleVariant="sports3d"
+                    outcomeLabelOverrides={orderPanelOutcomeLabelOverrides}
+                    outcomeAccentOverrides={orderPanelOutcomeAccentOverrides}
                     desktopMarketInfo={(
                       <SportsOrderPanelMarketInfo
                         card={activeTradeHeaderContext?.card ?? activeTradeContext.card}
@@ -5297,8 +5651,11 @@ export default function SportsGamesCenter({
       {isMobile && activeTradeContext && (
         <EventOrderPanelMobile
           event={activeTradeContext.card.event}
+          showDefaultTrigger={false}
           oddsFormat={oddsFormat}
           outcomeButtonStyleVariant="sports3d"
+          outcomeLabelOverrides={orderPanelOutcomeLabelOverrides}
+          outcomeAccentOverrides={orderPanelOutcomeAccentOverrides}
           mobileMarketInfo={(
             <SportsOrderPanelMarketInfo
               card={activeTradeHeaderContext?.card ?? activeTradeContext.card}

@@ -1,3 +1,4 @@
+import type { SportsMenuActiveCountRow } from '@/lib/sports-menu-counts'
 import type { SportsMenuEntry } from '@/lib/sports-menu-types'
 import type { SportsSlugMappingEntry } from '@/lib/sports-slug-mapping'
 import type { SportsVertical } from '@/lib/sports-vertical'
@@ -14,11 +15,14 @@ import { runQuery } from '@/lib/db/utils/run-query'
 import { db } from '@/lib/drizzle'
 import { normalizeComparableValue, slugifyText } from '@/lib/slug'
 import { SPORTS_AUXILIARY_SLUG_SQL_REGEX } from '@/lib/sports-event-slugs'
+import {
+  buildSportsMenuCountsBySlug,
+
+} from '@/lib/sports-menu-counts'
 import { buildSportsSidebarEntries } from '@/lib/sports-sidebar-entries'
 import {
   buildSportsSlugResolver,
   resolveCanonicalSportsSlugAlias,
-  resolveCanonicalSportsSportSlug,
 } from '@/lib/sports-slug-mapping'
 
 interface SportsMenuItemRow {
@@ -35,13 +39,6 @@ interface SportsMenuItemRow {
   games_enabled: boolean
   props_enabled: boolean
   sort_order: number
-}
-
-interface ActiveSportsCountRow {
-  slug: string | null
-  series_slug: string | null
-  tags: unknown
-  is_hidden: boolean
 }
 
 export interface SportsMenuLayoutData {
@@ -184,13 +181,22 @@ const getCachedSportsMenuRows = unstable_cache(
 )
 
 const getCachedActiveSportsCountRows = unstable_cache(
-  async (): Promise<ActiveSportsCountRow[]> => {
+  async (): Promise<SportsMenuActiveCountRow[]> => {
     const rows = await db
       .select({
         slug: event_sports.sports_sport_slug,
         series_slug: event_sports.sports_series_slug,
+        event_slug: events.slug,
+        sports_event_id: event_sports.sports_event_id,
+        sports_event_slug: event_sports.sports_event_slug,
+        parent_event_id: event_sports.sports_parent_event_id,
         tags: event_sports.sports_tags,
         is_hidden: events.is_hidden,
+        sports_live: event_sports.sports_live,
+        sports_ended: event_sports.sports_ended,
+        sports_start_time: event_sports.sports_start_time,
+        start_date: events.start_date,
+        end_date: events.end_date,
       })
       .from(event_sports)
       .innerJoin(events, eq(event_sports.event_id, events.id))
@@ -275,33 +281,6 @@ function toMappingEntries(rows: SportsMenuItemRow[]) {
   return mappings
 }
 
-function buildCountsBySlug(
-  resolver: ReturnType<typeof buildSportsSlugResolver>,
-  activeCountRows: ActiveSportsCountRow[],
-) {
-  const countsBySlug: Record<string, number> = {}
-
-  for (const row of activeCountRows) {
-    if (row.is_hidden) {
-      continue
-    }
-
-    const sportsTags = toOptionalStringArray(row.tags)
-    const canonicalSlug = resolveCanonicalSportsSportSlug(resolver, {
-      sportsSportSlug: row.slug,
-      sportsSeriesSlug: row.series_slug,
-      sportsTags,
-    })
-    if (!canonicalSlug) {
-      continue
-    }
-
-    countsBySlug[canonicalSlug] = (countsBySlug[canonicalSlug] ?? 0) + 1
-  }
-
-  return countsBySlug
-}
-
 function findDefaultLandingHref(menuEntries: SportsMenuEntry[]) {
   for (const entry of menuEntries) {
     if (entry.type === 'link') {
@@ -335,13 +314,14 @@ export async function getSportsSlugResolverFromDb() {
   return buildSportsSlugResolver(mappingEntries)
 }
 
-export async function getSportsCountsBySlugFromDb() {
+export async function getSportsCountsBySlugFromDb(vertical: SportsVertical = 'sports') {
   const [rows, activeCountRows] = await Promise.all([
     getCachedSportsMenuRows(),
     getCachedActiveSportsCountRows(),
   ])
   const resolver = buildSportsSlugResolver(toMappingEntries(rows))
-  return buildCountsBySlug(resolver, activeCountRows)
+  const menuEntries = buildSportsSidebarEntries(rows, vertical)
+  return buildSportsMenuCountsBySlug(resolver, activeCountRows, menuEntries)
 }
 
 export const SportsMenuRepository = {
@@ -370,7 +350,7 @@ export const SportsMenuRepository = {
       ])
       const resolver = buildSportsSlugResolver(toMappingEntries(rows))
       const menuEntries = buildSportsSidebarEntries(rows, vertical)
-      const countsBySlug = buildCountsBySlug(resolver, activeCountRows)
+      const countsBySlug = buildSportsMenuCountsBySlug(resolver, activeCountRows, menuEntries)
 
       return {
         data: {
