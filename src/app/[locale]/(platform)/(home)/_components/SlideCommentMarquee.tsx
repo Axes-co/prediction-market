@@ -88,10 +88,7 @@ export default function SlideCommentMarquee({ event }: SlideCommentMarqueeProps)
       className="relative h-full overflow-hidden"
       style={{ maskImage: 'linear-gradient(transparent 0px, black 40px, black 100%)' }}
     >
-      <div
-        className="flex shrink-0 flex-col will-change-transform"
-        style={{ animation: 'marquee-vertical 25s linear infinite' }}
-      >
+      <div className="flex shrink-0 animate-marquee-vertical flex-col will-change-transform hover:paused">
         {duplicated.map((comment, i) => (
           <CommentRow
             key={`${comment.id}-${i}`}

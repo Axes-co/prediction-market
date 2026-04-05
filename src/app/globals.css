@@ -239,6 +239,10 @@
   animation: trade-flow-rise 8s ease-out forwards;
 }
 
+@utility animate-marquee-vertical {
+  animation: marquee-vertical 25s linear infinite;
+}
+
 @utility text-2xs {
   font-size: 10px;
 }
