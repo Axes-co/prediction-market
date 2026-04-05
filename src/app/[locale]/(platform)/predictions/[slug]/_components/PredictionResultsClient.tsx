@@ -254,16 +254,26 @@ function PredictionTagBar({
   return (
     <div className="relative">
       <div
-        className="absolute left-0 top-0 bottom-0 w-8 md:w-16 bg-gradient-to-r from-background to-transparent z-[2] pointer-events-none transition-opacity duration-200 via-background opacity-0"
+        className="
+          pointer-events-none absolute inset-y-0 left-0 z-2 w-8 bg-linear-to-r from-background via-background
+          to-transparent opacity-0 transition-opacity duration-200
+          md:w-16
+        "
       />
       <div
         ref={scrollRef}
-        className="flex items-center justify-start gap-2 overflow-x-auto snap-x scroll-px-3 snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="
+          flex snap-x snap-mandatory scroll-px-3 items-center justify-start gap-2 overflow-x-auto [scrollbar-width:none]
+          [&::-webkit-scrollbar]:hidden
+        "
       >
         <AppLink
           href={'/predictions' as never}
           className={cn(
-            'inline-flex items-center shrink-0 h-8 rounded-sm px-3 text-[13px] font-semibold whitespace-nowrap transition-colors duration-150',
+            `
+              inline-flex h-8 shrink-0 items-center rounded-sm px-3 text-[13px] font-semibold whitespace-nowrap
+              transition-colors duration-150
+            `,
             isAllActive
               ? 'bg-muted text-foreground'
               : 'text-muted-foreground hover:bg-muted/50',
@@ -278,7 +288,10 @@ function PredictionTagBar({
               key={tag.slug}
               href={`/predictions/${tag.slug}` as never}
               className={cn(
-                'inline-flex items-center shrink-0 h-8 rounded-sm px-3 text-[13px] font-semibold whitespace-nowrap tracking-[-0.09px] transition-colors duration-150',
+                `
+                  inline-flex h-8 shrink-0 items-center rounded-sm px-3 text-[13px] font-semibold tracking-[-0.09px]
+                  whitespace-nowrap transition-colors duration-150
+                `,
                 activeTag === tag.slug
                   ? 'bg-muted text-foreground'
                   : 'text-muted-foreground hover:bg-muted/50',
@@ -294,11 +307,21 @@ function PredictionTagBar({
             type="button"
             aria-label="Scroll right"
             onClick={handleScrollRight}
-            className="hidden lg:flex items-center justify-center absolute right-0 top-1/2 -translate-y-1/2 z-[3] text-muted-foreground cursor-pointer hover:text-foreground size-7"
+            className="
+              absolute top-1/2 right-0 z-3 hidden size-7 -translate-y-1/2 cursor-pointer items-center justify-center
+              text-muted-foreground
+              hover:text-foreground
+              lg:flex
+            "
           >
             <ChevronRightIcon className="size-[18px]" />
           </button>
-          <div className="absolute right-0 top-0 bottom-0 w-8 md:w-16 bg-gradient-to-l from-background to-transparent z-[2] pointer-events-none transition-opacity duration-200 via-background" />
+          <div className="
+            pointer-events-none absolute inset-y-0 right-0 z-2 w-8 bg-linear-to-l from-background via-background
+            to-transparent transition-opacity duration-200
+            md:w-16
+          "
+          />
         </>
       )}
     </div>

@@ -124,6 +124,7 @@ describe('predictionResultsClient', () => {
   it('debounces search navigation and preserves active filters in the url', async () => {
     render(
       <PredictionResultsClient
+        navigationTags={[]}
         displayLabel="Test"
         initialCurrentTimestamp={Date.parse('2026-03-25T12:00:00.000Z')}
         initialEvents={[]}
@@ -160,6 +161,7 @@ describe('predictionResultsClient', () => {
   it('does not replace the route on mount when the current filtered url is already in sync', () => {
     render(
       <PredictionResultsClient
+        navigationTags={[]}
         displayLabel="Test"
         initialCurrentTimestamp={Date.parse('2026-03-25T12:00:00.000Z')}
         initialEvents={[]}
@@ -180,6 +182,7 @@ describe('predictionResultsClient', () => {
 
     render(
       <PredictionResultsClient
+        navigationTags={[]}
         displayLabel="Test"
         initialCurrentTimestamp={Date.parse('2026-03-25T12:00:00.000Z')}
         initialEvents={[]}
@@ -200,6 +203,7 @@ describe('predictionResultsClient', () => {
 
     render(
       <PredictionResultsClient
+        navigationTags={[]}
         displayLabel="Test"
         initialCurrentTimestamp={Date.parse('2026-03-25T12:00:00.000Z')}
         initialEvents={[]}
@@ -281,6 +285,7 @@ describe('predictionResultsClient', () => {
 
     render(
       <PredictionResultsClient
+        navigationTags={[]}
         displayLabel="Meta"
         initialCurrentTimestamp={Date.parse('2026-03-25T12:00:00.000Z')}
         initialEvents={[]}
@@ -338,6 +343,7 @@ describe('predictionResultsClient', () => {
 
     render(
       <PredictionResultsClient
+        navigationTags={[]}
         displayLabel="Meta"
         initialCurrentTimestamp={Date.parse('2026-03-25T12:00:00.000Z')}
         initialEvents={[]}
@@ -395,6 +401,7 @@ describe('predictionResultsClient', () => {
 
     render(
       <PredictionResultsClient
+        navigationTags={[]}
         displayLabel="Meta"
         initialCurrentTimestamp={Date.parse('2026-03-25T12:00:00.000Z')}
         initialEvents={[]}
@@ -453,6 +460,7 @@ describe('predictionResultsClient', () => {
 
     render(
       <PredictionResultsClient
+        navigationTags={[]}
         displayLabel="Meta"
         initialCurrentTimestamp={Date.parse('2026-03-25T12:00:00.000Z')}
         initialEvents={[]}
@@ -526,6 +534,7 @@ describe('predictionResultsClient', () => {
 
     render(
       <PredictionResultsClient
+        navigationTags={[]}
         displayLabel="Meta"
         initialCurrentTimestamp={Date.parse('2026-03-25T12:00:00.000Z')}
         initialEvents={[]}
@@ -545,6 +554,7 @@ describe('predictionResultsClient', () => {
   it('renders the desktop aside shell and the mobile drawer trigger', () => {
     render(
       <PredictionResultsClient
+        navigationTags={[]}
         displayLabel="Test"
         initialCurrentTimestamp={Date.parse('2026-03-25T12:00:00.000Z')}
         initialEvents={[]}
@@ -566,6 +576,7 @@ describe('predictionResultsClient', () => {
 
     render(
       <PredictionResultsClient
+        navigationTags={[]}
         displayLabel="Test"
         initialCurrentTimestamp={Date.parse('2026-03-25T12:00:00.000Z')}
         initialEvents={[]}
@@ -586,6 +597,7 @@ describe('predictionResultsClient', () => {
   it('fetches the next page when the infinite-scroll sentinel intersects', async () => {
     render(
       <PredictionResultsClient
+        navigationTags={[]}
         displayLabel="Test"
         initialCurrentTimestamp={Date.parse('2026-03-25T12:00:00.000Z')}
         initialEvents={[]}
