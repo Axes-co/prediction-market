@@ -6,6 +6,7 @@ export const PREDICTION_RESULTS_INTERNAL_ROUTE_SEGMENT = 'route-filters'
 
 export const PREDICTION_RESULTS_SORT_OPTIONS = [
   'trending',
+  'liquidity',
   'volume',
   'newest',
   'ending-soon',
@@ -44,6 +45,10 @@ function trimTrailingSlash(pathname: string) {
 
 export function parsePredictionResultsSort(value: string | null | undefined): PredictionResultsSortOption {
   const normalized = normalizeRouteFilterValue(value)
+
+  if (normalized === 'liquidity') {
+    return 'liquidity'
+  }
 
   if (normalized === 'volume' || normalized === 'total-volume') {
     return 'volume'
@@ -86,6 +91,7 @@ export function resolvePredictionResultsApiSort(sort: PredictionResultsSortOptio
       return 'created_at'
     case 'ending-soon':
       return 'end_date'
+    case 'liquidity':
     case 'competitive':
     case 'trending':
     default:

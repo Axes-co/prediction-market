@@ -47,6 +47,8 @@ export default async function HomeContent({
     initialEvents = []
   }
 
+  const heroEvents = initialEvents.slice(0, 6)
+
   return (
     <main className="container grid gap-4 py-4">
       <HomeClient
@@ -54,6 +56,7 @@ export default async function HomeContent({
         initialCurrentTimestamp={initialCurrentTimestamp}
         initialTag={initialTagSlug}
         initialMainTag={initialMainTagSlug}
+        heroEvents={heroEvents}
       />
     </main>
   )

@@ -4,6 +4,7 @@ import type { LucideIcon } from 'lucide-react'
 import type { PredictionResultsSortOption, PredictionResultsStatusOption } from '@/lib/prediction-results-filters'
 import {
   Clock3Icon,
+  DropletIcon,
   FlameIcon,
   HandFistIcon,
   SearchIcon,
@@ -40,6 +41,7 @@ export default function PredictionResultsFilters({
     label: string
   }> = [
     { value: 'trending', icon: TrendingUpIcon, label: t('Trending') },
+    { value: 'liquidity', icon: DropletIcon, label: t('Liquidity') },
     { value: 'volume', icon: FlameIcon, label: t('Volume') },
     { value: 'newest', icon: SparkleIcon, label: t('Newest') },
     { value: 'ending-soon', icon: Clock3Icon, label: t('Ending Soon') },

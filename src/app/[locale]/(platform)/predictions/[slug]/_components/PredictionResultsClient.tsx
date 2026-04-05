@@ -10,7 +10,7 @@ import { useAppKitAccount } from '@reown/appkit/react'
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query'
 import { BookmarkIcon, CheckIcon, ChevronRightIcon, Clock3Icon, FlameIcon, MessageCircleIcon, SearchIcon, Settings2Icon, XIcon } from 'lucide-react'
 import { useExtracted, useLocale } from 'next-intl'
-import { startTransition, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useCommentMetrics } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useCommentMetrics'
 import { resolveResolvedOrderPanelDisplay } from '@/app/[locale]/(platform)/event/[slug]/_utils/resolved-order-panel-market'
 import PredictionResultsFilters from '@/app/[locale]/(platform)/predictions/[slug]/_components/PredictionResultsFilters'
@@ -46,6 +46,11 @@ import {
 import { buildPredictionResultsPath } from '@/lib/prediction-search'
 import { cn } from '@/lib/utils'
 
+interface NavigationTagItem {
+  slug: string
+  name: string
+}
+
 interface PredictionResultsClientProps {
   displayLabel: string
   initialCurrentTimestamp: number | null
@@ -54,6 +59,7 @@ interface PredictionResultsClientProps {
   initialQuery: string
   initialSort: PredictionResultsSortOption
   initialStatus: PredictionResultsStatusOption
+  navigationTags: NavigationTagItem[]
   routeMainTag: string
   routeTag: string
 }
@@ -201,6 +207,104 @@ function filterPredictionEventsByStatus(events: Event[], status: PredictionResul
   })
 }
 
+// ---------------------------------------------------------------------------
+// Horizontal tag pill bar (Polymarket-style category navigation)
+// ---------------------------------------------------------------------------
+
+function PredictionTagBar({
+  tags,
+  activeTag,
+}: {
+  tags: NavigationTagItem[]
+  activeTag: string
+}) {
+  const t = useExtracted()
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [canScrollRight, setCanScrollRight] = useState(false)
+
+  const updateScrollState = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) {
+      return
+    }
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4)
+  }, [])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) {
+      return
+    }
+    updateScrollState()
+    el.addEventListener('scroll', updateScrollState, { passive: true })
+    const resizeObserver = new ResizeObserver(updateScrollState)
+    resizeObserver.observe(el)
+    return () => {
+      el.removeEventListener('scroll', updateScrollState)
+      resizeObserver.disconnect()
+    }
+  }, [updateScrollState])
+
+  function handleScrollRight() {
+    scrollRef.current?.scrollBy({ left: 200, behavior: 'smooth' })
+  }
+
+  const isAllActive = activeTag === 'trending'
+
+  return (
+    <div className="relative">
+      <div
+        className="absolute left-0 top-0 bottom-0 w-8 md:w-16 bg-gradient-to-r from-background to-transparent z-[2] pointer-events-none transition-opacity duration-200 via-background opacity-0"
+      />
+      <div
+        ref={scrollRef}
+        className="flex items-center justify-start gap-2 overflow-x-auto snap-x scroll-px-3 snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        <AppLink
+          href={'/predictions' as never}
+          className={cn(
+            'inline-flex items-center shrink-0 h-8 rounded-sm px-3 text-[13px] font-semibold whitespace-nowrap transition-colors duration-150',
+            isAllActive
+              ? 'bg-muted text-foreground'
+              : 'text-muted-foreground hover:bg-muted/50',
+          )}
+        >
+          {t('All')}
+        </AppLink>
+        {tags
+          .filter(tag => tag.slug !== 'trending' && tag.slug !== 'new')
+          .map(tag => (
+            <AppLink
+              key={tag.slug}
+              href={`/predictions/${tag.slug}` as never}
+              className={cn(
+                'inline-flex items-center shrink-0 h-8 rounded-sm px-3 text-[13px] font-semibold whitespace-nowrap tracking-[-0.09px] transition-colors duration-150',
+                activeTag === tag.slug
+                  ? 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:bg-muted/50',
+              )}
+            >
+              {tag.name}
+            </AppLink>
+          ))}
+      </div>
+      {canScrollRight && (
+        <>
+          <button
+            type="button"
+            aria-label="Scroll right"
+            onClick={handleScrollRight}
+            className="hidden lg:flex items-center justify-center absolute right-0 top-1/2 -translate-y-1/2 z-[3] text-muted-foreground cursor-pointer hover:text-foreground size-7"
+          >
+            <ChevronRightIcon className="size-[18px]" />
+          </button>
+          <div className="absolute right-0 top-0 bottom-0 w-8 md:w-16 bg-gradient-to-l from-background to-transparent z-[2] pointer-events-none transition-opacity duration-200 via-background" />
+        </>
+      )}
+    </div>
+  )
+}
+
 async function fetchPredictionResults({
   currentTimestamp,
   locale,
@@ -252,6 +356,7 @@ export default function PredictionResultsClient({
   initialQuery,
   initialSort,
   initialStatus,
+  navigationTags,
   routeMainTag,
   routeTag,
 }: PredictionResultsClientProps) {
@@ -571,6 +676,12 @@ export default function PredictionResultsClient({
             </Drawer>
           </div>
         </header>
+
+        {navigationTags.length > 0 && (
+          <div className="mb-5">
+            <PredictionTagBar tags={navigationTags} activeTag={routeTag} />
+          </div>
+        )}
 
         {showInitialSkeleton && (
           <PredictionResultsListSkeleton />

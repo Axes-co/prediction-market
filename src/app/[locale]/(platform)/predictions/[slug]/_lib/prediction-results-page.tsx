@@ -25,8 +25,10 @@ async function getPredictionPageContext(locale: SupportedLocale, slug: string) {
     newLabel: t('New'),
     trendingLabel: t('Trending'),
   })
+  const searchContext = resolvePredictionSearchContext(tags, slug)
+  const navigationTags = tags.map(tag => ({ slug: tag.slug, name: tag.name }))
 
-  return resolvePredictionSearchContext(tags, slug)
+  return { ...searchContext, navigationTags }
 }
 
 export async function generatePredictionResultsMetadata({
@@ -96,6 +98,7 @@ export async function renderPredictionResultsPage({
         initialQuery={context.query}
         initialSort={initialSort}
         initialStatus={initialStatus}
+        navigationTags={context.navigationTags}
         routeMainTag={context.mainTag}
         routeTag={context.tag}
       />

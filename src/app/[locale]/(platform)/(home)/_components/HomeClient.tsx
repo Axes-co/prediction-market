@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CategorySidebar from '@/app/[locale]/(platform)/(home)/_components/CategorySidebar'
 import EventsGrid from '@/app/[locale]/(platform)/(home)/_components/EventsGrid'
 import FilterToolbar from '@/app/[locale]/(platform)/(home)/_components/FilterToolbar'
+import HeroSection from '@/app/[locale]/(platform)/(home)/_components/HeroSection'
 import HomeSecondaryNavigation from '@/app/[locale]/(platform)/(home)/_components/HomeSecondaryNavigation'
 import { DEFAULT_FILTERS, useFilters } from '@/app/[locale]/(platform)/_providers/FilterProvider'
 import { usePlatformNavigationData } from '@/app/[locale]/(platform)/_providers/PlatformNavigationProvider'
@@ -19,6 +20,7 @@ interface HomeClientProps {
   initialCurrentTimestamp: number | null
   initialTag?: string
   initialMainTag?: string
+  heroEvents?: Event[]
 }
 
 function createHomeRouteFilters(targetTag: string, targetMainTag: string): FilterState {
@@ -34,6 +36,7 @@ export default function HomeClient({
   initialCurrentTimestamp,
   initialTag,
   initialMainTag,
+  heroEvents = [],
 }: HomeClientProps) {
   const pathname = usePathname()
   const router = useRouter()
@@ -198,6 +201,10 @@ export default function HomeClient({
 
   return (
     <>
+      {pathState.isHomePage && heroEvents.length > 0 && (
+        <HeroSection heroEvents={heroEvents} />
+      )}
+
       <div className="flex min-w-0 gap-6 lg:items-start lg:gap-10">
         {categorySidebar && (
           <CategorySidebar
