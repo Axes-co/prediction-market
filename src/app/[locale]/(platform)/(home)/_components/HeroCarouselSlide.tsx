@@ -5,7 +5,7 @@ import type { Event, Market, Outcome } from '@/types'
 import { LinkIcon, RepeatIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import Image from 'next/image'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import HeroCarouselSlideChart from '@/app/[locale]/(platform)/(home)/_components/HeroCarouselSlideChart'
 import HeroLiveChartPanel from '@/app/[locale]/(platform)/(home)/_components/HeroLiveChartPanel'
 import SlideCommentMarquee from '@/app/[locale]/(platform)/(home)/_components/SlideCommentMarquee'
@@ -481,6 +481,14 @@ function SportsScoreboard({
 // ---------------------------------------------------------------------------
 
 export default function HeroCarouselSlide({ event, isActive }: HeroCarouselSlideProps) {
+  // Lazy-load: only mount data-fetching children once the slide has been active.
+  // Prevents all slides from hitting APIs simultaneously on page load.
+  const hasBeenActiveRef = useRef(false)
+  if (isActive) {
+    hasBeenActiveRef.current = true
+  }
+  const shouldRenderContent = hasBeenActiveRef.current
+
   const homeSportsMoneylineModel = useMemo(() => buildHomeSportsMoneylineModel(event), [event])
   const chanceByMarket = useMemo(() => buildChanceByMarket(event.markets), [event.markets])
   const getDisplayChance = useCallback((marketId: string) => chanceByMarket[marketId] ?? 0, [chanceByMarket])
@@ -517,32 +525,34 @@ export default function HeroCarouselSlide({ event, isActive }: HeroCarouselSlide
             ? <SportsMoneylineButtons event={event} model={homeSportsMoneylineModel} heightClass={HERO_SPORTS_BUTTON_HEIGHT} />
             : <SlideOutcomes event={event} getDisplayChance={getDisplayChance} />}
 
-          {/* Comment marquee */}
+          {/* Comment marquee — lazy-loaded */}
           <div className="hidden min-h-0 flex-1 overflow-hidden lg:flex">
-            <SlideCommentMarquee event={event} />
+            {shouldRenderContent && <SlideCommentMarquee event={event} />}
           </div>
         </div>
 
-        {/* RIGHT 60% — chart rendering per layout type */}
+        {/* RIGHT 60% — chart rendering per layout type (lazy-loaded) */}
         <div className="relative hidden h-full min-h-0 flex-1 flex-col justify-center lg:flex">
-          {layout === 'sports' && homeSportsMoneylineModel
-            ? (
-                <>
-                  <SportsScoreboard event={event} model={homeSportsMoneylineModel} />
-                  <div className="hidden min-h-0 flex-1 pt-2 lg:block">
-                    <HeroCarouselSlideChart event={event} isActive={isActive} variant="sports" sportsModel={homeSportsMoneylineModel} />
-                  </div>
-                </>
-              )
-            : layout === 'live-chart'
+          {shouldRenderContent && (
+            layout === 'sports' && homeSportsMoneylineModel
               ? (
-                  <HeroLiveChartPanel event={event} isActive={isActive} />
+                  <>
+                    <SportsScoreboard event={event} model={homeSportsMoneylineModel} />
+                    <div className="hidden min-h-0 flex-1 pt-2 lg:block">
+                      <HeroCarouselSlideChart event={event} isActive={isActive} variant="sports" sportsModel={homeSportsMoneylineModel} />
+                    </div>
+                  </>
                 )
-              : (
-                  <div className="min-h-0 flex-1">
-                    <HeroCarouselSlideChart event={event} isActive={isActive} variant="multi-outcome" />
-                  </div>
-                )}
+              : layout === 'live-chart'
+                ? (
+                    <HeroLiveChartPanel event={event} isActive={isActive} />
+                  )
+                : (
+                    <div className="min-h-0 flex-1">
+                      <HeroCarouselSlideChart event={event} isActive={isActive} variant="multi-outcome" />
+                    </div>
+                  )
+          )}
         </div>
       </div>
 
