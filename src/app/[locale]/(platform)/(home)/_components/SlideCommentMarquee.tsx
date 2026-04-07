@@ -2,7 +2,6 @@
 
 import type { Comment, Event } from '@/types'
 import Image from 'next/image'
-import { useMemo } from 'react'
 import { useHeroComments } from '@/app/[locale]/(platform)/(home)/_hooks/useHeroComments'
 import AppLink from '@/components/AppLink'
 import {
@@ -67,17 +66,23 @@ function CommentRow({ comment, eventPath }: { comment: Comment, eventPath: strin
   )
 }
 
+function CommentSet({ comments, eventPath }: { comments: Comment[], eventPath: string }) {
+  return (
+    <div className="min-h-full">
+      {comments.map((comment, i) => (
+        <CommentRow
+          key={`${comment.id}-${i}`}
+          comment={comment}
+          eventPath={eventPath}
+        />
+      ))}
+    </div>
+  )
+}
+
 export default function SlideCommentMarquee({ event }: SlideCommentMarqueeProps) {
   const { data: comments } = useHeroComments(event.slug)
   const eventPath = resolveEventPagePath(event)
-
-  // Duplicate once for seamless loop — marquee-vertical scrolls -50% then resets
-  const duplicated = useMemo(() => {
-    if (!comments || comments.length === 0) {
-      return []
-    }
-    return [...comments, ...comments]
-  }, [comments])
 
   if (!comments || comments.length === 0) {
     return null
@@ -89,13 +94,8 @@ export default function SlideCommentMarquee({ event }: SlideCommentMarqueeProps)
       style={{ maskImage: 'linear-gradient(transparent 0px, black 40px, black 100%)' }}
     >
       <div className="flex shrink-0 animate-marquee-vertical flex-col will-change-transform hover:paused">
-        {duplicated.map((comment, i) => (
-          <CommentRow
-            key={`${comment.id}-${i}`}
-            comment={comment}
-            eventPath={eventPath}
-          />
-        ))}
+        <CommentSet comments={comments} eventPath={eventPath} />
+        <CommentSet comments={comments} eventPath={eventPath} />
       </div>
     </div>
   )

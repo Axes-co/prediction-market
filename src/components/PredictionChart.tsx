@@ -17,6 +17,7 @@ import { LinePath } from '@visx/shape'
 import { useTooltip } from '@visx/tooltip'
 import { bisector } from 'd3-array'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import PredictionChartEndOfLineLabels, { buildEndOfLineLabelEntries } from '@/components/PredictionChartEndOfLineLabels'
 import PredictionChartHeader from '@/components/PredictionChartHeader'
 import PredictionChartTooltipOverlay from '@/components/PredictionChartTooltipOverlay'
 import {
@@ -197,6 +198,8 @@ export function PredictionChart({
   clampCursorToDataExtent = false,
   tooltipHeader,
   watermark,
+  showEndOfLineLabels = false,
+  endOfLineLabelConfig,
 }: PredictionChartProps): ReactElement {
   const [data, setData] = useState<DataPoint[]>([])
   const [series, setSeries] = useState<SeriesConfig[]>([])
@@ -1026,6 +1029,10 @@ export function PredictionChart({
     domain: [yAxisMin, yAxisMax],
     nice: shouldUseNiceYScale,
   })
+
+  const endOfLineLabelEntries = showEndOfLineLabels
+    ? buildEndOfLineLabelEntries(data, series, resolvedMargin, xScale, yScale)
+    : []
 
   const clampedTooltipX = tooltipActive
     ? Math.max(0, Math.min(tooltipLeft as number, innerWidth))
@@ -1977,6 +1984,18 @@ export function PredictionChart({
                 )
               : hoveredAnnotationCluster.markers[0]?.tooltipContent}
           </div>
+        )}
+
+        {showEndOfLineLabels && (
+          <PredictionChartEndOfLineLabels
+            entries={endOfLineLabelEntries}
+            isDarkMode={isDarkMode}
+            visible={!tooltipActive}
+            nameSize={endOfLineLabelConfig?.nameSize}
+            valueSize={endOfLineLabelConfig?.valueSize}
+            strokeWidth={endOfLineLabelConfig?.strokeWidth}
+            strokeColor={endOfLineLabelConfig?.strokeColor}
+          />
         )}
       </div>
     </div>

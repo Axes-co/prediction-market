@@ -2,7 +2,6 @@
 
 import type { HomeSportsMoneylineModel } from '@/lib/sports-home-card'
 import type { Event, Market, Outcome } from '@/types'
-import type { PredictionChartCursorSnapshot } from '@/types/PredictionChartTypes'
 import { LinkIcon, RepeatIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import Image from 'next/image'
@@ -11,10 +10,6 @@ import HeroCarouselSlideChart from '@/app/[locale]/(platform)/(home)/_components
 import SlideCommentMarquee from '@/app/[locale]/(platform)/(home)/_components/SlideCommentMarquee'
 import SportsMoneylineButtons from '@/app/[locale]/(platform)/(home)/_components/SportsMoneylineButtons'
 import EventBookmark from '@/app/[locale]/(platform)/event/[slug]/_components/EventBookmark'
-import {
-  buildChartSeries,
-  getTopMarketIds,
-} from '@/app/[locale]/(platform)/event/[slug]/_utils/EventChartUtils'
 import AppLink from '@/components/AppLink'
 import EventIconImage from '@/components/EventIconImage'
 import SiteLogoIcon from '@/components/SiteLogoIcon'
@@ -39,7 +34,6 @@ interface HeroCarouselSlideProps {
   isActive: boolean
 }
 
-const MAX_CHART_SERIES = 4
 const OUTCOME_ICON_SIZE = 30
 
 // ---------------------------------------------------------------------------
@@ -236,58 +230,6 @@ function SlideFooter({ event, isSportsLayout }: { event: Event, isSportsLayout: 
           size={18}
           alt={site.name}
         />
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Chart legend (right panel, above chart)
-// ---------------------------------------------------------------------------
-
-function SlideChartLegend({
-  event,
-  cursorSnapshot,
-}: {
-  event: Event
-  cursorSnapshot: PredictionChartCursorSnapshot | null
-}) {
-  const chances = useMemo(() => buildChanceByMarket(event.markets), [event.markets])
-  const topMarketIds = useMemo(() => getTopMarketIds(chances, MAX_CHART_SERIES), [chances])
-  const series = useMemo(() => buildChartSeries(event, topMarketIds), [event, topMarketIds])
-
-  // Merge cursor hover values with baseline chances — same pattern as EventChart
-  const legendEntries = useMemo(
-    () => series.map((entry) => {
-      const hoveredValue = cursorSnapshot?.values?.[entry.key]
-      const baselineValue = chances[entry.key] ?? 0
-      const value = typeof hoveredValue === 'number' && Number.isFinite(hoveredValue)
-        ? hoveredValue
-        : baselineValue
-      return { ...entry, value }
-    }),
-    [series, cursorSnapshot, chances],
-  )
-
-  if (legendEntries.length === 0) {
-    return null
-  }
-
-  return (
-    <div className="mt-1.5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {legendEntries.map(entry => (
-          <div key={entry.key} className="flex items-center gap-1.5 whitespace-nowrap">
-            <div className="size-2 rounded-full" style={{ backgroundColor: entry.color }} />
-            <p className="text-sm text-muted-foreground">
-              {entry.name}
-              <span className="ml-0.5 font-semibold text-foreground">
-                &nbsp;
-                {Number.isInteger(entry.value) ? `${entry.value}%` : `${entry.value.toFixed(1)}%`}
-              </span>
-            </p>
-          </div>
-        ))}
       </div>
     </div>
   )
@@ -521,13 +463,11 @@ function SportsScoreboard({
 
 export default function HeroCarouselSlide({ event, isActive }: HeroCarouselSlideProps) {
   const homeSportsMoneylineModel = useMemo(() => buildHomeSportsMoneylineModel(event), [event])
-  const [cursorSnapshot, setCursorSnapshot] = useState<PredictionChartCursorSnapshot | null>(null)
   const chanceByMarket = useMemo(() => buildChanceByMarket(event.markets), [event.markets])
   const getDisplayChance = useCallback((marketId: string) => chanceByMarket[marketId] ?? 0, [chanceByMarket])
 
-  // Only sports moneyline cards use compact headers (header inside left panel, no actions).
-  // All other cards — including regular single-market Yes/No — use the standard header above body.
-  const useCompactHeader = Boolean(homeSportsMoneylineModel)
+  const isSportsLayout = Boolean(homeSportsMoneylineModel)
+  const useCompactHeader = isSportsLayout
 
   return (
     <div className={cn('relative flex size-full flex-col', useCompactHeader ? 'gap-2' : 'gap-4')}>
@@ -564,39 +504,20 @@ export default function HeroCarouselSlide({ event, isActive }: HeroCarouselSlide
           </div>
         </div>
 
-        {/* RIGHT 60% — sports scoreboard + chart  OR  legend + chart */}
+        {/* RIGHT 60% — chart rendering */}
         <div className="relative hidden h-full min-h-0 flex-1 flex-col justify-center lg:flex">
-          {homeSportsMoneylineModel
+          {isSportsLayout && homeSportsMoneylineModel
             ? (
                 <>
                   <SportsScoreboard event={event} model={homeSportsMoneylineModel} />
-                  <div className="hidden min-h-0 flex-1 lg:block">
-                    <div className="relative size-full">
-                      <div className="relative size-full">
-                        <div className="absolute inset-0 overflow-hidden pt-2">
-                          <div className="flex size-full flex-col">
-                            <div className="mt-7 min-h-0 flex-1">
-                              <HeroCarouselSlideChart event={event} isActive={isActive} onCursorDataChange={setCursorSnapshot} />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                  <div className="hidden min-h-0 flex-1 pt-2 lg:block">
+                    <HeroCarouselSlideChart event={event} isActive={isActive} variant="sports" />
                   </div>
                 </>
               )
             : (
                 <div className="min-h-0 flex-1">
-                  <div className="relative size-full">
-                    <div className="absolute inset-0 overflow-hidden">
-                      <div className="flex size-full flex-col">
-                        <SlideChartLegend event={event} cursorSnapshot={cursorSnapshot} />
-                        <div className="mt-7 min-h-0 flex-1">
-                          <HeroCarouselSlideChart event={event} isActive={isActive} onCursorDataChange={setCursorSnapshot} />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  <HeroCarouselSlideChart event={event} isActive={isActive} variant="multi-outcome" />
                 </div>
               )}
         </div>

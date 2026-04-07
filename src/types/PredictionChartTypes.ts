@@ -93,4 +93,11 @@ export interface PredictionChartProps {
     iconSvg?: string | null
     label?: string | null
   }
+  showEndOfLineLabels?: boolean
+  endOfLineLabelConfig?: {
+    nameSize?: number
+    valueSize?: number
+    strokeWidth?: number
+    strokeColor?: string
+  }
 }
