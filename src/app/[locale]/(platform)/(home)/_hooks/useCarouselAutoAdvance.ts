@@ -47,6 +47,8 @@ export function useCarouselAutoAdvance({
     elapsedAtPauseRef.current = 0
   }, [totalSlides])
 
+  const lastProgressRef = useRef(0)
+
   const tick = useCallback((now: number) => {
     if (pausedRef.current || !enabled) {
       rafRef.current = requestAnimationFrame(tick)
@@ -59,9 +61,15 @@ export function useCarouselAutoAdvance({
 
     const elapsed = now - startTimeRef.current
     const currentProgress = Math.min(elapsed / intervalMs, 1)
-    setProgress(currentProgress)
+
+    // Only trigger re-render when progress changes by ≥0.5% to avoid excessive updates
+    if (Math.abs(currentProgress - lastProgressRef.current) >= 0.005 || currentProgress >= 1) {
+      lastProgressRef.current = currentProgress
+      setProgress(currentProgress)
+    }
 
     if (currentProgress >= 1) {
+      lastProgressRef.current = 0
       advanceSlide()
     }
 

@@ -1,5 +1,6 @@
 'use client'
 
+import type { HomeSportsMoneylineModel } from '@/lib/sports-home-card'
 import type { Event } from '@/types'
 import type { PredictionChartCursorSnapshot, SeriesConfig } from '@/types/PredictionChartTypes'
 import dynamic from 'next/dynamic'
@@ -16,6 +17,7 @@ import {
 } from '@/app/[locale]/(platform)/event/[slug]/_utils/EventChartUtils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { buildChanceByMarket } from '@/lib/market-chance'
+import { resolveSportsTeamFallbackColor } from '@/lib/sports-team-colors'
 
 const PredictionChart = dynamic(
   () => import('@/components/PredictionChart'),
@@ -25,27 +27,86 @@ const PredictionChart = dynamic(
   },
 )
 
+// ---------------------------------------------------------------------------
+// Types & constants
+// ---------------------------------------------------------------------------
+
 type HeroChartVariant = 'multi-outcome' | 'sports'
 
 interface HeroCarouselSlideChartProps {
   event: Event
   isActive: boolean
   variant: HeroChartVariant
+  sportsModel?: HomeSportsMoneylineModel | null
 }
 
 const HERO_CHART_RANGE = '1W' as const
 const MAX_HERO_SERIES = 4
 const MIN_CHART_WIDTH = 200
 const MIN_CHART_HEIGHT = 150
-const CHART_MARGIN = { top: 10, right: 12, bottom: 24, left: 0 }
+const CHART_MARGIN = { top: 10, right: 16, bottom: 24, left: 0 }
+const PLOT_CLIP_RIGHT_PADDING = 18
+const SPORTS_COLOR_FALLBACKS = ['var(--yes)', 'var(--primary)', 'var(--no)']
 
 /**
- * Polymarket stops chart lines at ~60% of the width so end-of-line labels
- * have room on the right. We achieve this by extending xDomain.end past
- * the last data point by ~65% of the data's time span, so the last point
- * maps to ~60% of the chart width.
+ * Extend xDomain past last data point by this ratio of the data span,
+ * so the chart line ends at ~60% width leaving room for end-of-line labels.
  */
 const LABEL_SPACE_RATIO = 0.65
+
+// ---------------------------------------------------------------------------
+// Series color resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves chart series colors to match each event page's rendering:
+ *
+ * - Sports events use team colors, matching SportsGameGraph.resolveGraphSeriesColor
+ * - Single-market binary events use var(--primary), matching EventChart.effectiveSeries
+ * - Multi-market events use the default var(--chart-N) cycle from buildChartSeries
+ */
+function resolveHeroSeriesColors(
+  baseSeries: SeriesConfig[],
+  sportsModel: HomeSportsMoneylineModel | null | undefined,
+): SeriesConfig[] {
+  if (sportsModel && baseSeries.length > 0) {
+    // Build a lookup from conditionId → color, matching SportsGameGraph.resolveGraphSeriesColor:
+    // - team1: team hex color or resolveSportsTeamFallbackColor('team1')
+    // - team2: team hex color or resolveSportsTeamFallbackColor('team2')
+    // - draw:  var(--secondary-foreground)
+    const colorByConditionId = new Map<string, string>()
+
+    colorByConditionId.set(
+      sportsModel.team1Button.conditionId,
+      sportsModel.team1.color ?? resolveSportsTeamFallbackColor('team1'),
+    )
+    colorByConditionId.set(
+      sportsModel.team2Button.conditionId,
+      sportsModel.team2.color ?? resolveSportsTeamFallbackColor('team2'),
+    )
+    if (sportsModel.drawButton) {
+      colorByConditionId.set(sportsModel.drawButton.conditionId, 'var(--secondary-foreground)')
+    }
+
+    return baseSeries.map((entry, index) => {
+      const resolvedColor = colorByConditionId.get(entry.key)
+      if (resolvedColor) {
+        return { ...entry, color: resolvedColor }
+      }
+      return { ...entry, color: SPORTS_COLOR_FALLBACKS[index % SPORTS_COLOR_FALLBACKS.length] }
+    })
+  }
+
+  if (baseSeries.length === 1) {
+    return [{ ...baseSeries[0], color: 'var(--primary)' }]
+  }
+
+  return baseSeries
+}
+
+// ---------------------------------------------------------------------------
+// Chart legend (multi-outcome only)
+// ---------------------------------------------------------------------------
 
 function HeroChartLegend({
   series,
@@ -90,10 +151,15 @@ function HeroChartLegend({
   )
 }
 
+// ---------------------------------------------------------------------------
+// Main chart component
+// ---------------------------------------------------------------------------
+
 export default function HeroCarouselSlideChart({
   event,
   isActive,
   variant,
+  sportsModel,
 }: HeroCarouselSlideChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState<{ width: number, height: number } | null>(null)
@@ -137,16 +203,21 @@ export default function HeroCarouselSlideChart({
     [chances],
   )
 
-  const series = useMemo(
+  const baseSeries = useMemo(
     () => buildChartSeries(event, topMarketIds),
     [event, topMarketIds],
   )
 
-  const showLegend = variant === 'multi-outcome'
+  const series = useMemo(
+    () => resolveHeroSeriesColors(baseSeries, sportsModel),
+    [baseSeries, sportsModel],
+  )
+
+  const showLegend = variant === 'multi-outcome' && series.length > 1
   const showEndOfLineLabels = variant === 'sports'
 
-  // For sports cards with end-of-line labels: extend xDomain past the last data point
-  // so the chart line ends at ~60% width, leaving 40% for labels (matches Polymarket).
+  // For sports/live-chart cards with end-of-line labels: extend xDomain past the
+  // last data point so the chart line ends at ~60% width, leaving room for labels.
   const xDomain = useMemo(() => {
     if (!showEndOfLineLabels || normalizedHistory.length < 2 || !clientNow) {
       return undefined
@@ -160,7 +231,6 @@ export default function HeroCarouselSlideChart({
       return undefined
     }
 
-    // Extend domain end by LABEL_SPACE_RATIO of the data span
     return { end: lastTs + dataSpan * LABEL_SPACE_RATIO }
   }, [showEndOfLineLabels, normalizedHistory, clientNow])
 
@@ -190,14 +260,11 @@ export default function HeroCarouselSlideChart({
               height={dimensions.height}
               showXAxis
               showYAxis={false}
-              showHorizontalGrid={false}
+              showHorizontalGrid
               showVerticalGrid={false}
-              showAreaFill
-              areaFillTopOpacity={0.12}
               legendContent={legendContent}
               showLegend={showLegend}
-              lineStrokeWidth={2}
-              lineCurve="catmullRom"
+              lineCurve="monotoneX"
               margin={CHART_MARGIN}
               xDomain={xDomain}
               xAxisTickCount={3}
@@ -206,6 +273,7 @@ export default function HeroCarouselSlideChart({
               cursorStepMs={CURSOR_STEP_MS[HERO_CHART_RANGE]}
               onCursorDataChange={setCursorSnapshot}
               showEndOfLineLabels={showEndOfLineLabels}
+              plotClipPadding={{ right: PLOT_CLIP_RIGHT_PADDING }}
             />
           )
         : <Skeleton className="size-full rounded-lg" />}

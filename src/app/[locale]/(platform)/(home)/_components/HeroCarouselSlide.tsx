@@ -7,6 +7,7 @@ import { useExtracted } from 'next-intl'
 import Image from 'next/image'
 import { useCallback, useMemo, useState } from 'react'
 import HeroCarouselSlideChart from '@/app/[locale]/(platform)/(home)/_components/HeroCarouselSlideChart'
+import HeroLiveChartPanel from '@/app/[locale]/(platform)/(home)/_components/HeroLiveChartPanel'
 import SlideCommentMarquee from '@/app/[locale]/(platform)/(home)/_components/SlideCommentMarquee'
 import SportsMoneylineButtons from '@/app/[locale]/(platform)/(home)/_components/SportsMoneylineButtons'
 import EventBookmark from '@/app/[locale]/(platform)/event/[slug]/_components/EventBookmark'
@@ -37,10 +38,29 @@ interface HeroCarouselSlideProps {
 const OUTCOME_ICON_SIZE = 30
 
 // ---------------------------------------------------------------------------
-// Header: standard (multi-outcome) and compact (single/sports)
+// Slide layout type — determines header, right panel, and footer rendering
 // ---------------------------------------------------------------------------
 
-function SlideHeaderContent({ event, compact, isSportsLayout }: { event: Event, compact?: boolean, isSportsLayout?: boolean }) {
+type SlideLayout = 'sports' | 'live-chart' | 'standard'
+
+function resolveSlideLayout(
+  event: Event,
+  sportsModel: HomeSportsMoneylineModel | null,
+): SlideLayout {
+  if (sportsModel) {
+    return 'sports'
+  }
+  if (event.has_live_chart && !isHomeEventResolvedLike(event)) {
+    return 'live-chart'
+  }
+  return 'standard'
+}
+
+// ---------------------------------------------------------------------------
+// Header: standard (multi-outcome) and compact (single/sports/live-chart)
+// ---------------------------------------------------------------------------
+
+function SlideHeaderContent({ event, compact, isSportsLayout, hideIcon }: { event: Event, compact?: boolean, isSportsLayout?: boolean, hideIcon?: boolean }) {
   const eventPath = resolveEventPagePath(event)
   const isSportsEvent = Boolean(isSportsLayout)
 
@@ -81,8 +101,8 @@ function SlideHeaderContent({ event, compact, isSportsLayout }: { event: Event, 
     `)}
     >
       <div className="flex min-w-0 flex-1 items-center gap-4">
-        {/* Event icon — shown on standard headers, and compact non-sports headers. Sports compact cards omit the icon. */}
-        {event.icon_url && (!compact || !isSportsEvent) && (
+        {/* Event icon — shown on standard headers, and compact headers without hideIcon. Sports/live-chart compact cards omit the icon. */}
+        {event.icon_url && !hideIcon && (
           <div className="hidden shrink-0 md:block">
             <EventIconImage
               src={event.icon_url}
@@ -183,15 +203,14 @@ function LiveIndicator({ size = 'default' }: { size?: 'default' | 'sm' }) {
 // Footer: volume + end date / live indicator + platform logo
 // ---------------------------------------------------------------------------
 
-function SlideFooter({ event, isSportsLayout }: { event: Event, isSportsLayout: boolean }) {
+function SlideFooter({ event, layout }: { event: Event, layout: SlideLayout }) {
   const t = useExtracted()
   const site = useSiteIdentity()
-  const isLive = Boolean(event.sports_live)
-  const isSportsEvent = isSportsLayout
+  const isLive = Boolean(event.sports_live) || layout === 'live-chart'
   const hasRecurrence = Boolean(event.series_recurrence)
 
-  // Resolve end date label �� sports cards don't show end date (matches Polymarket)
-  const endDateLabel = !isSportsEvent && event.end_date
+  // Resolve end date label - sports and live-chart cards don't show end date
+  const endDateLabel = layout === 'standard' && event.end_date
     ? (() => {
         const d = new Date(event.end_date)
         return Number.isNaN(d.getTime()) ? null : t('Ends {date}', { date: formatDate(d) })
@@ -301,7 +320,7 @@ function SlideOutcomes({
                 {label}
               </p>
             </div>
-            <span className="text-2xl font-semibold text-foreground">
+            <span className="text-[1.75rem] leading-none font-semibold text-foreground">
               {chance}
               %
             </span>
@@ -466,8 +485,8 @@ export default function HeroCarouselSlide({ event, isActive }: HeroCarouselSlide
   const chanceByMarket = useMemo(() => buildChanceByMarket(event.markets), [event.markets])
   const getDisplayChance = useCallback((marketId: string) => chanceByMarket[marketId] ?? 0, [chanceByMarket])
 
-  const isSportsLayout = Boolean(homeSportsMoneylineModel)
-  const useCompactHeader = isSportsLayout
+  const layout = useMemo(() => resolveSlideLayout(event, homeSportsMoneylineModel), [event, homeSportsMoneylineModel])
+  const useCompactHeader = layout !== 'standard'
 
   return (
     <div className={cn('relative flex size-full flex-col', useCompactHeader ? 'gap-2' : 'gap-4')}>
@@ -477,10 +496,10 @@ export default function HeroCarouselSlide({ event, isActive }: HeroCarouselSlide
       {/* Standard header — multi-market events only */}
       {!useCompactHeader && <SlideHeaderContent event={event} />}
 
-      {/* Mobile compact header for sports */}
+      {/* Mobile compact header for sports/live-chart */}
       {useCompactHeader && (
         <div className="lg:hidden">
-          <SlideHeaderContent event={event} compact isSportsLayout />
+          <SlideHeaderContent event={event} compact isSportsLayout={layout === 'sports'} hideIcon={layout === 'sports'} />
         </div>
       )}
 
@@ -490,7 +509,7 @@ export default function HeroCarouselSlide({ event, isActive }: HeroCarouselSlide
         <div className="relative flex flex-col gap-4 lg:w-[40%] lg:justify-between">
           {useCompactHeader && (
             <div className="hidden lg:block">
-              <SlideHeaderContent event={event} compact isSportsLayout />
+              <SlideHeaderContent event={event} compact isSportsLayout={layout === 'sports'} hideIcon={layout === 'sports'} />
             </div>
           )}
 
@@ -504,26 +523,30 @@ export default function HeroCarouselSlide({ event, isActive }: HeroCarouselSlide
           </div>
         </div>
 
-        {/* RIGHT 60% — chart rendering */}
+        {/* RIGHT 60% — chart rendering per layout type */}
         <div className="relative hidden h-full min-h-0 flex-1 flex-col justify-center lg:flex">
-          {isSportsLayout && homeSportsMoneylineModel
+          {layout === 'sports' && homeSportsMoneylineModel
             ? (
                 <>
                   <SportsScoreboard event={event} model={homeSportsMoneylineModel} />
                   <div className="hidden min-h-0 flex-1 pt-2 lg:block">
-                    <HeroCarouselSlideChart event={event} isActive={isActive} variant="sports" />
+                    <HeroCarouselSlideChart event={event} isActive={isActive} variant="sports" sportsModel={homeSportsMoneylineModel} />
                   </div>
                 </>
               )
-            : (
-                <div className="min-h-0 flex-1">
-                  <HeroCarouselSlideChart event={event} isActive={isActive} variant="multi-outcome" />
-                </div>
-              )}
+            : layout === 'live-chart'
+              ? (
+                  <HeroLiveChartPanel event={event} isActive={isActive} />
+                )
+              : (
+                  <div className="min-h-0 flex-1">
+                    <HeroCarouselSlideChart event={event} isActive={isActive} variant="multi-outcome" />
+                  </div>
+                )}
         </div>
       </div>
 
-      <SlideFooter event={event} isSportsLayout={useCompactHeader} />
+      <SlideFooter event={event} layout={layout} />
     </div>
   )
 }
