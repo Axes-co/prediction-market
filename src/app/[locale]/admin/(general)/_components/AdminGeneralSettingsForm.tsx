@@ -21,6 +21,12 @@ import { InputError } from '@/components/ui/input-error'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  MAX_CUSTOM_JAVASCRIPT_CODE_NAME_LENGTH,
+  MAX_CUSTOM_JAVASCRIPT_CODE_SNIPPET_LENGTH,
+  MAX_CUSTOM_JAVASCRIPT_CODES,
+  serializeCustomJavascriptCodes,
+} from '@/lib/custom-javascript-code'
 import { cn, sanitizeSvg } from '@/lib/utils'
 
 const initialState = {
@@ -160,11 +166,8 @@ export default function AdminGeneralSettingsForm({
   const initialTiktokLink = initialThemeSiteSettings.tiktokLink
   const initialLinkedinLink = initialThemeSiteSettings.linkedinLink
   const initialYoutubeLink = initialThemeSiteSettings.youtubeLink
-  const initialWhatsappLink = initialThemeSiteSettings.whatsappLink
-  const initialTelegramLink = initialThemeSiteSettings.telegramLink
-  const initialRedditLink = initialThemeSiteSettings.redditLink
   const initialSupportUrl = initialThemeSiteSettings.supportUrl
-  const initialFooterDisclaimer = initialThemeSiteSettings.footerDisclaimer
+  const initialCustomJavascriptCodes = initialThemeSiteSettings.customJavascriptCodes
   const initialFeeRecipientWallet = initialThemeSiteSettings.feeRecipientWallet
   const initialLiFiIntegrator = initialThemeSiteSettings.lifiIntegrator
   const initialLiFiApiKey = initialThemeSiteSettings.lifiApiKey
@@ -193,11 +196,10 @@ export default function AdminGeneralSettingsForm({
   const [tiktokLink, setTiktokLink] = useState(initialTiktokLink)
   const [linkedinLink, setLinkedinLink] = useState(initialLinkedinLink)
   const [youtubeLink, setYoutubeLink] = useState(initialYoutubeLink)
-  const [whatsappLink, setWhatsappLink] = useState(initialWhatsappLink)
-  const [telegramLink, setTelegramLink] = useState(initialTelegramLink)
-  const [redditLink, setRedditLink] = useState(initialRedditLink)
   const [supportUrl, setSupportUrl] = useState(initialSupportUrl)
-  const [footerDisclaimer, setFooterDisclaimer] = useState(initialFooterDisclaimer)
+  const [customJavascriptCodes, setCustomJavascriptCodes] = useState<CustomJavascriptCodeDraft[]>(
+    () => initialCustomJavascriptCodes.map(code => createCustomJavascriptCodeDraft(nextCustomJavascriptCodeIdRef.current++, code)),
+  )
   const [feeRecipientWallet, setFeeRecipientWallet] = useState(initialFeeRecipientWallet)
   const [tosPdfPath, setTosPdfPath] = useState(initialTermsOfServicePdfPath)
   const [lifiIntegrator, setLifiIntegrator] = useState(initialLiFiIntegrator)
@@ -278,24 +280,18 @@ export default function AdminGeneralSettingsForm({
   }, [initialYoutubeLink])
 
   useEffect(() => {
-    setWhatsappLink(initialWhatsappLink)
-  }, [initialWhatsappLink])
-
-  useEffect(() => {
-    setTelegramLink(initialTelegramLink)
-  }, [initialTelegramLink])
-
-  useEffect(() => {
-    setRedditLink(initialRedditLink)
-  }, [initialRedditLink])
-
-  useEffect(() => {
     setSupportUrl(initialSupportUrl)
   }, [initialSupportUrl])
 
   useEffect(() => {
-    setFooterDisclaimer(initialFooterDisclaimer)
-  }, [initialFooterDisclaimer])
+    setTosPdfPath(initialTermsOfServicePdfPath)
+  }, [initialTermsOfServicePdfPath])
+
+  useEffect(() => {
+    setCustomJavascriptCodes(
+      initialCustomJavascriptCodes.map(code => createCustomJavascriptCodeDraft(nextCustomJavascriptCodeIdRef.current++, code)),
+    )
+  }, [initialCustomJavascriptCodes])
 
   useEffect(() => {
     setFeeRecipientWallet(initialFeeRecipientWallet)
@@ -889,45 +885,6 @@ export default function AdminGeneralSettingsForm({
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="theme-whatsapp-link">{t('WhatsApp link')}</Label>
-              <Input
-                id="theme-whatsapp-link"
-                name="whatsapp_link"
-                maxLength={2048}
-                value={whatsappLink}
-                onChange={event => setWhatsappLink(event.target.value)}
-                disabled={isPending}
-                placeholder={t('https://wa.me/your-number (optional)')}
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="theme-telegram-link">{t('Telegram link')}</Label>
-              <Input
-                id="theme-telegram-link"
-                name="telegram_link"
-                maxLength={2048}
-                value={telegramLink}
-                onChange={event => setTelegramLink(event.target.value)}
-                disabled={isPending}
-                placeholder={t('https://t.me/your-channel (optional)')}
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="theme-reddit-link">{t('Reddit link')}</Label>
-              <Input
-                id="theme-reddit-link"
-                name="reddit_link"
-                maxLength={2048}
-                value={redditLink}
-                onChange={event => setRedditLink(event.target.value)}
-                disabled={isPending}
-                placeholder={t('https://reddit.com/r/your-community (optional)')}
-              />
-            </div>
-
-            <div className="grid gap-2 md:col-span-2">
               <Label htmlFor="theme-support-link">{t('Support link')}</Label>
               <Input
                 id="theme-support-link"
@@ -937,19 +894,6 @@ export default function AdminGeneralSettingsForm({
                 onChange={event => setSupportUrl(event.target.value)}
                 disabled={isPending}
                 placeholder={t('Discord, Telegram, WhatsApp link, or support email (optional)')}
-              />
-            </div>
-
-            <div className="grid gap-2 md:col-span-2">
-              <Label htmlFor="theme-footer-disclaimer">{t('Footer disclaimer')}</Label>
-              <Textarea
-                id="theme-footer-disclaimer"
-                name="footer_disclaimer"
-                maxLength={2000}
-                value={footerDisclaimer}
-                onChange={event => setFooterDisclaimer(event.target.value)}
-                disabled={isPending}
-                placeholder={t('Legal disclaimer or company information shown at the bottom of the footer (optional)')}
               />
             </div>
           </div>

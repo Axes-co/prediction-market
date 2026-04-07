@@ -163,6 +163,7 @@ export async function updateGeneralSettingsAction(
   const redditLinkRaw = formData.get('reddit_link')
   const supportUrlRaw = formData.get('support_url')
   const footerDisclaimerRaw = formData.get('footer_disclaimer')
+  const customJavascriptCodesJsonRaw = formData.get('custom_javascript_codes_json')
   const feeRecipientWalletRaw = formData.get('fee_recipient_wallet')
   const tosPdfPathRaw = formData.get('tos_pdf_path')
   const tosPdfFileRaw = formData.get('tos_pdf')
@@ -189,8 +190,9 @@ export async function updateGeneralSettingsAction(
   const whatsappLink = typeof whatsappLinkRaw === 'string' ? whatsappLinkRaw : ''
   const telegramLink = typeof telegramLinkRaw === 'string' ? telegramLinkRaw : ''
   const redditLink = typeof redditLinkRaw === 'string' ? redditLinkRaw : ''
-  const supportUrl = typeof supportUrlRaw === 'string' ? supportUrlRaw : ''
   const footerDisclaimer = typeof footerDisclaimerRaw === 'string' ? footerDisclaimerRaw : ''
+  const supportUrl = typeof supportUrlRaw === 'string' ? supportUrlRaw : ''
+  const customJavascriptCodesJson = typeof customJavascriptCodesJsonRaw === 'string' ? customJavascriptCodesJsonRaw : ''
   const feeRecipientWallet = typeof feeRecipientWalletRaw === 'string' ? feeRecipientWalletRaw : ''
   let tosPdfPath = typeof tosPdfPathRaw === 'string' ? tosPdfPathRaw : ''
   const lifiIntegrator = typeof lifiIntegratorRaw === 'string' ? lifiIntegratorRaw : ''
@@ -275,6 +277,7 @@ export async function updateGeneralSettingsAction(
     redditLink,
     supportUrl,
     footerDisclaimer,
+    customJavascriptCodesJson,
     feeRecipientWallet,
     lifiIntegrator,
     lifiApiKey,
@@ -322,11 +325,8 @@ export async function updateGeneralSettingsAction(
     { group: 'general', key: 'site_tiktok_link', value: validated.data.tiktokLinkValue },
     { group: 'general', key: 'site_linkedin_link', value: validated.data.linkedinLinkValue },
     { group: 'general', key: 'site_youtube_link', value: validated.data.youtubeLinkValue },
-    { group: 'general', key: 'site_whatsapp_link', value: validated.data.whatsappLinkValue },
-    { group: 'general', key: 'site_telegram_link', value: validated.data.telegramLinkValue },
-    { group: 'general', key: 'site_reddit_link', value: validated.data.redditLinkValue },
     { group: 'general', key: 'site_support_url', value: validated.data.supportUrlValue },
-    { group: 'general', key: 'site_footer_disclaimer', value: validated.data.footerDisclaimerValue },
+    { group: 'general', key: 'site_custom_javascript_codes', value: validated.data.customJavascriptCodesValue },
     { group: 'general', key: 'fee_recipient_wallet', value: validated.data.feeRecipientWalletValue },
     { group: 'general', key: TERMS_OF_SERVICE_PDF_PATH_KEY, value: tosPdfPath },
     { group: 'general', key: 'lifi_integrator', value: validated.data.lifiIntegratorValue },

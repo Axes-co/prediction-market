@@ -23,7 +23,6 @@ import {
   sanitizeThemeSiteLogoSvg,
   validateThemeSiteDescription,
   validateThemeSiteExternalUrl,
-  validateThemeSiteFooterDisclaimer,
   validateThemeSiteGoogleAnalyticsId,
   validateThemeSiteLogoImagePath,
   validateThemeSiteLogoMode,
@@ -53,8 +52,9 @@ const THEME_SITE_YOUTUBE_LINK_KEY = 'site_youtube_link'
 const THEME_SITE_WHATSAPP_LINK_KEY = 'site_whatsapp_link'
 const THEME_SITE_TELEGRAM_LINK_KEY = 'site_telegram_link'
 const THEME_SITE_REDDIT_LINK_KEY = 'site_reddit_link'
-const THEME_SITE_SUPPORT_URL_KEY = 'site_support_url'
 const THEME_SITE_FOOTER_DISCLAIMER_KEY = 'site_footer_disclaimer'
+const THEME_SITE_SUPPORT_URL_KEY = 'site_support_url'
+const THEME_SITE_CUSTOM_JAVASCRIPT_CODES_KEY = 'site_custom_javascript_codes'
 const GENERAL_PWA_ICON_192_PATH_KEY = 'pwa_icon_192_path'
 const GENERAL_PWA_ICON_512_PATH_KEY = 'pwa_icon_512_path'
 const GENERAL_FEE_RECIPIENT_WALLET_KEY = 'fee_recipient_wallet'
@@ -118,6 +118,8 @@ interface NormalizedThemeSiteConfig {
   supportUrlValue: string
   footerDisclaimer: string | null
   footerDisclaimerValue: string
+  customJavascriptCodes: CustomJavascriptCodeConfig[]
+  customJavascriptCodesValue: string
   feeRecipientWallet: `0x${string}`
   feeRecipientWalletValue: string
   lifiIntegrator: string | null
@@ -162,6 +164,7 @@ export interface ThemeSiteSettingsFormState {
   redditLink: string
   supportUrl: string
   footerDisclaimer: string
+  customJavascriptCodes: CustomJavascriptCodeConfig[]
   feeRecipientWallet: string
   lifiIntegrator: string
   lifiApiKey: string
@@ -307,7 +310,8 @@ function normalizeThemeSiteConfig(params: {
   telegramLinkValue: string | null | undefined
   redditLinkValue: string | null | undefined
   supportUrlValue: string | null | undefined
-  footerDisclaimerValue: string | null | undefined
+  footerDisclaimerValue?: string | null | undefined
+  customJavascriptCodesJsonValue?: string | null | undefined
   feeRecipientWalletValue: string | null | undefined
   lifiIntegratorValue?: string | null | undefined
   lifiApiKeyValue?: string | null | undefined
@@ -331,6 +335,7 @@ function normalizeThemeSiteConfig(params: {
   redditLinkErrorLabel: string
   supportUrlErrorLabel: string
   footerDisclaimerErrorLabel?: string
+  customJavascriptCodesErrorLabel?: string
   feeRecipientWalletErrorLabel: string
   lifiIntegratorErrorLabel?: string
   lifiApiKeyErrorLabel?: string
@@ -428,12 +433,12 @@ function normalizeThemeSiteConfig(params: {
     return { data: null, error: supportUrlValidated.error }
   }
 
-  const footerDisclaimerValidated = validateThemeSiteFooterDisclaimer(
-    params.footerDisclaimerValue,
-    params.footerDisclaimerErrorLabel ?? 'Footer disclaimer',
+  const customJavascriptCodesValidated = validateCustomJavascriptCodesJson(
+    params.customJavascriptCodesJsonValue,
+    params.customJavascriptCodesErrorLabel ?? 'Custom javascript code',
   )
-  if (footerDisclaimerValidated.error) {
-    return { data: null, error: footerDisclaimerValidated.error }
+  if (customJavascriptCodesValidated.error || !customJavascriptCodesValidated.value) {
+    return { data: null, error: customJavascriptCodesValidated.error ?? 'Custom javascript code is invalid.' }
   }
 
   const feeRecipientWalletValidated = normalizeFeeRecipientWalletAddress(
@@ -512,8 +517,10 @@ function normalizeThemeSiteConfig(params: {
       redditLinkValue: redditLinkValidated.value ?? '',
       supportUrl: supportUrlValidated.value,
       supportUrlValue: supportUrlValidated.value ?? '',
-      footerDisclaimer: footerDisclaimerValidated.value,
-      footerDisclaimerValue: footerDisclaimerValidated.value ?? '',
+      footerDisclaimer: params.footerDisclaimerValue?.trim() || null,
+      footerDisclaimerValue: params.footerDisclaimerValue?.trim() ?? '',
+      customJavascriptCodes: customJavascriptCodesValidated.value,
+      customJavascriptCodesValue: customJavascriptCodesValidated.valueJson,
       feeRecipientWallet: feeRecipientWalletValidated.value!,
       feeRecipientWalletValue: feeRecipientWalletValidated.value!,
       lifiIntegrator: lifiIntegratorValidated.value,
@@ -556,6 +563,7 @@ function buildThemeSiteIdentity(config: NormalizedThemeSiteConfig): ThemeSiteIde
     redditLink: config.redditLink,
     supportUrl: config.supportUrl,
     footerDisclaimer: config.footerDisclaimer,
+    customJavascriptCodes: config.customJavascriptCodes,
     pwaIcon192Path: config.pwaIcon192Path,
     pwaIcon512Path: config.pwaIcon512Path,
     pwaIcon192Url,
@@ -611,9 +619,6 @@ function hasStoredThemeSiteSettings(generalSettings?: SettingsGroup) {
     || generalSettings[THEME_SITE_TIKTOK_LINK_KEY]?.value?.trim()
     || generalSettings[THEME_SITE_LINKEDIN_LINK_KEY]?.value?.trim()
     || generalSettings[THEME_SITE_YOUTUBE_LINK_KEY]?.value?.trim()
-    || generalSettings[THEME_SITE_WHATSAPP_LINK_KEY]?.value?.trim()
-    || generalSettings[THEME_SITE_TELEGRAM_LINK_KEY]?.value?.trim()
-    || generalSettings[THEME_SITE_REDDIT_LINK_KEY]?.value?.trim()
     || generalSettings[THEME_SITE_SUPPORT_URL_KEY]?.value?.trim()
     || generalSettings[THEME_SITE_CUSTOM_JAVASCRIPT_CODES_KEY]?.value?.trim()
     || generalSettings[GENERAL_PWA_ICON_192_PATH_KEY]?.value?.trim()
@@ -675,6 +680,7 @@ export function getThemeSiteSettingsFormState(allSettings?: SettingsMap): ThemeS
     redditLinkValue: generalSettings?.[THEME_SITE_REDDIT_LINK_KEY]?.value ?? defaultSite.redditLink,
     supportUrlValue: generalSettings?.[THEME_SITE_SUPPORT_URL_KEY]?.value ?? defaultSite.supportUrl,
     footerDisclaimerValue: generalSettings?.[THEME_SITE_FOOTER_DISCLAIMER_KEY]?.value ?? defaultSite.footerDisclaimer,
+    customJavascriptCodesJsonValue: generalSettings?.[THEME_SITE_CUSTOM_JAVASCRIPT_CODES_KEY]?.value,
     feeRecipientWalletValue: generalSettings?.[GENERAL_FEE_RECIPIENT_WALLET_KEY]?.value ?? ZERO_ADDRESS,
     siteNameErrorLabel: 'Site name',
     siteDescriptionErrorLabel: 'Site description',
@@ -721,6 +727,7 @@ export function getThemeSiteSettingsFormState(allSettings?: SettingsMap): ThemeS
       redditLink: normalized.data.redditLinkValue,
       supportUrl: normalized.data.supportUrlValue,
       footerDisclaimer: normalized.data.footerDisclaimerValue,
+      customJavascriptCodes: normalized.data.customJavascriptCodes,
       feeRecipientWallet: isZeroAddress(normalized.data.feeRecipientWalletValue)
         ? ''
         : normalized.data.feeRecipientWalletValue,
@@ -751,6 +758,7 @@ export function getThemeSiteSettingsFormState(allSettings?: SettingsMap): ThemeS
     redditLink: defaultSite.redditLink ?? '',
     supportUrl: defaultSite.supportUrl ?? '',
     footerDisclaimer: defaultSite.footerDisclaimer ?? '',
+    customJavascriptCodes: defaultSite.customJavascriptCodes,
     feeRecipientWallet: '',
     lifiIntegrator,
     lifiApiKey: '',
@@ -797,6 +805,7 @@ export function validateThemeSiteSettingsInput(params: {
   redditLink: string | null | undefined
   supportUrl: string | null | undefined
   footerDisclaimer: string | null | undefined
+  customJavascriptCodesJson: string | null | undefined
   feeRecipientWallet: string | null | undefined
   lifiIntegrator: string | null | undefined
   lifiApiKey: string | null | undefined
@@ -822,6 +831,7 @@ export function validateThemeSiteSettingsInput(params: {
     redditLinkValue: params.redditLink,
     supportUrlValue: params.supportUrl,
     footerDisclaimerValue: params.footerDisclaimer,
+    customJavascriptCodesJsonValue: params.customJavascriptCodesJson,
     feeRecipientWalletValue: params.feeRecipientWallet,
     lifiIntegratorValue: params.lifiIntegrator,
     lifiApiKeyValue: params.lifiApiKey,
@@ -902,6 +912,7 @@ export async function loadRuntimeThemeState(): Promise<RuntimeThemeState> {
         redditLinkValue: generalSettings?.[THEME_SITE_REDDIT_LINK_KEY]?.value,
         supportUrlValue: generalSettings?.[THEME_SITE_SUPPORT_URL_KEY]?.value,
         footerDisclaimerValue: generalSettings?.[THEME_SITE_FOOTER_DISCLAIMER_KEY]?.value,
+        customJavascriptCodesJsonValue: generalSettings?.[THEME_SITE_CUSTOM_JAVASCRIPT_CODES_KEY]?.value,
         feeRecipientWalletValue: generalSettings?.[GENERAL_FEE_RECIPIENT_WALLET_KEY]?.value ?? ZERO_ADDRESS,
         siteNameErrorLabel: 'Site name in settings',
         siteDescriptionErrorLabel: 'Site description in settings',
