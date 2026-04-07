@@ -2,15 +2,20 @@
 
 import type { ReactNode } from 'react'
 import type { AdminThemeSiteSettingsInitialState } from '@/app/[locale]/admin/theme/_types/theme-form-state'
+import type { CustomJavascriptCodeConfig, CustomJavascriptCodeDisablePage } from '@/lib/custom-javascript-code'
 import { ChevronDownIcon, ImageUp, RefreshCwIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { useActionState, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useActionState, useEffect, useId, useMemo, useRef, useState, useTransition } from 'react'
 import { toast } from 'sonner'
-import { updateGeneralSettingsAction } from '@/app/[locale]/admin/(general)/_actions/update-general-settings'
+import {
+  removeTermsOfServicePdfAction,
+  updateGeneralSettingsAction,
+} from '@/app/[locale]/admin/(general)/_actions/update-general-settings'
 import AllowedMarketCreatorsManager from '@/app/[locale]/admin/(general)/_components/AllowedMarketCreatorsManager'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { InputError } from '@/components/ui/input-error'
 import { Label } from '@/components/ui/label'
@@ -40,6 +45,8 @@ interface OpenRouterGeneralSettings {
 
 interface AdminGeneralSettingsFormProps {
   initialThemeSiteSettings: AdminThemeSiteSettingsInitialState
+  initialTermsOfServicePdfPath: string
+  initialTermsOfServicePdfUrl: string | null
   openRouterSettings: OpenRouterGeneralSettings
 }
 
@@ -50,6 +57,21 @@ interface SettingsAccordionSectionProps {
   className?: string
   isOpen: boolean
   onToggle: (value: string) => void
+}
+
+interface CustomJavascriptCodeDraft extends CustomJavascriptCodeConfig {
+  id: string
+}
+
+function createCustomJavascriptCodeDraft(id: number, code: CustomJavascriptCodeConfig): CustomJavascriptCodeDraft {
+  return {
+    id: `custom-javascript-code-${id}`,
+    ...code,
+  }
+}
+
+function toCustomJavascriptCodeConfig({ id: _id, ...code }: CustomJavascriptCodeDraft): CustomJavascriptCodeConfig {
+  return code
 }
 
 function SettingsAccordionSection({
@@ -115,6 +137,8 @@ function SettingsAccordionSection({
 
 export default function AdminGeneralSettingsForm({
   initialThemeSiteSettings,
+  initialTermsOfServicePdfPath,
+  initialTermsOfServicePdfUrl,
   openRouterSettings,
 }: AdminGeneralSettingsFormProps) {
   const t = useExtracted()
@@ -150,7 +174,9 @@ export default function AdminGeneralSettingsForm({
 
   const router = useRouter()
   const [state, formAction, isPending] = useActionState(updateGeneralSettingsAction, initialState)
+  const [isRemovingTermsOfServicePdf, startRemovingTermsOfServicePdf] = useTransition()
   const wasPendingRef = useRef(isPending)
+  const nextCustomJavascriptCodeIdRef = useRef(0)
 
   const [siteName, setSiteName] = useState(initialSiteName)
   const [siteDescription, setSiteDescription] = useState(initialSiteDescription)
@@ -173,6 +199,7 @@ export default function AdminGeneralSettingsForm({
   const [supportUrl, setSupportUrl] = useState(initialSupportUrl)
   const [footerDisclaimer, setFooterDisclaimer] = useState(initialFooterDisclaimer)
   const [feeRecipientWallet, setFeeRecipientWallet] = useState(initialFeeRecipientWallet)
+  const [tosPdfPath, setTosPdfPath] = useState(initialTermsOfServicePdfPath)
   const [lifiIntegrator, setLifiIntegrator] = useState(initialLiFiIntegrator)
   const [lifiApiKey, setLifiApiKey] = useState(initialLiFiApiKey)
   const [openRouterApiKey, setOpenRouterApiKey] = useState('')
@@ -184,6 +211,7 @@ export default function AdminGeneralSettingsForm({
   const [openRouterModelsError, setOpenRouterModelsError] = useState<string | undefined>(openRouterSettings.modelsError)
   const [isRefreshingOpenRouterModels, setIsRefreshingOpenRouterModels] = useState(false)
   const [selectedLogoFile, setSelectedLogoFile] = useState<File | null>(null)
+  const [selectedTermsOfServicePdfFile, setSelectedTermsOfServicePdfFile] = useState<File | null>(null)
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null)
   const [pwaIcon192PreviewUrl, setPwaIcon192PreviewUrl] = useState<string | null>(null)
   const [pwaIcon512PreviewUrl, setPwaIcon512PreviewUrl] = useState<string | null>(null)
@@ -333,6 +361,18 @@ export default function AdminGeneralSettingsForm({
   const pwaIcon512Preview = useMemo(() => {
     return pwaIcon512PreviewUrl ?? initialPwaIcon512Url
   }, [initialPwaIcon512Url, pwaIcon512PreviewUrl])
+  const serializedCustomJavascriptCodes = useMemo(
+    () => serializeCustomJavascriptCodes(customJavascriptCodes.map(toCustomJavascriptCodeConfig)),
+    [customJavascriptCodes],
+  )
+  const customJavascriptCodeDisablePageOptions = useMemo(() => ([
+    { value: 'home' as const, label: t('Home') },
+    { value: 'event' as const, label: '/event' },
+    { value: 'portfolio' as const, label: '/portfolio' },
+    { value: 'settings' as const, label: '/settings' },
+    { value: 'docs' as const, label: '/docs' },
+    { value: 'admin' as const, label: '/admin' },
+  ]), [t])
 
   const sanitizedLogoSvg = useMemo(() => sanitizeSvg(logoSvg), [logoSvg])
   const svgPreviewUrl = useMemo(
@@ -342,6 +382,7 @@ export default function AdminGeneralSettingsForm({
 
   const showImagePreview = Boolean(imagePreview)
   const showSvgPreview = !showImagePreview && Boolean(sanitizedLogoSvg.trim())
+  const hasUploadedTermsOfServicePdf = Boolean(initialTermsOfServicePdfUrl && tosPdfPath.trim())
   const trimmedOpenRouterApiKey = openRouterApiKey.trim()
   const openRouterModelSelectEnabled = openRouterSettings.isModelSelectEnabled || Boolean(trimmedOpenRouterApiKey)
 
@@ -357,6 +398,47 @@ export default function AdminGeneralSettingsForm({
       }
 
       return [...previous, value]
+    })
+  }
+
+  function updateCustomJavascriptCode(
+    index: number,
+    updater: (code: CustomJavascriptCodeDraft) => CustomJavascriptCodeDraft,
+  ) {
+    setCustomJavascriptCodes(previous => previous.map((code, codeIndex) => (
+      codeIndex === index ? updater(code) : code
+    )))
+  }
+
+  function handleAddCustomJavascriptCode() {
+    setCustomJavascriptCodes(previous => [
+      ...previous,
+      createCustomJavascriptCodeDraft(nextCustomJavascriptCodeIdRef.current++, {
+        name: '',
+        snippet: '',
+        disabledOn: [],
+      }),
+    ])
+  }
+
+  function handleRemoveCustomJavascriptCode(index: number) {
+    setCustomJavascriptCodes(previous => previous.filter((_, codeIndex) => codeIndex !== index))
+  }
+
+  function handleToggleCustomJavascriptCodeDisableOn(
+    index: number,
+    value: CustomJavascriptCodeDisablePage,
+    checked: boolean,
+  ) {
+    updateCustomJavascriptCode(index, (code) => {
+      const disabledOn = checked
+        ? Array.from(new Set([...code.disabledOn, value]))
+        : code.disabledOn.filter(entry => entry !== value)
+
+      return {
+        ...code,
+        disabledOn,
+      }
     })
   }
 
@@ -400,6 +482,28 @@ export default function AdminGeneralSettingsForm({
     }
   }
 
+  function handleRemoveTermsOfServicePdf() {
+    startRemovingTermsOfServicePdf(async () => {
+      try {
+        const result = await removeTermsOfServicePdfAction()
+
+        if (result.error) {
+          toast.error(result.error)
+          return
+        }
+
+        setTosPdfPath('')
+        setSelectedTermsOfServicePdfFile(null)
+        toast.success(t('Terms of Use PDF removed.'))
+        router.refresh()
+      }
+      catch (error) {
+        console.error('Failed to remove Terms of Use PDF', error)
+        toast.error(t('Unable to remove the Terms of Use PDF right now.'))
+      }
+    })
+  }
+
   return (
     <form action={formAction} className="grid gap-6">
       <input type="hidden" name="logo_mode" value={logoMode} />
@@ -408,6 +512,8 @@ export default function AdminGeneralSettingsForm({
       <input type="hidden" name="pwa_icon_192_path" value={pwaIcon192Path} />
       <input type="hidden" name="pwa_icon_512_path" value={pwaIcon512Path} />
       <input type="hidden" name="openrouter_model" value={openRouterModel} />
+      <input type="hidden" name="tos_pdf_path" value={tosPdfPath} />
+      <input type="hidden" name="custom_javascript_codes_json" value={serializedCustomJavascriptCodes} />
 
       <div className="grid gap-6">
         <SettingsAccordionSection
@@ -688,22 +794,9 @@ export default function AdminGeneralSettingsForm({
           value="community-analytics"
           isOpen={openSections.includes('community-analytics')}
           onToggle={toggleSection}
-          header={<h3 className="text-base font-medium">{t('Community and analytics')}</h3>}
+          header={<h3 className="text-base font-medium">{t('Social & Community')}</h3>}
         >
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="grid gap-2">
-              <Label htmlFor="theme-google-analytics-id">{t('Google Analytics ID')}</Label>
-              <Input
-                id="theme-google-analytics-id"
-                name="google_analytics_id"
-                maxLength={120}
-                value={googleAnalyticsId}
-                onChange={event => setGoogleAnalyticsId(event.target.value)}
-                disabled={isPending}
-                placeholder={t('G-XXXXXXXXXX (optional)')}
-              />
-            </div>
-
             <div className="grid gap-2">
               <Label htmlFor="theme-discord-link">{t('Discord community link')}</Label>
               <Input
@@ -863,168 +956,359 @@ export default function AdminGeneralSettingsForm({
         </SettingsAccordionSection>
 
         <SettingsAccordionSection
-          value="openrouter"
-          isOpen={openSections.includes('openrouter')}
+          value="legal"
+          isOpen={openSections.includes('legal')}
           onToggle={toggleSection}
-          header={<h3 className="text-base font-medium">{t('OpenRouter integration')}</h3>}
+          header={<h3 className="text-base font-medium">{t('Legal')}</h3>}
         >
-          <div className="grid gap-6">
+          <div className="grid gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="openrouter_key">{t('API key')}</Label>
+              <Label htmlFor="terms-of-service-pdf">{t('Terms of Use PDF')}</Label>
               <Input
-                id="openrouter_key"
-                name="openrouter_api_key"
-                type="password"
-                autoComplete="off"
-                maxLength={256}
-                value={openRouterApiKey}
-                onChange={event => setOpenRouterApiKey(event.target.value)}
-                disabled={isPending}
-                placeholder={
-                  initialOpenRouterApiKeyConfigured && !trimmedOpenRouterApiKey
-                    ? '••••••••••••••••'
-                    : t('Enter OpenRouter API key')
-                }
+                id="terms-of-service-pdf"
+                type="file"
+                name="tos_pdf"
+                accept="application/pdf"
+                disabled={isPending || isRemovingTermsOfServicePdf}
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null
+                  setSelectedTermsOfServicePdfFile(file)
+                }}
               />
               <p className="text-xs text-muted-foreground">
-                {t('Generate an API key at')}
-                {' '}
-                <a
-                  href="https://openrouter.ai/settings/keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline underline-offset-2"
-                >
-                  openrouter.ai/settings/keys
-                </a>
-                .
+                {t('Upload a PDF to replace the default /tos page content. PDF only, up to 2MB.')}
               </p>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="openrouter_model">{t('Preferred OpenRouter model')}</Label>
-              <div className="flex items-center gap-2">
-                <Select
-                  value={openRouterSelectValue}
-                  onValueChange={handleOpenRouterModelChange}
-                  disabled={!openRouterModelSelectEnabled || isPending}
+            {selectedTermsOfServicePdfFile
+              ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t('Selected file:')}
+                    {' '}
+                    {selectedTermsOfServicePdfFile.name}
+                  </p>
+                )
+              : null}
+
+            {hasUploadedTermsOfServicePdf
+              && (
+                <div className="
+                  flex flex-col gap-3 rounded-xl border border-border/60 bg-muted/10 p-4
+                  sm:flex-row sm:items-center sm:justify-between
+                "
                 >
-                  <SelectTrigger id="openrouter_model" className="h-12! w-full max-w-md justify-between text-left">
-                    <SelectValue placeholder={t('Select a model')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={AUTOMATIC_MODEL_VALUE}>
-                      {t('Let OpenRouter decide')}
-                    </SelectItem>
-                    {openRouterModelOptions.map(model => (
-                      <SelectItem key={model.id} value={model.id}>
-                        <div className="flex flex-col gap-0.5">
-                          <span>{model.label}</span>
-                          {model.contextWindow
-                            ? (
-                                <span className="text-xs text-muted-foreground">
-                                  {t('Context window:')}
-                                  {' '}
-                                  {model.contextWindow.toLocaleString()}
-                                </span>
-                              )
-                            : null}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="icon"
-                  className="size-12 shrink-0"
-                  disabled={!trimmedOpenRouterApiKey || isPending || isRefreshingOpenRouterModels}
-                  onClick={handleRefreshOpenRouterModels}
-                  title={t('Refresh models')}
-                  aria-label={t('Refresh models')}
-                >
-                  <RefreshCwIcon className={cn('size-4', { 'animate-spin': isRefreshingOpenRouterModels })} />
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {t('Models with live browsing (for example')}
-                {' '}
-                <code>perplexity/sonar</code>
-                {t(') perform best. Explore available models at')}
-                {' '}
-                <a
-                  href="https://openrouter.ai/models"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline underline-offset-2"
-                >
-                  openrouter.ai/models
-                </a>
-                .
-              </p>
-              {openRouterModelsError
-                ? (
-                    <p className="text-xs text-destructive">{openRouterModelsError}</p>
-                  )
-                : null}
-            </div>
+                  <div className="grid gap-1">
+                    <p className="text-sm font-medium">{t('An uploaded Terms of Use PDF is currently active on /tos.')}</p>
+                    <a
+                      href={initialTermsOfServicePdfUrl ?? '#'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-muted-foreground underline underline-offset-2"
+                    >
+                      {t('Open current PDF')}
+                    </a>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isPending || isRemovingTermsOfServicePdf}
+                    onClick={handleRemoveTermsOfServicePdf}
+                  >
+                    {isRemovingTermsOfServicePdf ? t('Removing...') : t('Remove uploaded PDF')}
+                  </Button>
+                </div>
+              )}
           </div>
         </SettingsAccordionSection>
 
         <SettingsAccordionSection
-          value="lifi"
-          isOpen={openSections.includes('lifi')}
+          value="integrations"
+          isOpen={openSections.includes('integrations')}
           onToggle={toggleSection}
-          header={<h3 className="text-base font-medium">{t('LI.FI integration')}</h3>}
+          header={<h3 className="text-base font-medium">{t('Integrations')}</h3>}
         >
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-6">
             <div className="grid gap-2">
-              <Label htmlFor="theme-lifi-integrator">{t('Integrator name')}</Label>
+              <Label htmlFor="theme-google-analytics-id">{t('Google Analytics ID')}</Label>
               <Input
-                id="theme-lifi-integrator"
-                name="lifi_integrator"
+                id="theme-google-analytics-id"
+                name="google_analytics_id"
                 maxLength={120}
-                value={lifiIntegrator}
-                onChange={event => setLifiIntegrator(event.target.value)}
+                value={googleAnalyticsId}
+                onChange={event => setGoogleAnalyticsId(event.target.value)}
                 disabled={isPending}
-                placeholder={t('your-app-id (optional)')}
+                placeholder={t('G-XXXXXXXXXX (optional)')}
               />
-              <p className="text-xs text-muted-foreground">
-                {t('Create an account and generate one at')}
-                {' '}
-                <a
-                  href="https://li.fi"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline underline-offset-2"
-                >
-                  li.fi
-                </a>
-                .
-              </p>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="theme-lifi-api-key">{t('API key')}</Label>
-              <Input
-                id="theme-lifi-api-key"
-                name="lifi_api_key"
-                type="password"
-                autoComplete="off"
-                maxLength={256}
-                value={lifiApiKey}
-                onChange={event => setLifiApiKey(event.target.value)}
-                disabled={isPending}
-                placeholder={
-                  initialLiFiApiKeyConfigured && !lifiApiKey.trim()
-                    ? '••••••••••••••••'
-                    : t('Enter API key (optional)')
-                }
-              />
-              <p className="invisible text-xs text-muted-foreground" aria-hidden="true">
-                {t('Spacer')}
-              </p>
+            <div className="grid gap-6 border-t border-border/50 pt-6">
+              <div className="grid gap-2">
+                <h4 className="text-sm font-medium">{t('OpenRouter integration')}</h4>
+                <Label htmlFor="openrouter_key">{t('API key')}</Label>
+                <Input
+                  id="openrouter_key"
+                  name="openrouter_api_key"
+                  type="password"
+                  autoComplete="off"
+                  maxLength={256}
+                  value={openRouterApiKey}
+                  onChange={event => setOpenRouterApiKey(event.target.value)}
+                  disabled={isPending}
+                  placeholder={
+                    initialOpenRouterApiKeyConfigured && !trimmedOpenRouterApiKey
+                      ? '••••••••••••••••'
+                      : t('Enter OpenRouter API key')
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t('Generate an API key at')}
+                  {' '}
+                  <a
+                    href="https://openrouter.ai/settings/keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline underline-offset-2"
+                  >
+                    openrouter.ai/settings/keys
+                  </a>
+                  .
+                </p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="openrouter_model">{t('Preferred OpenRouter model')}</Label>
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={openRouterSelectValue}
+                    onValueChange={handleOpenRouterModelChange}
+                    disabled={!openRouterModelSelectEnabled || isPending}
+                  >
+                    <SelectTrigger id="openrouter_model" className="h-12! w-full max-w-md justify-between text-left">
+                      <SelectValue placeholder={t('Select a model')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={AUTOMATIC_MODEL_VALUE}>
+                        {t('Let OpenRouter decide')}
+                      </SelectItem>
+                      {openRouterModelOptions.map(model => (
+                        <SelectItem key={model.id} value={model.id}>
+                          <div className="flex flex-col gap-0.5">
+                            <span>{model.label}</span>
+                            {model.contextWindow
+                              ? (
+                                  <span className="text-xs text-muted-foreground">
+                                    {t('Context window:')}
+                                    {' '}
+                                    {model.contextWindow.toLocaleString()}
+                                  </span>
+                                )
+                              : null}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="icon"
+                    className="size-12 shrink-0"
+                    disabled={!trimmedOpenRouterApiKey || isPending || isRefreshingOpenRouterModels}
+                    onClick={handleRefreshOpenRouterModels}
+                    title={t('Refresh models')}
+                    aria-label={t('Refresh models')}
+                  >
+                    <RefreshCwIcon className={cn('size-4', { 'animate-spin': isRefreshingOpenRouterModels })} />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t('Models with live browsing (for example')}
+                  {' '}
+                  <code>perplexity/sonar</code>
+                  {t(') perform best. Explore available models at')}
+                  {' '}
+                  <a
+                    href="https://openrouter.ai/models"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline underline-offset-2"
+                  >
+                    openrouter.ai/models
+                  </a>
+                  .
+                </p>
+                {openRouterModelsError
+                  ? (
+                      <p className="text-xs text-destructive">{openRouterModelsError}</p>
+                    )
+                  : null}
+              </div>
+            </div>
+
+            <div className="grid gap-4 border-t border-border/50 pt-6 md:grid-cols-2">
+              <div className="grid gap-2 md:col-span-2">
+                <h4 className="text-sm font-medium">{t('LI.FI integration')}</h4>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="theme-lifi-integrator">{t('Integrator name')}</Label>
+                <Input
+                  id="theme-lifi-integrator"
+                  name="lifi_integrator"
+                  maxLength={120}
+                  value={lifiIntegrator}
+                  onChange={event => setLifiIntegrator(event.target.value)}
+                  disabled={isPending}
+                  placeholder={t('your-app-id (optional)')}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t('Create an account and generate one at')}
+                  {' '}
+                  <a
+                    href="https://li.fi"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline underline-offset-2"
+                  >
+                    li.fi
+                  </a>
+                  .
+                </p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="theme-lifi-api-key">{t('API key')}</Label>
+                <Input
+                  id="theme-lifi-api-key"
+                  name="lifi_api_key"
+                  type="password"
+                  autoComplete="off"
+                  maxLength={256}
+                  value={lifiApiKey}
+                  onChange={event => setLifiApiKey(event.target.value)}
+                  disabled={isPending}
+                  placeholder={
+                    initialLiFiApiKeyConfigured && !lifiApiKey.trim()
+                      ? '••••••••••••••••'
+                      : t('Enter API key (optional)')
+                  }
+                />
+                <p className="invisible text-xs text-muted-foreground" aria-hidden="true">
+                  {t('Spacer')}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 border-t border-border/50 pt-6">
+              <div className="flex items-center justify-between gap-3">
+                <div className="grid gap-1">
+                  <h4 className="text-sm font-medium">{t('Custom Integrations')}</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {t('Add external scripts to enable features like chat, analytics, tracking, and more')}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isPending || customJavascriptCodes.length >= MAX_CUSTOM_JAVASCRIPT_CODES}
+                  onClick={handleAddCustomJavascriptCode}
+                >
+                  {t('Add Integration')}
+                </Button>
+              </div>
+
+              <div className="grid gap-3">
+                {customJavascriptCodes.length > 0
+                  ? customJavascriptCodes.map((code, index) => (
+                      <div
+                        key={code.id}
+                        className="grid gap-4 rounded-xl border border-border/60 bg-muted/10 p-4"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <h4 className="text-sm font-medium">
+                            {code.name.trim() || `${t('Script')} ${index + 1}`}
+                          </h4>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            disabled={isPending}
+                            onClick={() => handleRemoveCustomJavascriptCode(index)}
+                          >
+                            {t('Remove')}
+                          </Button>
+                        </div>
+
+                        <div className="grid gap-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor={`theme-custom-javascript-code-name-${code.id}`}>{t('Name')}</Label>
+                            <Input
+                              id={`theme-custom-javascript-code-name-${code.id}`}
+                              value={code.name}
+                              onChange={event => updateCustomJavascriptCode(index, current => ({
+                                ...current,
+                                name: event.target.value,
+                              }))}
+                              disabled={isPending}
+                              maxLength={MAX_CUSTOM_JAVASCRIPT_CODE_NAME_LENGTH}
+                              placeholder={t('Support widget')}
+                            />
+                          </div>
+
+                          <div className="grid gap-2">
+                            <Label htmlFor={`theme-custom-javascript-code-snippet-${code.id}`}>{t('Paste your JavaScript snippet here')}</Label>
+                            <Textarea
+                              id={`theme-custom-javascript-code-snippet-${code.id}`}
+                              value={code.snippet}
+                              onChange={event => updateCustomJavascriptCode(index, current => ({
+                                ...current,
+                                snippet: event.target.value,
+                              }))}
+                              disabled={isPending}
+                              rows={6}
+                              maxLength={MAX_CUSTOM_JAVASCRIPT_CODE_SNIPPET_LENGTH}
+                              placeholder={'<script src="https://..."></script>'}
+                              className="font-mono text-xs"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid gap-2">
+                          <Label>{t('Disable on')}</Label>
+                          <div className="flex flex-wrap gap-3">
+                            {customJavascriptCodeDisablePageOptions.map((option) => {
+                              const fieldId = `theme-custom-javascript-code-${code.id}-disable-${option.value}`
+                              return (
+                                <label
+                                  key={option.value}
+                                  htmlFor={fieldId}
+                                  className={cn(
+                                    `
+                                      flex min-w-32 cursor-pointer items-center gap-2 rounded-lg border border-border/60
+                                      px-3 py-2 text-sm transition-colors
+                                      hover:bg-muted/40
+                                    `,
+                                    code.disabledOn.includes(option.value) && 'border-primary/50 bg-primary/5',
+                                  )}
+                                >
+                                  <Checkbox
+                                    id={fieldId}
+                                    checked={code.disabledOn.includes(option.value)}
+                                    disabled={isPending}
+                                    onCheckedChange={checked => handleToggleCustomJavascriptCodeDisableOn(index, option.value, checked === true)}
+                                  />
+                                  <span>{option.label}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  : null}
+              </div>
             </div>
           </div>
         </SettingsAccordionSection>
@@ -1058,7 +1342,7 @@ export default function AdminGeneralSettingsForm({
       {state.error && <InputError message={state.error} />}
 
       <div className="flex justify-end">
-        <Button type="submit" className="w-full sm:w-40" disabled={isPending}>
+        <Button type="submit" className="w-full sm:w-40" disabled={isPending || isRemovingTermsOfServicePdf}>
           {isPending ? t('Saving...') : t('Save settings')}
         </Button>
       </div>

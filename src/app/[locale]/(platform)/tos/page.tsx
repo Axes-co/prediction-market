@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { setRequestLocale } from 'next-intl/server'
-import { loadRuntimeThemeState } from '@/lib/theme-settings'
+import { SettingsRepository } from '@/lib/db/queries/settings'
+import { getTermsOfServicePdfUrl } from '@/lib/terms-of-service'
+import { getThemeSiteSettingsFormState, loadRuntimeThemeState } from '@/lib/theme-settings'
 
 export async function generateMetadata(): Promise<Metadata> {
   const runtimeTheme = await loadRuntimeThemeState()
@@ -12,14 +14,32 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 }
 
-export default async function TermsOfUsePage({ params }: PageProps<'/[locale]/terms-of-use'>) {
+export default async function TermsOfUsePage({ params }: PageProps<'/[locale]/tos'>) {
   const { locale } = await params
   setRequestLocale(locale)
 
-  const runtimeTheme = await loadRuntimeThemeState()
-  const siteName = runtimeTheme.site.name
+  const { data: allSettings } = await SettingsRepository.getSettings()
+  const siteSettings = getThemeSiteSettingsFormState(allSettings ?? undefined)
+  const siteName = siteSettings.siteName
   const siteNameUpper = siteName.toUpperCase()
   const siteUrl = (process.env.SITE_URL?.trim()?.replace(/\/$/, '') ?? '') || undefined
+  const termsOfServicePdfUrl = getTermsOfServicePdfUrl(allSettings ?? undefined)
+
+  if (termsOfServicePdfUrl) {
+    const pdfViewerUrl = termsOfServicePdfUrl.includes('#')
+      ? termsOfServicePdfUrl
+      : `${termsOfServicePdfUrl}#view=FitH&zoom=page-width&pagemode=none`
+
+    return (
+      <main className="h-[calc(100dvh-5rem)] w-full overflow-x-hidden">
+        <iframe
+          src={pdfViewerUrl}
+          title="Terms of Use PDF"
+          className="block size-full border-0"
+        />
+      </main>
+    )
+  }
 
   return (
     <main className="container mx-auto max-w-4xl space-y-10 py-12 leading-relaxed text-foreground dark:text-foreground">

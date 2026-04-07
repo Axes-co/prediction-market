@@ -1,8 +1,10 @@
+import type { CustomJavascriptCodeConfig } from '@/lib/custom-javascript-code'
 import type { ResolvedThemeConfig, ThemeOverrides, ThemePresetId, ThemeRadius } from '@/lib/theme'
 import type { ThemeSiteIdentity, ThemeSiteLogoMode } from '@/lib/theme-site-identity'
 import { cacheTag } from 'next/cache'
 import { cacheTags } from '@/lib/cache-tags'
 import { ZERO_ADDRESS } from '@/lib/contracts'
+import { validateCustomJavascriptCodesJson } from '@/lib/custom-javascript-code'
 import { SettingsRepository } from '@/lib/db/queries/settings'
 import { getPublicAssetUrl } from '@/lib/storage'
 import {
@@ -613,6 +615,7 @@ function hasStoredThemeSiteSettings(generalSettings?: SettingsGroup) {
     || generalSettings[THEME_SITE_TELEGRAM_LINK_KEY]?.value?.trim()
     || generalSettings[THEME_SITE_REDDIT_LINK_KEY]?.value?.trim()
     || generalSettings[THEME_SITE_SUPPORT_URL_KEY]?.value?.trim()
+    || generalSettings[THEME_SITE_CUSTOM_JAVASCRIPT_CODES_KEY]?.value?.trim()
     || generalSettings[GENERAL_PWA_ICON_192_PATH_KEY]?.value?.trim()
     || generalSettings[GENERAL_PWA_ICON_512_PATH_KEY]?.value?.trim()
     || generalSettings[GENERAL_FEE_RECIPIENT_WALLET_KEY]?.value?.trim()
@@ -692,6 +695,7 @@ export function getThemeSiteSettingsFormState(allSettings?: SettingsMap): ThemeS
     telegramLinkErrorLabel: 'Telegram link',
     redditLinkErrorLabel: 'Reddit link',
     supportUrlErrorLabel: 'Support URL',
+    customJavascriptCodesErrorLabel: 'Custom javascript code',
     feeRecipientWalletErrorLabel: 'Fee recipient wallet',
   })
 
@@ -840,6 +844,7 @@ export function validateThemeSiteSettingsInput(params: {
     telegramLinkErrorLabel: 'Telegram link',
     redditLinkErrorLabel: 'Reddit link',
     supportUrlErrorLabel: 'Support URL',
+    customJavascriptCodesErrorLabel: 'Custom javascript code',
     feeRecipientWalletErrorLabel: 'Fee recipient wallet',
     lifiIntegratorErrorLabel: 'LI.FI integrator',
     lifiApiKeyErrorLabel: 'LI.FI API key',
@@ -917,6 +922,7 @@ export async function loadRuntimeThemeState(): Promise<RuntimeThemeState> {
         telegramLinkErrorLabel: 'Telegram link in settings',
         redditLinkErrorLabel: 'Reddit link in settings',
         supportUrlErrorLabel: 'Support URL in settings',
+        customJavascriptCodesErrorLabel: 'Custom javascript code in settings',
         feeRecipientWalletErrorLabel: 'Fee recipient wallet in settings',
       })
     : null

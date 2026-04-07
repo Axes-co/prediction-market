@@ -140,7 +140,9 @@ describe('updateGeneralSettingsAction', () => {
     expect(savedPayload.find(entry => entry.key === 'site_telegram_link')?.value).toBe('')
     expect(savedPayload.find(entry => entry.key === 'site_reddit_link')?.value).toBe('')
     expect(savedPayload.find(entry => entry.key === 'site_support_url')?.value).toBe('mailto:support@kuest.com')
+    expect(savedPayload.find(entry => entry.key === 'site_custom_javascript_codes')?.value).toBe('')
     expect(savedPayload.find(entry => entry.key === 'fee_recipient_wallet')?.value).toBe('0x1111111111111111111111111111111111111111')
+    expect(savedPayload.find(entry => entry.key === 'tos_pdf_path')?.value).toBe('')
     expect(savedPayload.find(entry => entry.key === 'lifi_integrator')?.value).toBe('kuest-fork')
     expect(savedPayload.find(entry => entry.key === 'lifi_api_key')?.value).toBe('enc.v1.lifi-123')
     expect(savedPayload.find(entry => entry.group === 'ai' && entry.key === 'openrouter_model')?.value).toBe('openai/gpt-4o-mini')
@@ -149,6 +151,7 @@ describe('updateGeneralSettingsAction', () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/[locale]/admin', 'page')
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/[locale]/admin/theme', 'page')
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/[locale]/admin/market-context', 'page')
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/[locale]/tos', 'page')
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/[locale]', 'layout')
   })
 
@@ -246,5 +249,75 @@ describe('updateGeneralSettingsAction', () => {
     const result = await updateGeneralSettingsAction({ error: null }, formData)
     expect(result).toEqual({ error: 'Logo must be PNG, JPG, WebP, or SVG.' })
     expect(mocks.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it('uploads and saves a Terms of Use PDF when provided', async () => {
+    mocks.getCurrentUser.mockResolvedValueOnce({ id: 'admin-1', is_admin: true })
+    mocks.updateSettings.mockResolvedValueOnce({ data: [], error: null })
+
+    const { updateGeneralSettingsAction } = await import('@/app/[locale]/admin/(general)/_actions/update-general-settings')
+    const formData = new FormData()
+    formData.set('site_name', 'Kuest')
+    formData.set('site_description', 'Prediction market')
+    formData.set('logo_mode', 'svg')
+    formData.set('logo_svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>')
+    formData.set('logo_image_path', '')
+    formData.set('fee_recipient_wallet', '0x1111111111111111111111111111111111111111')
+    formData.set('tos_pdf', new File(['%PDF-1.7'], 'terms.pdf', { type: 'application/pdf' }))
+
+    const result = await updateGeneralSettingsAction({ error: null }, formData)
+    expect(result).toEqual({ error: null })
+    expect(mocks.upload).toHaveBeenCalledTimes(1)
+
+    const uploadedPath = mocks.upload.mock.calls[0][0] as string
+    expect(uploadedPath).toMatch(/^legal\/terms-of-service-\d+-[a-z0-9]+\.pdf$/)
+    const uploadedBody = mocks.upload.mock.calls[0][1] as unknown
+    const isBinaryBody = ArrayBuffer.isView(uploadedBody)
+      || (
+        uploadedBody !== null
+        && typeof uploadedBody === 'object'
+        && 'type' in uploadedBody
+        && 'data' in uploadedBody
+      )
+    expect(isBinaryBody).toBe(true)
+    expect(mocks.upload.mock.calls[0][2]).toEqual({
+      contentType: 'application/pdf',
+      cacheControl: '31536000',
+    })
+
+    const savedPayload = mocks.updateSettings.mock.calls[0][0] as Array<{ group: string, key: string, value: string }>
+    expect(savedPayload.find(entry => entry.key === 'tos_pdf_path')?.value).toBe(uploadedPath)
+  })
+
+  it('rejects unsupported Terms of Use PDF uploads', async () => {
+    mocks.getCurrentUser.mockResolvedValueOnce({ id: 'admin-1', is_admin: true })
+
+    const { updateGeneralSettingsAction } = await import('@/app/[locale]/admin/(general)/_actions/update-general-settings')
+    const formData = new FormData()
+    formData.set('site_name', 'Kuest')
+    formData.set('site_description', 'Prediction market')
+    formData.set('logo_mode', 'svg')
+    formData.set('logo_svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>')
+    formData.set('logo_image_path', '')
+    formData.set('fee_recipient_wallet', '0x1111111111111111111111111111111111111111')
+    formData.set('tos_pdf', new File(['not-a-pdf'], 'terms.txt', { type: 'text/plain' }))
+
+    const result = await updateGeneralSettingsAction({ error: null }, formData)
+    expect(result).toEqual({ error: 'Terms of Use PDF must be a PDF file.' })
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it('removes the uploaded Terms of Use PDF', async () => {
+    mocks.getCurrentUser.mockResolvedValueOnce({ id: 'admin-1', is_admin: true })
+    mocks.updateSettings.mockResolvedValueOnce({ data: [], error: null })
+
+    const { removeTermsOfServicePdfAction } = await import('@/app/[locale]/admin/(general)/_actions/update-general-settings')
+
+    const result = await removeTermsOfServicePdfAction()
+    expect(result).toEqual({ error: null })
+    expect(mocks.updateSettings).toHaveBeenCalledWith([
+      { group: 'general', key: 'tos_pdf_path', value: '' },
+    ])
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/[locale]/tos', 'page')
   })
 })

@@ -1,3 +1,4 @@
+import type { CustomJavascriptCodeConfig } from '@/lib/custom-javascript-code'
 import { sanitizeSvg } from '@/lib/utils'
 
 export const THEME_SITE_LOGO_MODES = ['svg', 'image'] as const
