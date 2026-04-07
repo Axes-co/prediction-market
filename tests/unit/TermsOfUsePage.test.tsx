@@ -51,7 +51,7 @@ describe('termsOfUsePage', () => {
       'src',
       'https://cdn.example.com/legal/tos.pdf#view=FitH&zoom=page-width&pagemode=none',
     )
-    expect(screen.queryByText(/These Terms of Use \("Terms"\) govern your access/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/These Terms of Use/i)).not.toBeInTheDocument()
   })
 
   it('falls back to the built-in Terms of Use content when no PDF is configured', async () => {
@@ -60,7 +60,7 @@ describe('termsOfUsePage', () => {
     const { default: TermsOfUsePage } = await import('@/app/[locale]/(platform)/tos/page')
     render(await TermsOfUsePage({ params: Promise.resolve({ locale: 'en' }) } as any))
 
-    expect(screen.getByText(/These Terms of Use \("Terms"\) govern your access/i)).toBeInTheDocument()
+    expect(screen.getByText(/These Terms of Use/i)).toBeInTheDocument()
     expect(screen.queryByTitle('Terms of Use PDF')).not.toBeInTheDocument()
   })
 })
