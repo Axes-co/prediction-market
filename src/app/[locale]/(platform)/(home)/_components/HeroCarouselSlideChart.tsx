@@ -2,7 +2,7 @@
 
 import type { HomeSportsMoneylineButton, HomeSportsMoneylineModel } from '@/lib/sports-home-card'
 import type { Event } from '@/types'
-import type { PredictionChartCursorSnapshot, SeriesConfig } from '@/types/PredictionChartTypes'
+import type { DataPoint, PredictionChartCursorSnapshot, SeriesConfig } from '@/types/PredictionChartTypes'
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useResizeObserver } from '@/app/[locale]/(platform)/(home)/_hooks/useResizeObserver'
@@ -54,19 +54,18 @@ const PLOT_CLIP_RIGHT_PADDING = 18
 const LABEL_SPACE_RATIO = 0.65
 
 // ---------------------------------------------------------------------------
-// Series resolution
+// Sports series resolution
 //
-// The hero chart resolves series differently per variant:
+// Mirrors SportsGameGraph (SportsGamesCenter.tsx) which handles two cases:
 //
-//   Sports  → builds series directly from the moneyline model buttons,
-//             using team abbreviations as labels and team colors.
-//             Mirrors SportsGameGraph (SportsGamesCenter.tsx):
-//             - Separated moneyline: one conditionId per team (key = conditionId)
-//             - Binary moneyline: shared conditionId (key = conditionId:outcomeIndex)
+//   Separated moneyline (neg-risk): each team has its own conditionId/market.
+//     → useEventPriceHistory returns independent data per conditionId.
+//     → Series key = conditionId (matches data directly).
 //
-//   Standard → uses buildChartSeries (EventChartUtils) for multi-market,
-//              then overrides single-market to var(--primary) to match
-//              EventChart.effectiveSeries.
+//   Binary moneyline (non-neg-risk): both teams share one conditionId/market.
+//     → useEventPriceHistory returns one column for the YES outcome (team1).
+//     → We derive team2 = 100 - team1, keyed with compound keys.
+//     → Mirrors SportsGameGraph.buildCompositeMoneylineGraphTargets.
 // ---------------------------------------------------------------------------
 
 const SPORTS_FALLBACK_COLORS = ['var(--yes)', 'var(--primary)', 'var(--no)']
@@ -88,40 +87,72 @@ function resolveButtonColor(
   return SPORTS_FALLBACK_COLORS[fallbackIndex % SPORTS_FALLBACK_COLORS.length]
 }
 
-function buildSportsSeries(
-  model: HomeSportsMoneylineModel,
-): SeriesConfig[] {
+interface SportsSeriesResult {
+  series: SeriesConfig[]
+  isBinaryMoneyline: boolean
+  sharedConditionId: string | null
+}
+
+function buildSportsSeries(model: HomeSportsMoneylineModel): SportsSeriesResult {
   const buttons = [
     model.team1Button,
     model.drawButton,
     model.team2Button,
   ].filter((b): b is HomeSportsMoneylineButton => Boolean(b))
 
-  // Detect binary moneyline: all buttons share one conditionId.
-  // In this case, use compound key (conditionId:outcomeIndex) to match
-  // SportsGameGraph.buildCompositeMoneylineGraphTargets.
   const uniqueConditionIds = new Set(buttons.map(b => b.conditionId))
   const isBinaryMoneyline = uniqueConditionIds.size === 1
+  const sharedConditionId = isBinaryMoneyline ? buttons[0].conditionId : null
 
-  return buttons.map((button, index) => ({
+  const series = buttons.map((button, index) => ({
     key: isBinaryMoneyline
       ? `${button.conditionId}:${button.outcomeIndex}`
       : button.conditionId,
     name: button.label,
     color: resolveButtonColor(model, button, index),
   }))
+
+  return { series, isBinaryMoneyline, sharedConditionId }
 }
 
-function resolveHeroSeries(
+/**
+ * For binary moneyline, normalizedHistory has data keyed by plain conditionId.
+ * PredictionChart expects data keyed by compound series keys (conditionId:outcomeIndex).
+ *
+ * This transforms each data point:
+ *   { date, "condId": 65 }  →  { date, "condId:0": 65, "condId:1": 35 }
+ *
+ * Mirrors how SportsGameGraph fetches per-outcome data via separate tokenIds.
+ */
+function transformBinaryMoneylineData(
+  data: DataPoint[],
+  conditionId: string,
+  buttons: HomeSportsMoneylineButton[],
+): DataPoint[] {
+  return data.map((point) => {
+    const yesValue = point[conditionId]
+    if (typeof yesValue !== 'number') {
+      return point
+    }
+
+    const transformed: DataPoint = { date: point.date }
+    for (const button of buttons) {
+      const compoundKey = `${conditionId}:${button.outcomeIndex}`
+      // outcomeIndex 0 = YES (original value), outcomeIndex 1 = NO (complement)
+      transformed[compoundKey] = button.outcomeIndex === 0 ? yesValue : 100 - yesValue
+    }
+    return transformed
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Standard series resolution
+// ---------------------------------------------------------------------------
+
+function resolveStandardSeries(
   event: Event,
-  variant: HeroChartVariant,
-  sportsModel: HomeSportsMoneylineModel | null | undefined,
   chances: Record<string, number>,
 ): SeriesConfig[] {
-  if (variant === 'sports' && sportsModel) {
-    return buildSportsSeries(sportsModel)
-  }
-
   const marketIds = getTopMarketIds(chances, MAX_HERO_SERIES)
   const series = buildChartSeries(event, marketIds)
 
@@ -228,23 +259,43 @@ export default function HeroCarouselSlideChart({
     [event.markets],
   )
 
-  // --- Series ---
+  // --- Series & data resolution ---
+
+  const sportsResult = useMemo(
+    () => variant === 'sports' && sportsModel ? buildSportsSeries(sportsModel) : null,
+    [variant, sportsModel],
+  )
 
   const series = useMemo(
-    () => resolveHeroSeries(event, variant, sportsModel, chances),
-    [event, variant, sportsModel, chances],
+    () => sportsResult?.series ?? resolveStandardSeries(event, chances),
+    [sportsResult, event, chances],
   )
+
+  // For binary moneyline, transform data to match compound series keys.
+  // Separated moneyline and standard charts use normalizedHistory as-is.
+  const chartData = useMemo(() => {
+    if (!sportsResult?.isBinaryMoneyline || !sportsResult.sharedConditionId || !sportsModel) {
+      return normalizedHistory
+    }
+    const buttons = [
+      sportsModel.team1Button,
+      sportsModel.drawButton,
+      sportsModel.team2Button,
+    ].filter((b): b is HomeSportsMoneylineButton => Boolean(b))
+
+    return transformBinaryMoneylineData(normalizedHistory, sportsResult.sharedConditionId, buttons)
+  }, [normalizedHistory, sportsResult, sportsModel])
 
   const showLegend = variant === 'multi-outcome' && series.length > 1
   const showEndOfLineLabels = variant === 'sports'
 
   const xDomain = useMemo(() => {
-    if (!showEndOfLineLabels || normalizedHistory.length < 2 || !clientNow) {
+    if (!showEndOfLineLabels || chartData.length < 2 || !clientNow) {
       return undefined
     }
 
-    const firstTs = normalizedHistory[0].date.getTime()
-    const lastTs = normalizedHistory.at(-1)!.date.getTime()
+    const firstTs = chartData[0].date.getTime()
+    const lastTs = chartData.at(-1)!.date.getTime()
     const dataSpan = lastTs - firstTs
 
     if (dataSpan <= 0) {
@@ -252,7 +303,7 @@ export default function HeroCarouselSlideChart({
     }
 
     return { end: lastTs + dataSpan * LABEL_SPACE_RATIO }
-  }, [showEndOfLineLabels, normalizedHistory, clientNow])
+  }, [showEndOfLineLabels, chartData, clientNow])
 
   const legendContent = useMemo(
     () => showLegend
@@ -269,14 +320,14 @@ export default function HeroCarouselSlideChart({
 
   // --- Render ---
 
-  const showChart = isActive && normalizedHistory.length > 0 && dimensions !== null
+  const showChart = isActive && chartData.length > 0 && dimensions !== null
 
   return (
     <div ref={containerRef} className="size-full">
       {showChart
         ? (
             <PredictionChart
-              data={normalizedHistory}
+              data={chartData}
               series={series}
               width={dimensions.width}
               height={dimensions.height}
