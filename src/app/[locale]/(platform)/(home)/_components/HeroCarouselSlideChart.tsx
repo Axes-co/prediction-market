@@ -273,16 +273,38 @@ export default function HeroCarouselSlideChart({
     eventResolvedAt: event.resolved_at,
   })
 
+  // Filter data to only include columns matching our series keys.
+  // Matches kuest's SportsGameGraph.historyChartData (line 1472) and
+  // EventChart.chartData which uses filterChartDataForSeries.
+  // Without this, extra market columns affect autoscale y-axis range.
+  const chartData = useMemo(() => {
+    const seriesKeys = chartConfig.series.map(s => s.key)
+    return normalizedHistory
+      .map((point) => {
+        const filtered: Record<string, number | Date> & { date: Date } = { date: point.date }
+        let hasValue = false
+        for (const key of seriesKeys) {
+          const value = point[key]
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            filtered[key] = value
+            hasValue = true
+          }
+        }
+        return hasValue ? filtered : null
+      })
+      .filter((point): point is NonNullable<typeof point> => point !== null)
+  }, [normalizedHistory, chartConfig.series])
+
   const showLegend = chartConfig.series.length > 1
   const showEndOfLineLabels = variant === 'sports'
-  const leadingGapStart = normalizedHistory[0]?.date ?? null
+  const leadingGapStart = chartData[0]?.date ?? null
 
   const xDomain = useMemo(() => {
-    if (!showEndOfLineLabels || normalizedHistory.length < 2 || !clientNow) {
+    if (!showEndOfLineLabels || chartData.length < 2 || !clientNow) {
       return undefined
     }
-    const firstTs = normalizedHistory[0].date.getTime()
-    const lastTs = normalizedHistory.at(-1)!.date.getTime()
+    const firstTs = chartData[0].date.getTime()
+    const lastTs = chartData.at(-1)!.date.getTime()
     const dataSpan = lastTs - firstTs
     if (dataSpan <= 0) {
       return undefined
@@ -303,14 +325,14 @@ export default function HeroCarouselSlideChart({
     [showLegend, chartConfig.series, chances, cursorSnapshot],
   )
 
-  const showChart = isActive && normalizedHistory.length > 0 && dimensions !== null
+  const showChart = isActive && chartData.length > 0 && dimensions !== null
 
   return (
     <div ref={containerRef} className="size-full">
       {showChart
         ? (
             <PredictionChart
-              data={normalizedHistory}
+              data={chartData}
               series={chartConfig.series}
               width={dimensions.width}
               height={dimensions.height}
