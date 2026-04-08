@@ -97,8 +97,13 @@ function resolveHeroSeriesColors(
     })
   }
 
-  // Single-market and multi-market events: use the colors from buildChartSeries
-  // (var(--chart-N) cycle) so they match the event page exactly.
+  // Single-market binary events: override to var(--primary) to match
+  // EventChart.effectiveSeries (line 749) which uses var(--primary) for YES view.
+  if (baseSeries.length === 1) {
+    return [{ ...baseSeries[0], color: 'var(--primary)' }]
+  }
+
+  // Multi-market events: use the default var(--chart-N) cycle from buildChartSeries.
   return baseSeries
 }
 
@@ -196,14 +201,26 @@ export default function HeroCarouselSlideChart({
     [event.markets],
   )
 
-  const topMarketIds = useMemo(
-    () => getTopMarketIds(chances, MAX_HERO_SERIES),
-    [chances],
-  )
+  // For sports charts, only show moneyline market lines (matching
+  // SportsGameGraph which filters to button.marketType === 'moneyline').
+  // For standard charts, show top markets by probability.
+  const chartMarketIds = useMemo(() => {
+    if (variant === 'sports' && sportsModel) {
+      const moneylineIds = [
+        sportsModel.team1Button.conditionId,
+        sportsModel.team2Button.conditionId,
+      ]
+      if (sportsModel.drawButton) {
+        moneylineIds.push(sportsModel.drawButton.conditionId)
+      }
+      return moneylineIds
+    }
+    return getTopMarketIds(chances, MAX_HERO_SERIES)
+  }, [variant, sportsModel, chances])
 
   const baseSeries = useMemo(
-    () => buildChartSeries(event, topMarketIds),
-    [event, topMarketIds],
+    () => buildChartSeries(event, chartMarketIds),
+    [event, chartMarketIds],
   )
 
   const series = useMemo(
@@ -266,8 +283,7 @@ export default function HeroCarouselSlideChart({
               margin={CHART_MARGIN}
               xDomain={xDomain}
               xAxisTickCount={3}
-              yAxis={{ min: 0, max: 100, ticks: [0, 25, 50, 75, 100] }}
-              autoscale={false}
+              autoscale
               cursorStepMs={CURSOR_STEP_MS[HERO_CHART_RANGE]}
               onCursorDataChange={setCursorSnapshot}
               showEndOfLineLabels={showEndOfLineLabels}
