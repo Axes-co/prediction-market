@@ -55,13 +55,13 @@ export default function SportsScoreboard({ event, model }: SportsScoreboardProps
           <div className="flex flex-col items-center gap-3">
             <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-3">
               <div className="flex flex-col items-end gap-1">
-                <span className="text-[2rem] font-medium tabular-nums">
+                <span className="text-2xl/tight font-semibold tabular-nums">
                   {score?.team1 ?? 0}
                 </span>
               </div>
               <span className="mb-5 h-1 w-3 rounded-full bg-muted-foreground/30" />
               <div className="flex flex-col items-start gap-1">
-                <span className="text-[2rem] font-medium tabular-nums">
+                <span className="text-2xl/tight font-semibold tabular-nums">
                   {score?.team2 ?? 0}
                 </span>
               </div>
