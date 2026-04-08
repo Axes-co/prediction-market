@@ -39,7 +39,7 @@ function OutcomeButton({
   })
 
   return (
-    <Button asChild variant={variant} className="h-14 flex-1 gap-1.5 text-lg font-bold tabular-nums">
+    <Button asChild variant={variant} className="h-14 flex-1 gap-1.5 text-base font-semibold tabular-nums">
       <AppLink href={href as never}>
         <span className="truncate uppercase">{outcome.outcome_text ?? (variant === 'yes' ? 'Yes' : 'No')}</span>
         <span>
@@ -112,11 +112,11 @@ export default function SlideOutcomes({ event, getDisplayChance }: SlideOutcomes
                   </div>
                 </div>
               )}
-              <p className="truncate text-[15px] font-medium tracking-[-0.01em] text-foreground group-hover:underline">
+              <p className="truncate text-sm font-medium tracking-[-0.01em] text-foreground group-hover:underline">
                 {label}
               </p>
             </div>
-            <span className="text-[1.75rem] leading-none font-semibold text-foreground">
+            <span className="text-xl leading-none font-semibold text-foreground">
               {chance}
               %
             </span>
