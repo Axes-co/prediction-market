@@ -37,7 +37,6 @@ type HeroChartVariant = 'multi-outcome' | 'sports'
 
 interface HeroCarouselSlideChartProps {
   event: Event
-  isActive: boolean
   variant: HeroChartVariant
   sportsModel?: HomeSportsMoneylineModel | null
 }
@@ -236,7 +235,6 @@ function HeroChartLegend({
 
 export default function HeroCarouselSlideChart({
   event,
-  isActive,
   variant,
   sportsModel,
 }: HeroCarouselSlideChartProps) {
@@ -318,7 +316,7 @@ export default function HeroCarouselSlideChart({
       return undefined
     }
     return { end: lastTs + dataSpan * LABEL_SPACE_RATIO }
-  }, [showEndOfLineLabels, normalizedHistory, clientNow])
+  }, [showEndOfLineLabels, chartData, clientNow])
 
   const legendContent = useMemo(
     () => showLegend
@@ -333,7 +331,10 @@ export default function HeroCarouselSlideChart({
     [showLegend, chartConfig.series, chances, cursorSnapshot],
   )
 
-  const showChart = isActive && chartData.length > 0 && dimensions !== null
+  // Render chart whenever data is ready, even on preloaded (off-screen) slides.
+  // This eliminates the skeleton flash during slide transitions — the chart SVG
+  // is already rendered before the slide animates into view.
+  const showChart = chartData.length > 0 && dimensions !== null
 
   return (
     <div ref={containerRef} className="size-full">

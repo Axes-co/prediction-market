@@ -112,7 +112,7 @@ function HeroCarouselSlide({ event, isActive, shouldPreload }: HeroCarouselSlide
                   <>
                     <SportsScoreboard event={event} model={homeSportsMoneylineModel} />
                     <div className="hidden min-h-0 flex-1 pt-2 lg:block">
-                      <HeroCarouselSlideChart event={event} isActive={isActive} variant="sports" sportsModel={homeSportsMoneylineModel} />
+                      <HeroCarouselSlideChart event={event} variant="sports" sportsModel={homeSportsMoneylineModel} />
                     </div>
                   </>
                 )
@@ -122,7 +122,7 @@ function HeroCarouselSlide({ event, isActive, shouldPreload }: HeroCarouselSlide
                   )
                 : (
                     <div className="min-h-0 flex-1">
-                      <HeroCarouselSlideChart event={event} isActive={isActive} variant="multi-outcome" />
+                      <HeroCarouselSlideChart event={event} variant="multi-outcome" />
                     </div>
                   )
           )}

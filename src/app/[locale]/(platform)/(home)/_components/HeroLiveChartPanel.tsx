@@ -231,7 +231,7 @@ export default function HeroLiveChartPanel({ event, isActive }: HeroLiveChartPan
     ? currentPrice - baselinePrice
     : null
 
-  const showChart = isActive && chartData.length > 0 && chartDimensions !== null
+  const showChart = chartData.length > 0 && chartDimensions !== null
 
   // --- Render ---
   return (
