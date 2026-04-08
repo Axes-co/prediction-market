@@ -82,7 +82,6 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
   const [isMergeDialogOpen, setIsMergeDialogOpen] = useState(false)
   const [mergeSuccess, setMergeSuccess] = useState(false)
   const [hideMergeButton, setHideMergeButton] = useState(false)
-  const [hiddenMergeSignature, setHiddenMergeSignature] = useState<string | null>(null)
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false)
   const [sharePosition, setSharePosition] = useState<PublicPosition | null>(null)
   const [availableMergeableMarkets, setAvailableMergeableMarkets] = useState<MergeableMarket[]>([])
@@ -131,7 +130,6 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
       setSearchQuery('')
       setRetryCount(0)
       setHideMergeButton(false)
-      setHiddenMergeSignature(null)
     })
   }, [userAddress])
 
@@ -216,7 +214,11 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
     const map: Record<string, Record<string, number>> = {}
 
     positionsWithIcons
-      .filter(position => position.status === 'active' && position.conditionId)
+      .filter(position =>
+        position.status === 'active'
+        && position.conditionId
+        && position.asset,
+      )
       .forEach((position) => {
         const conditionId = position.conditionId as string
         const assetKey = typeof position.asset === 'string' ? position.asset.trim() : ''
@@ -233,16 +235,6 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
     return map
   }, [positionsWithIcons])
 
-  const mergeSignature = useMemo(() => {
-    if (!availableMergeableMarkets.length) {
-      return ''
-    }
-    return availableMergeableMarkets
-      .map(market => `${market.conditionId}:${market.mergeAmount.toFixed(6)}`)
-      .sort()
-      .join('|')
-  }, [availableMergeableMarkets])
-
   useEffect(() => {
     let cancelled = false
 
@@ -254,7 +246,7 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
     }
 
     fetchLockedSharesByCondition(mergeableMarkets)
-      .then((lockedSharesByCondition) => {
+      .then((availabilityByCondition) => {
         if (cancelled) {
           return
         }
@@ -272,7 +264,8 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
             }
 
             const [firstOutcome, secondOutcome] = market.outcomeAssets
-            const locked = lockedSharesByCondition[conditionId] ?? {}
+            const availability = availabilityByCondition[conditionId]
+            const locked = availability?.lockedShares ?? {}
             const availableFirst = Math.max(
               0,
               (positionShares[firstOutcome] ?? 0) - (locked[firstOutcome] ?? 0),
@@ -290,6 +283,7 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
             return {
               ...market,
               mergeAmount: safeMergeAmount,
+              isNegRisk: availability?.isNegRisk ?? market.isNegRisk,
             }
           })
           .filter((entry): entry is MergeableMarket => Boolean(entry))
@@ -323,27 +317,15 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
     onSuccess: () => setMergeSuccess(true),
   })
 
-  useEffect(() => {
-    if (!hideMergeButton || !hiddenMergeSignature) {
-      return
-    }
-
-    if (mergeSignature && mergeSignature !== hiddenMergeSignature) {
-      setHideMergeButton(false)
-      setHiddenMergeSignature(null)
-    }
-  }, [hideMergeButton, hiddenMergeSignature, mergeSignature])
-
   const handleMergeDialogChange = useCallback((open: boolean) => {
     setIsMergeDialogOpen(open)
     if (!open) {
       if (mergeSuccess) {
         setHideMergeButton(true)
-        setHiddenMergeSignature(mergeSignature)
       }
       setMergeSuccess(false)
     }
-  }, [mergeSignature, mergeSuccess])
+  }, [mergeSuccess])
 
   const shareCardPayload = useMemo(() => {
     if (!sharePosition) {

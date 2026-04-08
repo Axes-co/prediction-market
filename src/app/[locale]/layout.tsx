@@ -6,6 +6,7 @@ import { setRequestLocale } from 'next-intl/server'
 import { cacheTag } from 'next/cache'
 import { notFound } from 'next/navigation'
 import CustomJavascriptCode from '@/components/CustomJavascriptCode'
+import GlobalAnnouncementBanner from '@/components/GlobalAnnouncementBanner'
 import PwaInstallStateSync from '@/components/PwaInstallStateSync'
 import PwaServiceWorker from '@/components/PwaServiceWorker'
 import SiteStructuredData from '@/components/seo/SiteStructuredData'
@@ -15,6 +16,7 @@ import { isRtlLocale } from '@/i18n/locales'
 import { routing } from '@/i18n/routing'
 import { cacheTags } from '@/lib/cache-tags'
 import { openSauceOne } from '@/lib/fonts'
+import { loadGlobalAnnouncementSettings } from '@/lib/global-announcement-settings'
 import { IS_TEST_MODE } from '@/lib/network'
 import { resolvePwaThemeColors } from '@/lib/pwa-colors'
 import siteUrlUtils from '@/lib/site-url'
@@ -107,6 +109,8 @@ export default async function LocaleLayout({ params, children }: LayoutProps<'/[
   }
 
   const runtimeTheme = await loadRuntimeThemeState()
+  const globalAnnouncement = await loadGlobalAnnouncementSettings()
+  const hasGlobalAnnouncement = globalAnnouncement.message.trim().length > 0
   cacheTag(cacheTags.settings)
 
   setRequestLocale(locale)
@@ -126,6 +130,16 @@ export default async function LocaleLayout({ params, children }: LayoutProps<'/[
         <SiteIdentityProvider site={runtimeTheme.site}>
           <NextIntlClientProvider locale={locale}>
             <AppProviders>
+              {hasGlobalAnnouncement
+                ? (
+                    <GlobalAnnouncementBanner
+                      locale={locale}
+                      message={globalAnnouncement.message}
+                      linkUrl={globalAnnouncement.linkUrl}
+                      disabledOn={globalAnnouncement.disabledOn}
+                    />
+                  )
+                : null}
               {IS_TEST_MODE && <TestModeBannerDeferred />}
               <PwaInstallStateSync />
               {children}
