@@ -2,22 +2,25 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 export default function HeroCarouselSkeleton() {
   return (
-    <div className="flex flex-col gap-4 flex-1">
-      <div className="rounded-[18px] border border-border bg-card overflow-hidden min-h-[min(480px,60vh)] max-h-[500px] p-5 pb-4">
-        <div className="flex flex-col gap-4 h-full">
+    <div className="flex flex-1 flex-col gap-4">
+      <div className="
+        max-h-[500px] min-h-[min(480px,60vh)] overflow-hidden rounded-[18px] border border-border bg-card p-5 pb-4
+      "
+      >
+        <div className="flex h-full flex-col gap-4">
           <div className="flex items-center gap-4">
-            <Skeleton className="size-14 rounded-md shrink-0" />
+            <Skeleton className="size-14 shrink-0 rounded-md" />
             <div className="flex-1 space-y-2">
               <Skeleton className="h-4 w-24" />
               <Skeleton className="h-7 w-3/4" />
             </div>
           </div>
 
-          <div className="flex gap-6 flex-1 min-h-0">
+          <div className="flex min-h-0 flex-1 gap-6">
             <div className="w-[40%] space-y-3">
               <div className="space-y-2">
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="flex items-center justify-between py-2 border-b border-border">
+                  <div key={i} className="flex items-center justify-between border-b border-border py-2">
                     <Skeleton className="h-4 w-24" />
                     <Skeleton className="h-6 w-12" />
                   </div>
@@ -25,7 +28,7 @@ export default function HeroCarouselSkeleton() {
               </div>
             </div>
             <div className="flex-1">
-              <Skeleton className="h-full w-full rounded-lg" />
+              <Skeleton className="size-full rounded-lg" />
             </div>
           </div>
 
@@ -36,7 +39,7 @@ export default function HeroCarouselSkeleton() {
         </div>
       </div>
 
-      <div className="flex items-center justify-center gap-1.5 h-10">
+      <div className="flex h-10 items-center justify-center gap-1.5">
         {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton
             key={i}
