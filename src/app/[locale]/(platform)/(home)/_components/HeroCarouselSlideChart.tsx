@@ -5,7 +5,7 @@ import type { HomeSportsMoneylineButton, HomeSportsMoneylineModel } from '@/lib/
 import type { Event } from '@/types'
 import type { PredictionChartCursorSnapshot, SeriesConfig } from '@/types/PredictionChartTypes'
 import dynamic from 'next/dynamic'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useResizeObserver } from '@/app/[locale]/(platform)/(home)/_hooks/useResizeObserver'
 import {
   CURSOR_STEP_MS,
@@ -48,7 +48,6 @@ const MIN_CHART_WIDTH = 200
 const MIN_CHART_HEIGHT = 150
 const CHART_MARGIN = { top: 10, right: 16, bottom: 24, left: 0 }
 const PLOT_CLIP_RIGHT_PADDING = 18
-const LABEL_SPACE_RATIO = 0.65
 
 // ---------------------------------------------------------------------------
 // Sports series + targets
@@ -238,11 +237,6 @@ export default function HeroCarouselSlideChart({
   const [dimensions, setDimensions] = useState<{ width: number, height: number } | null>(null)
   const [cursorSnapshot, setCursorSnapshot] = useState<PredictionChartCursorSnapshot | null>(null)
 
-  const [clientNow, setClientNow] = useState<number | null>(null)
-  useEffect(() => {
-    setClientNow(Date.now())
-  }, [])
-
   const handleResize = useCallback((entry: ResizeObserverEntry) => {
     const { width, height } = entry.contentRect
     if (width >= MIN_CHART_WIDTH && height >= MIN_CHART_HEIGHT) {
@@ -274,21 +268,7 @@ export default function HeroCarouselSlideChart({
   })
 
   const showLegend = chartConfig.series.length > 1
-  const showEndOfLineLabels = variant === 'sports'
   const leadingGapStart = normalizedHistory[0]?.date ?? null
-
-  const xDomain = useMemo(() => {
-    if (!showEndOfLineLabels || normalizedHistory.length < 2 || !clientNow) {
-      return undefined
-    }
-    const firstTs = normalizedHistory[0].date.getTime()
-    const lastTs = normalizedHistory.at(-1)!.date.getTime()
-    const dataSpan = lastTs - firstTs
-    if (dataSpan <= 0) {
-      return undefined
-    }
-    return { end: lastTs + dataSpan * LABEL_SPACE_RATIO }
-  }, [showEndOfLineLabels, normalizedHistory, clientNow])
 
   const legendContent = useMemo(
     () => showLegend
@@ -322,12 +302,10 @@ export default function HeroCarouselSlideChart({
               showLegend={showLegend}
               lineCurve="monotoneX"
               margin={CHART_MARGIN}
-              xDomain={xDomain}
               xAxisTickCount={3}
               autoscale
               cursorStepMs={CURSOR_STEP_MS[HERO_CHART_RANGE]}
               onCursorDataChange={setCursorSnapshot}
-              showEndOfLineLabels={showEndOfLineLabels}
               leadingGapStart={leadingGapStart}
               plotClipPadding={{ right: PLOT_CLIP_RIGHT_PADDING }}
             />
