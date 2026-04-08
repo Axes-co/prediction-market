@@ -17,7 +17,7 @@ export default function HeroSidebar({ events }: HeroSidebarProps) {
   return (
     <div className="hidden min-h-full w-[40%] flex-col justify-between gap-0 pb-0 lg:flex">
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div className="flex flex-1 flex-col gap-4 overflow-hidden pb-4">
+        <div className="flex max-h-[500px] min-h-[300px] flex-1 flex-col gap-4 overflow-hidden pb-4">
           <HeroBiggestMovers events={events} />
           <div className="border-t border-dashed border-border" />
           <HeroHotTopics events={events} />
