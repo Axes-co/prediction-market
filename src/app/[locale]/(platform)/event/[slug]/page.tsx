@@ -1,3 +1,5 @@
+'use cache'
+
 import type { Metadata } from 'next'
 import type { SupportedLocale } from '@/i18n/locales'
 import { setRequestLocale } from 'next-intl/server'
@@ -87,9 +89,5 @@ export default async function EventPage({ params }: PageProps<'/[locale]/event/[
     notFound()
   }
 
-  return (
-    <>
-      <CachedEventPageContent locale={resolvedLocale} slug={slug} />
-    </>
-  )
+  return <CachedEventPageContent locale={resolvedLocale} slug={slug} />
 }
