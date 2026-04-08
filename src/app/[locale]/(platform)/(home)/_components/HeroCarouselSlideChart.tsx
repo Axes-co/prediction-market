@@ -273,8 +273,9 @@ export default function HeroCarouselSlideChart({
     eventResolvedAt: event.resolved_at,
   })
 
-  const showLegend = variant === 'multi-outcome' && chartConfig.series.length > 1
+  const showLegend = chartConfig.series.length > 1
   const showEndOfLineLabels = variant === 'sports'
+  const leadingGapStart = normalizedHistory[0]?.date ?? null
 
   const xDomain = useMemo(() => {
     if (!showEndOfLineLabels || normalizedHistory.length < 2 || !clientNow) {
@@ -327,6 +328,7 @@ export default function HeroCarouselSlideChart({
               cursorStepMs={CURSOR_STEP_MS[HERO_CHART_RANGE]}
               onCursorDataChange={setCursorSnapshot}
               showEndOfLineLabels={showEndOfLineLabels}
+              leadingGapStart={leadingGapStart}
               plotClipPadding={{ right: PLOT_CLIP_RIGHT_PADDING }}
             />
           )

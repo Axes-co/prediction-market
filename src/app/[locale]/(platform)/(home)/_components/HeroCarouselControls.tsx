@@ -2,6 +2,7 @@
 
 import type { Event } from '@/types'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
+import { memo } from 'react'
 import { cn } from '@/lib/utils'
 
 interface HeroCarouselControlsProps {
@@ -25,7 +26,7 @@ function resolveAdjacentTitle(events: Event[], activeIndex: number, direction: '
   return events[targetIndex]?.title ?? ''
 }
 
-export default function HeroCarouselControls({
+export default memo(({
   totalSlides,
   activeIndex,
   progress,
@@ -33,7 +34,7 @@ export default function HeroCarouselControls({
   onGoTo,
   onPrev,
   onNext,
-}: HeroCarouselControlsProps) {
+}: HeroCarouselControlsProps) => {
   if (totalSlides <= 1) {
     return null
   }
@@ -115,4 +116,4 @@ export default function HeroCarouselControls({
       </div>
     </div>
   )
-}
+})
