@@ -97,10 +97,8 @@ function resolveHeroSeriesColors(
     })
   }
 
-  if (baseSeries.length === 1) {
-    return [{ ...baseSeries[0], color: 'var(--primary)' }]
-  }
-
+  // Single-market and multi-market events: use the colors from buildChartSeries
+  // (var(--chart-N) cycle) so they match the event page exactly.
   return baseSeries
 }
 

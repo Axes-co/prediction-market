@@ -133,15 +133,41 @@ export default function HeroLiveChartPanel({ event, isActive }: HeroLiveChartPan
     if (!hasLiveData || !nowMs) {
       return liveData
     }
-    const cutoff = nowMs - LIVE_WINDOW_MS
-    const inWindow = liveData.filter(p => p.date.getTime() >= cutoff)
-    const lastPoint = (inWindow.length > 0 ? inWindow : liveData).at(-1)
+    const domainStart = nowMs - LIVE_WINDOW_MS
+    let lastPointBeforeDomain: typeof liveData[number] | null = null
+    const pointsInDomain: typeof liveData = []
+
+    for (const point of liveData) {
+      const ts = point.date.getTime()
+      if (!Number.isFinite(ts)) {
+        continue
+      }
+      if (ts < domainStart) {
+        lastPointBeforeDomain = point
+        continue
+      }
+      if (ts <= nowMs) {
+        pointsInDomain.push(point)
+      }
+    }
+
+    // Include the last point before the window so the line enters from the
+    // left edge — matching EventLiveSeriesChart's render pipeline.
+    let next = pointsInDomain
+    if (lastPointBeforeDomain) {
+      next = pointsInDomain.length > 0
+        ? [lastPointBeforeDomain, ...pointsInDomain]
+        : [lastPointBeforeDomain]
+    }
+
+    // Extend to current time with the latest known price
+    const lastPoint = next.at(-1)
     const lastPrice = lastPoint?.[SERIES_KEY]
     const lastTs = lastPoint?.date.getTime() ?? 0
     if (typeof lastPrice === 'number' && Number.isFinite(lastPrice) && nowMs > lastTs) {
-      return [...inWindow, { date: new Date(nowMs), [SERIES_KEY]: lastPrice }].slice(-MAX_POINTS)
+      next = [...next, { date: new Date(nowMs), [SERIES_KEY]: lastPrice }].slice(-MAX_POINTS)
     }
-    return inWindow
+    return next
   }, [liveData, hasLiveData, nowMs])
 
   const liveXDomain = useMemo(() => {

@@ -22,38 +22,6 @@ function hasSportsContext(event: Event) {
   return Boolean(event.sports_sport_slug?.trim())
 }
 
-function getNormalizedEventTagTokens(event: Event) {
-  const tagTokens = new Set<string>()
-
-  for (const tag of event.tags ?? []) {
-    const normalizedSlug = normalizeText(tag.slug)
-    const normalizedName = normalizeText(tag.name)
-    if (normalizedSlug) {
-      tagTokens.add(normalizedSlug)
-    }
-    if (normalizedName) {
-      tagTokens.add(normalizedName)
-    }
-  }
-
-  const normalizedMainTag = normalizeText(event.main_tag)
-  if (normalizedMainTag) {
-    tagTokens.add(normalizedMainTag)
-  }
-
-  return tagTokens
-}
-
-function hasPropsTag(event: Event) {
-  const tagTokens = getNormalizedEventTagTokens(event)
-  return Array.from(tagTokens).some(token => token === 'props' || token === 'prop')
-}
-
-function hasGamesTag(event: Event) {
-  const tagTokens = getNormalizedEventTagTokens(event)
-  return Array.from(tagTokens).some(token => token === 'games' || token === 'game')
-}
-
 function isNegRiskEvent(event: Event) {
   return Boolean(
     event.neg_risk
@@ -434,11 +402,11 @@ function buildBinaryMoneylineModel(
 }
 
 export function buildHomeSportsMoneylineModel(event: Event): HomeSportsMoneylineModel | null {
-  if (
-    !hasSportsContext(event)
-    || hasPropsTag(event)
-    || !hasGamesTag(event)
-  ) {
+  // Use the server-resolved sports_section field instead of scanning tags.
+  // This correctly identifies esports events that lack a literal "games" tag.
+  // Props events are excluded; non-games sections (null) fall through to the
+  // downstream guards (team count, moneyline market detection) which filter naturally.
+  if (!hasSportsContext(event) || event.sports_section === 'props') {
     return null
   }
 

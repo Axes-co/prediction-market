@@ -90,10 +90,10 @@ export default function SlideCommentMarquee({ event }: SlideCommentMarqueeProps)
 
   return (
     <div
-      className="relative h-full overflow-hidden"
+      className="group/marquee relative h-full overflow-hidden"
       style={{ maskImage: 'linear-gradient(transparent 0px, black 40px, black 100%)' }}
     >
-      <div className="flex shrink-0 animate-marquee-vertical flex-col will-change-transform hover:paused">
+      <div className="flex shrink-0 animate-marquee-vertical flex-col will-change-transform group-hover/marquee:paused">
         <CommentSet comments={comments} eventPath={eventPath} />
         <CommentSet comments={comments} eventPath={eventPath} />
       </div>

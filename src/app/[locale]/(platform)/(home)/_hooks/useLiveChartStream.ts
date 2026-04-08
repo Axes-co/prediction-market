@@ -250,13 +250,41 @@ export function useLiveChartStream(event: Event, isActive: boolean): LiveChartSt
       }
 
       setLiveData((prev) => {
-        const now = Date.now()
-        const cutoff = now - LIVE_DATA_RETENTION_MS
+        const arrivalTimestamp = Date.now()
+        const cutoff = arrivalTimestamp - LIVE_DATA_RETENTION_MS
+
+        // Snapshot messages carry historical points with real timestamps.
+        // Replace the entire dataset with properly-timestamped points so the
+        // chart line spans the full window from the first render — matching
+        // the event page's EventLiveSeriesChart snapshot path.
+        if (isSnapshot && updates.length > 1) {
+          let lastSnapshotTs: number | null = null
+          const snapshotPoints: DataPoint[] = []
+
+          for (const update of updates) {
+            let ts = update.timestamp
+            if (!Number.isFinite(ts)) {
+              continue
+            }
+            ts = Math.max(cutoff + 1, Math.min(ts, arrivalTimestamp))
+            if (lastSnapshotTs !== null && ts <= lastSnapshotTs) {
+              ts = lastSnapshotTs + 1
+            }
+            snapshotPoints.push({ date: new Date(ts), [SERIES_KEY]: update.price })
+            lastSnapshotTs = ts
+          }
+
+          if (snapshotPoints.length > 0) {
+            return snapshotPoints.slice(-MAX_POINTS)
+          }
+        }
+
+        // Incremental updates: append to existing data.
         let next = prev.filter(p => p.date.getTime() >= cutoff)
         let lastTs = next.length ? next.at(-1)!.date.getTime() : null
 
         for (const update of updates) {
-          let ts = Math.max(update.timestamp, now)
+          let ts = Math.max(cutoff + 1, Math.min(update.timestamp, arrivalTimestamp))
           if (lastTs !== null && ts <= lastTs) {
             ts = lastTs + 1
           }

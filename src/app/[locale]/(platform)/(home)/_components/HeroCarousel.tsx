@@ -1,7 +1,7 @@
 'use client'
 
 import type { Event } from '@/types'
-import { useCallback, useRef } from 'react'
+import { memo, useCallback, useRef } from 'react'
 import HeroCarouselControls from '@/app/[locale]/(platform)/(home)/_components/HeroCarouselControls'
 import HeroCarouselSlide from '@/app/[locale]/(platform)/(home)/_components/HeroCarouselSlide'
 import { useCarouselAutoAdvance } from '@/app/[locale]/(platform)/(home)/_hooks/useCarouselAutoAdvance'
@@ -11,6 +11,50 @@ interface HeroCarouselProps {
 }
 
 const AUTO_ADVANCE_INTERVAL_MS = 10_000
+
+// ---------------------------------------------------------------------------
+// Slide container — memoized to only re-render when activeIndex changes,
+// not on every progress tick (~20x/sec). This prevents recalculating offsets
+// and re-evaluating 6 slide memo boundaries on every animation frame.
+// ---------------------------------------------------------------------------
+
+const HeroCarouselSlides = memo(({
+  events,
+  activeIndex,
+}: {
+  events: Event[]
+  activeIndex: number
+}) => {
+  return (
+    <div className="absolute inset-0 overflow-hidden">
+      {events.map((event, index) => {
+        const offset = (index - activeIndex) * 100
+        const isActive = index === activeIndex
+        const isAdjacent = events.length > 1 && (
+          index === (activeIndex + 1) % events.length
+          || index === (activeIndex - 1 + events.length) % events.length
+        )
+        return (
+          <div
+            key={event.id}
+            className="absolute inset-0 p-5 pb-4"
+            aria-hidden={!isActive}
+            style={{
+              transform: `translateX(${offset}%)`,
+              transition: 'transform 500ms cubic-bezier(0.32, 0.72, 0, 1)',
+            }}
+          >
+            <HeroCarouselSlide event={event} isActive={isActive} shouldPreload={isAdjacent} />
+          </div>
+        )
+      })}
+    </div>
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Main carousel
+// ---------------------------------------------------------------------------
 
 export default function HeroCarousel({ events }: HeroCarouselProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -59,24 +103,7 @@ export default function HeroCarousel({ events }: HeroCarouselProps) {
         dark:border-border dark:shadow-none
       "
       >
-        <div className="absolute inset-0 overflow-hidden">
-          {events.map((event, index) => {
-            const offset = (index - activeIndex) * 100
-            return (
-              <div
-                key={event.id}
-                className="absolute inset-0 p-5 pb-4"
-                aria-hidden={index !== activeIndex}
-                style={{
-                  transform: `translateX(${offset}%)`,
-                  transition: 'transform 500ms cubic-bezier(0.32, 0.72, 0, 1)',
-                }}
-              >
-                <HeroCarouselSlide event={event} isActive={index === activeIndex} />
-              </div>
-            )
-          })}
-        </div>
+        <HeroCarouselSlides events={events} activeIndex={activeIndex} />
       </div>
 
       <HeroCarouselControls
