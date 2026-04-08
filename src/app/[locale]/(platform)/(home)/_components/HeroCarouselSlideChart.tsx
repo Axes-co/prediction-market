@@ -1,14 +1,15 @@
 'use client'
 
+import type { MarketTokenTarget } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useEventPriceHistory'
 import type { HomeSportsMoneylineButton, HomeSportsMoneylineModel } from '@/lib/sports-home-card'
 import type { Event } from '@/types'
-import type { DataPoint, PredictionChartCursorSnapshot, SeriesConfig } from '@/types/PredictionChartTypes'
+import type { PredictionChartCursorSnapshot, SeriesConfig } from '@/types/PredictionChartTypes'
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useResizeObserver } from '@/app/[locale]/(platform)/(home)/_hooks/useResizeObserver'
 import {
-  buildMarketTargets,
   CURSOR_STEP_MS,
+
   useEventPriceHistory,
 } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useEventPriceHistory'
 import {
@@ -16,6 +17,7 @@ import {
   getTopMarketIds,
 } from '@/app/[locale]/(platform)/event/[slug]/_utils/EventChartUtils'
 import { Skeleton } from '@/components/ui/skeleton'
+import { OUTCOME_INDEX } from '@/lib/constants'
 import { buildChanceByMarket } from '@/lib/market-chance'
 import { resolveSportsTeamFallbackColor } from '@/lib/sports-team-colors'
 
@@ -46,26 +48,16 @@ const MIN_CHART_WIDTH = 200
 const MIN_CHART_HEIGHT = 150
 const CHART_MARGIN = { top: 10, right: 16, bottom: 24, left: 0 }
 const PLOT_CLIP_RIGHT_PADDING = 18
-
-/**
- * Extend xDomain past last data point by this ratio of the data span,
- * so the chart line ends at ~60% width leaving room for end-of-line labels.
- */
 const LABEL_SPACE_RATIO = 0.65
 
 // ---------------------------------------------------------------------------
-// Sports series resolution
+// Sports series + targets
 //
-// Mirrors SportsGameGraph (SportsGamesCenter.tsx) which handles two cases:
-//
-//   Separated moneyline (neg-risk): each team has its own conditionId/market.
-//     → useEventPriceHistory returns independent data per conditionId.
-//     → Series key = conditionId (matches data directly).
-//
-//   Binary moneyline (non-neg-risk): both teams share one conditionId/market.
-//     → useEventPriceHistory returns one column for the YES outcome (team1).
-//     → We derive team2 = 100 - team1, keyed with compound keys.
-//     → Mirrors SportsGameGraph.buildCompositeMoneylineGraphTargets.
+// Mirrors SportsGameGraph (SportsGamesCenter.tsx lines 1412-1428):
+//   marketTargets maps each graphSeriesTarget to { conditionId: target.key, tokenId: target.tokenId }
+//   This means useEventPriceHistory keys data by the SERIES KEY, not the raw conditionId.
+//   For binary moneyline: key = "conditionId:outcomeIndex" with per-outcome tokenId.
+//   For separated moneyline: key = conditionId with YES outcome tokenId.
 // ---------------------------------------------------------------------------
 
 const SPORTS_FALLBACK_COLORS = ['var(--yes)', 'var(--primary)', 'var(--no)']
@@ -87,13 +79,26 @@ function resolveButtonColor(
   return SPORTS_FALLBACK_COLORS[fallbackIndex % SPORTS_FALLBACK_COLORS.length]
 }
 
-interface SportsSeriesResult {
+interface SportsChartConfig {
   series: SeriesConfig[]
-  isBinaryMoneyline: boolean
-  sharedConditionId: string | null
+  targets: MarketTokenTarget[]
 }
 
-function buildSportsSeries(model: HomeSportsMoneylineModel): SportsSeriesResult {
+/**
+ * Builds chart series AND data-fetch targets for sports events.
+ *
+ * Uses the same key strategy as SportsGameGraph.graphSeriesTargets:
+ *   - Separated moneyline (neg-risk): key = conditionId, tokenId = YES outcome
+ *   - Binary moneyline: key = conditionId:outcomeIndex, tokenId = per-outcome token
+ *
+ * And the same target mapping as SportsGameGraph (line 1416):
+ *   { conditionId: target.key, tokenId: target.tokenId }
+ * so useEventPriceHistory keys results by the series key directly.
+ */
+function buildSportsChartConfig(
+  event: Event,
+  model: HomeSportsMoneylineModel,
+): SportsChartConfig {
   const buttons = [
     model.team1Button,
     model.drawButton,
@@ -102,66 +107,74 @@ function buildSportsSeries(model: HomeSportsMoneylineModel): SportsSeriesResult 
 
   const uniqueConditionIds = new Set(buttons.map(b => b.conditionId))
   const isBinaryMoneyline = uniqueConditionIds.size === 1
-  const sharedConditionId = isBinaryMoneyline ? buttons[0].conditionId : null
 
-  const series = buttons.map((button, index) => ({
-    key: isBinaryMoneyline
+  const series: SeriesConfig[] = []
+  const targets: MarketTokenTarget[] = []
+
+  for (const [index, button] of buttons.entries()) {
+    const market = event.markets.find(m => m.condition_id === button.conditionId)
+    if (!market) {
+      continue
+    }
+
+    const outcome = market.outcomes.find(o => o.outcome_index === button.outcomeIndex)
+      ?? (isBinaryMoneyline ? null : market.outcomes.find(o => o.outcome_index === OUTCOME_INDEX.YES))
+      ?? market.outcomes[0]
+
+    if (!outcome?.token_id) {
+      continue
+    }
+
+    const key = isBinaryMoneyline
       ? `${button.conditionId}:${button.outcomeIndex}`
-      : button.conditionId,
-    name: button.label,
-    color: resolveButtonColor(model, button, index),
-  }))
+      : button.conditionId
 
-  return { series, isBinaryMoneyline, sharedConditionId }
-}
+    series.push({
+      key,
+      name: button.label,
+      color: resolveButtonColor(model, button, index),
+    })
 
-/**
- * For binary moneyline, normalizedHistory has data keyed by plain conditionId.
- * PredictionChart expects data keyed by compound series keys (conditionId:outcomeIndex).
- *
- * This transforms each data point:
- *   { date, "condId": 65 }  →  { date, "condId:0": 65, "condId:1": 35 }
- *
- * Mirrors how SportsGameGraph fetches per-outcome data via separate tokenIds.
- */
-function transformBinaryMoneylineData(
-  data: DataPoint[],
-  conditionId: string,
-  buttons: HomeSportsMoneylineButton[],
-): DataPoint[] {
-  return data.map((point) => {
-    const yesValue = point[conditionId]
-    if (typeof yesValue !== 'number') {
-      return point
-    }
+    targets.push({
+      conditionId: key,
+      tokenId: outcome.token_id,
+    })
+  }
 
-    const transformed: DataPoint = { date: point.date }
-    for (const button of buttons) {
-      const compoundKey = `${conditionId}:${button.outcomeIndex}`
-      // outcomeIndex 0 = YES (original value), outcomeIndex 1 = NO (complement)
-      transformed[compoundKey] = button.outcomeIndex === 0 ? yesValue : 100 - yesValue
-    }
-    return transformed
-  })
+  return { series, targets }
 }
 
 // ---------------------------------------------------------------------------
-// Standard series resolution
+// Standard series + targets
 // ---------------------------------------------------------------------------
 
-function resolveStandardSeries(
-  event: Event,
-  chances: Record<string, number>,
-): SeriesConfig[] {
+interface StandardChartConfig {
+  series: SeriesConfig[]
+  targets: MarketTokenTarget[]
+}
+
+function buildStandardChartConfig(event: Event, chances: Record<string, number>): StandardChartConfig {
   const marketIds = getTopMarketIds(chances, MAX_HERO_SERIES)
-  const series = buildChartSeries(event, marketIds)
+  let series = buildChartSeries(event, marketIds)
 
   // Single-market: var(--primary) to match EventChart.effectiveSeries.
   if (series.length === 1) {
-    return [{ ...series[0], color: 'var(--primary)' }]
+    series = [{ ...series[0], color: 'var(--primary)' }]
   }
 
-  return series
+  // Build targets using conditionId as key (standard flow).
+  const targets: MarketTokenTarget[] = event.markets
+    .map((market) => {
+      const outcome = market.outcomes.find(o => o.outcome_index === OUTCOME_INDEX.YES)
+        ?? market.outcomes[0]
+      if (!outcome?.token_id) {
+        return null
+      }
+      return { conditionId: market.condition_id, tokenId: outcome.token_id }
+    })
+    .filter((t): t is MarketTokenTarget => t !== null)
+
+  return { series, targets }
 }
 
 // ---------------------------------------------------------------------------
@@ -239,96 +252,65 @@ export default function HeroCarouselSlideChart({
 
   useResizeObserver(containerRef, handleResize)
 
-  // --- Data ---
-
-  const targets = useMemo(
-    () => buildMarketTargets(event.markets),
-    [event.markets],
-  )
-
-  const { normalizedHistory } = useEventPriceHistory({
-    eventId: event.id,
-    range: HERO_CHART_RANGE,
-    targets,
-    eventCreatedAt: event.created_at,
-    eventResolvedAt: event.resolved_at,
-  })
-
   const chances = useMemo(
     () => buildChanceByMarket(event.markets),
     [event.markets],
   )
 
-  // --- Series & data resolution ---
-
-  const sportsResult = useMemo(
-    () => variant === 'sports' && sportsModel ? buildSportsSeries(sportsModel) : null,
-    [variant, sportsModel],
+  // Resolve series and targets together — they must use matching keys.
+  const chartConfig = useMemo(
+    () => variant === 'sports' && sportsModel
+      ? buildSportsChartConfig(event, sportsModel)
+      : buildStandardChartConfig(event, chances),
+    [event, variant, sportsModel, chances],
   )
 
-  const series = useMemo(
-    () => sportsResult?.series ?? resolveStandardSeries(event, chances),
-    [sportsResult, event, chances],
-  )
+  const { normalizedHistory } = useEventPriceHistory({
+    eventId: event.id,
+    range: HERO_CHART_RANGE,
+    targets: chartConfig.targets,
+    eventCreatedAt: event.created_at,
+    eventResolvedAt: event.resolved_at,
+  })
 
-  // For binary moneyline, transform data to match compound series keys.
-  // Separated moneyline and standard charts use normalizedHistory as-is.
-  const chartData = useMemo(() => {
-    if (!sportsResult?.isBinaryMoneyline || !sportsResult.sharedConditionId || !sportsModel) {
-      return normalizedHistory
-    }
-    const buttons = [
-      sportsModel.team1Button,
-      sportsModel.drawButton,
-      sportsModel.team2Button,
-    ].filter((b): b is HomeSportsMoneylineButton => Boolean(b))
-
-    return transformBinaryMoneylineData(normalizedHistory, sportsResult.sharedConditionId, buttons)
-  }, [normalizedHistory, sportsResult, sportsModel])
-
-  const showLegend = variant === 'multi-outcome' && series.length > 1
+  const showLegend = variant === 'multi-outcome' && chartConfig.series.length > 1
   const showEndOfLineLabels = variant === 'sports'
 
   const xDomain = useMemo(() => {
-    if (!showEndOfLineLabels || chartData.length < 2 || !clientNow) {
+    if (!showEndOfLineLabels || normalizedHistory.length < 2 || !clientNow) {
       return undefined
     }
-
-    const firstTs = chartData[0].date.getTime()
-    const lastTs = chartData.at(-1)!.date.getTime()
+    const firstTs = normalizedHistory[0].date.getTime()
+    const lastTs = normalizedHistory.at(-1)!.date.getTime()
     const dataSpan = lastTs - firstTs
-
     if (dataSpan <= 0) {
       return undefined
     }
-
     return { end: lastTs + dataSpan * LABEL_SPACE_RATIO }
-  }, [showEndOfLineLabels, chartData, clientNow])
+  }, [showEndOfLineLabels, normalizedHistory, clientNow])
 
   const legendContent = useMemo(
     () => showLegend
       ? (
           <HeroChartLegend
-            series={series}
+            series={chartConfig.series}
             chances={chances}
             cursorSnapshot={cursorSnapshot}
           />
         )
       : null,
-    [showLegend, series, chances, cursorSnapshot],
+    [showLegend, chartConfig.series, chances, cursorSnapshot],
   )
 
-  // --- Render ---
-
-  const showChart = isActive && chartData.length > 0 && dimensions !== null
+  const showChart = isActive && normalizedHistory.length > 0 && dimensions !== null
 
   return (
     <div ref={containerRef} className="size-full">
       {showChart
         ? (
             <PredictionChart
-              data={chartData}
-              series={series}
+              data={normalizedHistory}
+              series={chartConfig.series}
               width={dimensions.width}
               height={dimensions.height}
               showXAxis
