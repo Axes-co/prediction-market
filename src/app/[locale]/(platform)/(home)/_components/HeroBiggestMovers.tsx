@@ -1,17 +1,11 @@
 'use client'
 
 import type { Event } from '@/types'
-import { ArrowRightIcon, ChevronRightIcon } from 'lucide-react'
+import { ChevronRightIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import { useMemo } from 'react'
-import {
-  buildMarketTargets,
-  useEventPriceHistory,
-} from '@/app/[locale]/(platform)/event/[slug]/_hooks/useEventPriceHistory'
-import { computeChanceChanges } from '@/app/[locale]/(platform)/event/[slug]/_utils/EventChartUtils'
 import AppLink from '@/components/AppLink'
 import { resolveEventPagePath } from '@/lib/events-routing'
-import { cn } from '@/lib/utils'
 
 interface HeroBiggestMoversProps {
   events: Event[]
@@ -19,7 +13,6 @@ interface HeroBiggestMoversProps {
 
 interface MoverEntry {
   event: Event
-  conditionId: string
   displayChance: number
   volume24h: number
 }
@@ -39,80 +32,10 @@ function resolvePrimaryMover(event: Event): MoverEntry | null {
 
   return {
     event,
-    conditionId: market.condition_id,
     displayChance: Math.max(0, Math.min(100, currentChance)),
     volume24h: market.volume_24h ?? 0,
   }
 }
-
-// ---------------------------------------------------------------------------
-// Mover row — fetches price history to compute 12h change.
-// React Query deduplicates calls for events already in the carousel.
-// ---------------------------------------------------------------------------
-
-function MoverRow({ mover, index }: { mover: MoverEntry, index: number }) {
-  const targets = useMemo(
-    () => buildMarketTargets(mover.event.markets),
-    [mover.event.markets],
-  )
-
-  const { normalizedHistory } = useEventPriceHistory({
-    eventId: mover.event.id,
-    range: '1D',
-    targets,
-    eventCreatedAt: mover.event.created_at,
-    eventResolvedAt: mover.event.resolved_at,
-  })
-
-  const change = useMemo(() => {
-    if (normalizedHistory.length === 0) {
-      return null
-    }
-    const changes = computeChanceChanges(normalizedHistory)
-    const value = changes[mover.conditionId]
-    return typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : null
-  }, [normalizedHistory, mover.conditionId])
-
-  return (
-    <AppLink
-      href={resolveEventPagePath(mover.event) as never}
-      className="group flex items-start gap-4 py-2.5"
-    >
-      <div className="pt-0.5 text-sm font-semibold text-muted-foreground tabular-nums">
-        {index + 1}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="line-clamp-2 text-sm font-medium text-foreground group-hover:underline">
-          {mover.event.title}
-        </p>
-      </div>
-      <div className="flex shrink-0 flex-col gap-1.5 text-right">
-        <span className="text-lg leading-none font-semibold text-foreground">
-          {mover.displayChance}
-          %
-        </span>
-        {change !== null && change !== 0 && (
-          <div className={cn(
-            'flex items-center justify-end gap-0.5',
-            change > 0 ? 'text-yes' : 'text-no',
-          )}
-          >
-            <ArrowRightIcon className={cn('size-3', change > 0 ? '-rotate-45' : 'rotate-45')} />
-            <span className="text-sm leading-none font-medium">
-              {change > 0 ? '+' : ''}
-              {change}
-              %
-            </span>
-          </div>
-        )}
-      </div>
-    </AppLink>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Main component
-// ---------------------------------------------------------------------------
 
 export default function HeroBiggestMovers({ events }: HeroBiggestMoversProps) {
   const t = useExtracted()
@@ -137,7 +60,26 @@ export default function HeroBiggestMovers({ events }: HeroBiggestMoversProps) {
 
       <div className="flex flex-col">
         {movers.map((mover, index) => (
-          <MoverRow key={mover.event.id} mover={mover} index={index} />
+          <AppLink
+            key={mover.event.id}
+            href={resolveEventPagePath(mover.event) as never}
+            className="group flex items-start gap-4 py-2.5"
+          >
+            <div className="pt-0.5 text-sm font-semibold text-muted-foreground tabular-nums">
+              {index + 1}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="line-clamp-2 text-sm font-medium text-foreground group-hover:underline">
+                {mover.event.title}
+              </p>
+            </div>
+            <div className="shrink-0 text-right">
+              <span className="text-lg leading-none font-semibold text-foreground">
+                {mover.displayChance}
+                %
+              </span>
+            </div>
+          </AppLink>
         ))}
       </div>
     </div>
