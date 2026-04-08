@@ -46,7 +46,6 @@ const MIN_CHART_WIDTH = 200
 const MIN_CHART_HEIGHT = 150
 const CHART_MARGIN = { top: 10, right: 16, bottom: 24, left: 0 }
 const PLOT_CLIP_RIGHT_PADDING = 18
-const SPORTS_COLOR_FALLBACKS = ['var(--yes)', 'var(--primary)', 'var(--no)']
 
 /**
  * Extend xDomain past last data point by this ratio of the data span,
@@ -55,56 +54,73 @@ const SPORTS_COLOR_FALLBACKS = ['var(--yes)', 'var(--primary)', 'var(--no)']
 const LABEL_SPACE_RATIO = 0.65
 
 // ---------------------------------------------------------------------------
-// Series color resolution
+// Series resolution — selects which markets to chart and assigns colors.
+//
+// This mirrors the downstream color resolution pattern used across the app:
+//   - EventChart.effectiveSeries       → single-market: var(--primary)
+//   - SportsGameGraph.resolveGraphSeriesColor → sports: team hex or fallback
+//   - buildChartSeries                 → multi-market: var(--chart-N) cycle
+//
+// The hero chart unifies all three in a single pipeline.
 // ---------------------------------------------------------------------------
 
-/**
- * Resolves chart series colors to match each event page's rendering:
- *
- * - Sports events use team colors, matching SportsGameGraph.resolveGraphSeriesColor
- * - Single-market binary events use var(--primary), matching EventChart.effectiveSeries
- * - Multi-market events use the default var(--chart-N) cycle from buildChartSeries
- */
-function resolveHeroSeriesColors(
-  baseSeries: SeriesConfig[],
+const SPORTS_FALLBACK_COLORS = ['var(--yes)', 'var(--primary)', 'var(--no)']
+
+function resolveMoneylineMarketIds(sportsModel: HomeSportsMoneylineModel): string[] {
+  const ids = [
+    sportsModel.team1Button.conditionId,
+    sportsModel.team2Button.conditionId,
+  ]
+  if (sportsModel.drawButton) {
+    ids.push(sportsModel.drawButton.conditionId)
+  }
+  return ids
+}
+
+function buildSportsColorMap(sportsModel: HomeSportsMoneylineModel): Map<string, string> {
+  const map = new Map<string, string>()
+  map.set(
+    sportsModel.team1Button.conditionId,
+    sportsModel.team1.color ?? resolveSportsTeamFallbackColor('team1'),
+  )
+  map.set(
+    sportsModel.team2Button.conditionId,
+    sportsModel.team2.color ?? resolveSportsTeamFallbackColor('team2'),
+  )
+  if (sportsModel.drawButton) {
+    map.set(sportsModel.drawButton.conditionId, 'var(--secondary-foreground)')
+  }
+  return map
+}
+
+function resolveHeroSeries(
+  event: Event,
+  variant: HeroChartVariant,
   sportsModel: HomeSportsMoneylineModel | null | undefined,
+  chances: Record<string, number>,
 ): SeriesConfig[] {
-  if (sportsModel && baseSeries.length > 0) {
-    // Build a lookup from conditionId → color, matching SportsGameGraph.resolveGraphSeriesColor:
-    // - team1: team hex color or resolveSportsTeamFallbackColor('team1')
-    // - team2: team hex color or resolveSportsTeamFallbackColor('team2')
-    // - draw:  var(--secondary-foreground)
-    const colorByConditionId = new Map<string, string>()
-
-    colorByConditionId.set(
-      sportsModel.team1Button.conditionId,
-      sportsModel.team1.color ?? resolveSportsTeamFallbackColor('team1'),
-    )
-    colorByConditionId.set(
-      sportsModel.team2Button.conditionId,
-      sportsModel.team2.color ?? resolveSportsTeamFallbackColor('team2'),
-    )
-    if (sportsModel.drawButton) {
-      colorByConditionId.set(sportsModel.drawButton.conditionId, 'var(--secondary-foreground)')
-    }
-
-    return baseSeries.map((entry, index) => {
-      const resolvedColor = colorByConditionId.get(entry.key)
-      if (resolvedColor) {
-        return { ...entry, color: resolvedColor }
-      }
-      return { ...entry, color: SPORTS_COLOR_FALLBACKS[index % SPORTS_COLOR_FALLBACKS.length] }
-    })
+  // Sports: chart only the moneyline markets with team colors.
+  if (variant === 'sports' && sportsModel) {
+    const marketIds = resolveMoneylineMarketIds(sportsModel)
+    const series = buildChartSeries(event, marketIds)
+    const colorMap = buildSportsColorMap(sportsModel)
+    return series.map((entry, index) => ({
+      ...entry,
+      color: colorMap.get(entry.key) ?? SPORTS_FALLBACK_COLORS[index % SPORTS_FALLBACK_COLORS.length],
+    }))
   }
 
-  // Single-market binary events: override to var(--primary) to match
-  // EventChart.effectiveSeries (line 749) which uses var(--primary) for YES view.
-  if (baseSeries.length === 1) {
-    return [{ ...baseSeries[0], color: 'var(--primary)' }]
+  // Standard: chart top markets by probability.
+  const marketIds = getTopMarketIds(chances, MAX_HERO_SERIES)
+  const series = buildChartSeries(event, marketIds)
+
+  // Single-market: var(--primary) to match EventChart.effectiveSeries.
+  if (series.length === 1) {
+    return [{ ...series[0], color: 'var(--primary)' }]
   }
 
-  // Multi-market events: use the default var(--chart-N) cycle from buildChartSeries.
-  return baseSeries
+  // Multi-market: var(--chart-N) cycle from buildChartSeries.
+  return series
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +184,6 @@ export default function HeroCarouselSlideChart({
   const [dimensions, setDimensions] = useState<{ width: number, height: number } | null>(null)
   const [cursorSnapshot, setCursorSnapshot] = useState<PredictionChartCursorSnapshot | null>(null)
 
-  // Client-side timestamp to avoid SSR hydration mismatch with Date.now()
   const [clientNow, setClientNow] = useState<number | null>(null)
   useEffect(() => {
     setClientNow(Date.now())
@@ -182,6 +197,8 @@ export default function HeroCarouselSlideChart({
   }, [])
 
   useResizeObserver(containerRef, handleResize)
+
+  // --- Data ---
 
   const targets = useMemo(
     () => buildMarketTargets(event.markets),
@@ -201,38 +218,16 @@ export default function HeroCarouselSlideChart({
     [event.markets],
   )
 
-  // For sports charts, only show moneyline market lines (matching
-  // SportsGameGraph which filters to button.marketType === 'moneyline').
-  // For standard charts, show top markets by probability.
-  const chartMarketIds = useMemo(() => {
-    if (variant === 'sports' && sportsModel) {
-      const moneylineIds = [
-        sportsModel.team1Button.conditionId,
-        sportsModel.team2Button.conditionId,
-      ]
-      if (sportsModel.drawButton) {
-        moneylineIds.push(sportsModel.drawButton.conditionId)
-      }
-      return moneylineIds
-    }
-    return getTopMarketIds(chances, MAX_HERO_SERIES)
-  }, [variant, sportsModel, chances])
-
-  const baseSeries = useMemo(
-    () => buildChartSeries(event, chartMarketIds),
-    [event, chartMarketIds],
-  )
+  // --- Series ---
 
   const series = useMemo(
-    () => resolveHeroSeriesColors(baseSeries, sportsModel),
-    [baseSeries, sportsModel],
+    () => resolveHeroSeries(event, variant, sportsModel, chances),
+    [event, variant, sportsModel, chances],
   )
 
   const showLegend = variant === 'multi-outcome' && series.length > 1
   const showEndOfLineLabels = variant === 'sports'
 
-  // For sports/live-chart cards with end-of-line labels: extend xDomain past the
-  // last data point so the chart line ends at ~60% width, leaving room for labels.
   const xDomain = useMemo(() => {
     if (!showEndOfLineLabels || normalizedHistory.length < 2 || !clientNow) {
       return undefined
@@ -261,6 +256,8 @@ export default function HeroCarouselSlideChart({
       : null,
     [showLegend, series, chances, cursorSnapshot],
   )
+
+  // --- Render ---
 
   const showChart = isActive && normalizedHistory.length > 0 && dimensions !== null
 
