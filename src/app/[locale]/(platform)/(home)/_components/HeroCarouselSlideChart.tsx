@@ -1,6 +1,6 @@
 'use client'
 
-import type { HomeSportsMoneylineModel } from '@/lib/sports-home-card'
+import type { HomeSportsMoneylineButton, HomeSportsMoneylineModel } from '@/lib/sports-home-card'
 import type { Event } from '@/types'
 import type { PredictionChartCursorSnapshot, SeriesConfig } from '@/types/PredictionChartTypes'
 import dynamic from 'next/dynamic'
@@ -54,43 +54,62 @@ const PLOT_CLIP_RIGHT_PADDING = 18
 const LABEL_SPACE_RATIO = 0.65
 
 // ---------------------------------------------------------------------------
-// Series resolution — selects which markets to chart and assigns colors.
+// Series resolution
 //
-// This mirrors the downstream color resolution pattern used across the app:
-//   - EventChart.effectiveSeries       → single-market: var(--primary)
-//   - SportsGameGraph.resolveGraphSeriesColor → sports: team hex or fallback
-//   - buildChartSeries                 → multi-market: var(--chart-N) cycle
+// The hero chart resolves series differently per variant:
 //
-// The hero chart unifies all three in a single pipeline.
+//   Sports  → builds series directly from the moneyline model buttons,
+//             using team abbreviations as labels and team colors.
+//             Mirrors SportsGameGraph (SportsGamesCenter.tsx):
+//             - Separated moneyline: one conditionId per team (key = conditionId)
+//             - Binary moneyline: shared conditionId (key = conditionId:outcomeIndex)
+//
+//   Standard → uses buildChartSeries (EventChartUtils) for multi-market,
+//              then overrides single-market to var(--primary) to match
+//              EventChart.effectiveSeries.
 // ---------------------------------------------------------------------------
 
 const SPORTS_FALLBACK_COLORS = ['var(--yes)', 'var(--primary)', 'var(--no)']
 
-function resolveMoneylineMarketIds(sportsModel: HomeSportsMoneylineModel): string[] {
-  const ids = [
-    sportsModel.team1Button.conditionId,
-    sportsModel.team2Button.conditionId,
-  ]
-  if (sportsModel.drawButton) {
-    ids.push(sportsModel.drawButton.conditionId)
+function resolveButtonColor(
+  model: HomeSportsMoneylineModel,
+  button: HomeSportsMoneylineButton,
+  fallbackIndex: number,
+): string {
+  if (button.tone === 'team1') {
+    return model.team1.color ?? resolveSportsTeamFallbackColor('team1')
   }
-  return ids
+  if (button.tone === 'team2') {
+    return model.team2.color ?? resolveSportsTeamFallbackColor('team2')
+  }
+  if (button.tone === 'draw') {
+    return 'var(--secondary-foreground)'
+  }
+  return SPORTS_FALLBACK_COLORS[fallbackIndex % SPORTS_FALLBACK_COLORS.length]
 }
 
-function buildSportsColorMap(sportsModel: HomeSportsMoneylineModel): Map<string, string> {
-  const map = new Map<string, string>()
-  map.set(
-    sportsModel.team1Button.conditionId,
-    sportsModel.team1.color ?? resolveSportsTeamFallbackColor('team1'),
-  )
-  map.set(
-    sportsModel.team2Button.conditionId,
-    sportsModel.team2.color ?? resolveSportsTeamFallbackColor('team2'),
-  )
-  if (sportsModel.drawButton) {
-    map.set(sportsModel.drawButton.conditionId, 'var(--secondary-foreground)')
-  }
-  return map
+function buildSportsSeries(
+  model: HomeSportsMoneylineModel,
+): SeriesConfig[] {
+  const buttons = [
+    model.team1Button,
+    model.drawButton,
+    model.team2Button,
+  ].filter((b): b is HomeSportsMoneylineButton => Boolean(b))
+
+  // Detect binary moneyline: all buttons share one conditionId.
+  // In this case, use compound key (conditionId:outcomeIndex) to match
+  // SportsGameGraph.buildCompositeMoneylineGraphTargets.
+  const uniqueConditionIds = new Set(buttons.map(b => b.conditionId))
+  const isBinaryMoneyline = uniqueConditionIds.size === 1
+
+  return buttons.map((button, index) => ({
+    key: isBinaryMoneyline
+      ? `${button.conditionId}:${button.outcomeIndex}`
+      : button.conditionId,
+    name: button.label,
+    color: resolveButtonColor(model, button, index),
+  }))
 }
 
 function resolveHeroSeries(
@@ -99,18 +118,10 @@ function resolveHeroSeries(
   sportsModel: HomeSportsMoneylineModel | null | undefined,
   chances: Record<string, number>,
 ): SeriesConfig[] {
-  // Sports: chart only the moneyline markets with team colors.
   if (variant === 'sports' && sportsModel) {
-    const marketIds = resolveMoneylineMarketIds(sportsModel)
-    const series = buildChartSeries(event, marketIds)
-    const colorMap = buildSportsColorMap(sportsModel)
-    return series.map((entry, index) => ({
-      ...entry,
-      color: colorMap.get(entry.key) ?? SPORTS_FALLBACK_COLORS[index % SPORTS_FALLBACK_COLORS.length],
-    }))
+    return buildSportsSeries(sportsModel)
   }
 
-  // Standard: chart top markets by probability.
   const marketIds = getTopMarketIds(chances, MAX_HERO_SERIES)
   const series = buildChartSeries(event, marketIds)
 
@@ -119,7 +130,6 @@ function resolveHeroSeries(
     return [{ ...series[0], color: 'var(--primary)' }]
   }
 
-  // Multi-market: var(--chart-N) cycle from buildChartSeries.
   return series
 }
 
