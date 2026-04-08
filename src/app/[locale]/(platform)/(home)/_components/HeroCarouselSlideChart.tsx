@@ -188,23 +188,24 @@ function buildStandardChartConfig(event: Event, chances: Record<string, number>)
 
 function HeroChartLegend({
   series,
-  chances,
+  latestSnapshot,
   cursorSnapshot,
 }: {
   series: SeriesConfig[]
-  chances: Record<string, number>
+  latestSnapshot: Record<string, number>
   cursorSnapshot: PredictionChartCursorSnapshot | null
 }) {
+  // Matches SportsGameGraph.legendSeriesWithValues (line 1776):
+  // Use hovered value from cursor, fall back to latestSnapshot from chart data.
   const entries = useMemo(
     () => series.map((entry) => {
       const hoveredValue = cursorSnapshot?.values?.[entry.key]
-      const baselineValue = chances[entry.key] ?? 0
       const value = typeof hoveredValue === 'number' && Number.isFinite(hoveredValue)
         ? hoveredValue
-        : baselineValue
+        : (latestSnapshot[entry.key] ?? 0)
       return { ...entry, value }
     }),
-    [series, cursorSnapshot, chances],
+    [series, cursorSnapshot, latestSnapshot],
   )
 
   if (entries.length === 0) {
@@ -301,6 +302,23 @@ export default function HeroCarouselSlideChart({
       .filter((point): point is NonNullable<typeof point> => point !== null)
   }, [normalizedHistory, chartConfig.series])
 
+  // Compute latest values from chart data for legend baseline.
+  // Matches SportsGameGraph.latestSnapshot (line 1553-1572):
+  // scans chartData backwards per series to find the last known value.
+  const latestSnapshot = useMemo(() => {
+    const values: Record<string, number> = {}
+    for (const seriesItem of chartConfig.series) {
+      for (let i = chartData.length - 1; i >= 0; i--) {
+        const value = chartData[i][seriesItem.key]
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          values[seriesItem.key] = value
+          break
+        }
+      }
+    }
+    return values
+  }, [chartData, chartConfig.series])
+
   const showLegend = chartConfig.series.length > 1
   const showEndOfLineLabels = variant === 'sports'
   const leadingGapStart = chartData[0]?.date ?? null
@@ -323,12 +341,12 @@ export default function HeroCarouselSlideChart({
       ? (
           <HeroChartLegend
             series={chartConfig.series}
-            chances={chances}
+            latestSnapshot={latestSnapshot}
             cursorSnapshot={cursorSnapshot}
           />
         )
       : null,
-    [showLegend, chartConfig.series, chances, cursorSnapshot],
+    [showLegend, chartConfig.series, latestSnapshot, cursorSnapshot],
   )
 
   // Render chart whenever data is ready, even on preloaded (off-screen) slides.
