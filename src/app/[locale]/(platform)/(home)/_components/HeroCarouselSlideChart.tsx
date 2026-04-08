@@ -50,7 +50,9 @@ const DEFAULT_CHART_RANGE = 'ALL' as const
 const MAX_HERO_SERIES = 4
 const MIN_CHART_WIDTH = 200
 const MIN_CHART_HEIGHT = 150
-const CHART_MARGIN = { top: 10, right: 16, bottom: 24, left: 0 }
+// Right margin accommodates the Y-axis labels (rendered on right via AxisRight).
+// Polymarket uses yAxisOrientation:"right" with dynamic right margin.
+const CHART_MARGIN = { top: 10, right: 40, bottom: 24, left: 0 }
 const PLOT_CLIP_RIGHT_PADDING = 18
 const LABEL_SPACE_RATIO = 0.65
 
@@ -343,12 +345,13 @@ export default function HeroCarouselSlideChart({
               width={dimensions.width}
               height={dimensions.height}
               showXAxis
-              showYAxis={false}
+              showYAxis
               showHorizontalGrid
               showVerticalGrid={false}
               legendContent={legendContent}
               showLegend={showLegend}
               lineCurve="monotoneX"
+              lineStrokeWidth={1.75}
               margin={CHART_MARGIN}
               xDomain={xDomain}
               xAxisTickCount={3}
