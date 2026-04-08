@@ -31,7 +31,7 @@ const { resolveSiteUrl } = siteUrlUtils
 const SITE_URL = resolveSiteUrl(process.env)
 const siteUrlObject = new URL(SITE_URL)
 const SIWE_DOMAIN = siteUrlObject.host
-const SIWE_EMAIL_DOMAIN = siteUrlObject.hostname || 'kuest.com'
+const SIWE_EMAIL_DOMAIN = siteUrlObject.hostname || 'axes.co'
 
 function parseTimestampMs(value: unknown): number | null {
   if (value === null || value === undefined) {

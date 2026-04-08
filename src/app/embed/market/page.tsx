@@ -1,11 +1,11 @@
 import type { Metadata } from 'next'
 import type { EmbedOutcome } from '@/components/embed/MarketEmbedCard'
-import type { EmbedTheme } from '@/lib/embed-theme'
 import type { SupportedLocale } from '@/i18n/locales'
-import { Suspense } from 'react'
+import type { EmbedTheme } from '@/lib/embed-theme'
 import { eq } from 'drizzle-orm'
-import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from '@/i18n/locales'
+import { Suspense } from 'react'
 import MarketEmbedCard from '@/components/embed/MarketEmbedCard'
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from '@/i18n/locales'
 import { OUTCOME_INDEX } from '@/lib/constants'
 import { EventRepository } from '@/lib/db/queries/event'
 import { markets as marketsTable } from '@/lib/db/schema/events/tables'
@@ -75,13 +75,19 @@ async function resolveMarketBySlug(slug: string, locale: SupportedLocale) {
     with: { event: { columns: { slug: true } } },
   })
 
-  if (!marketRecord?.event?.slug) return null
+  if (!marketRecord?.event?.slug) {
+    return null
+  }
 
   const { data: event } = await EventRepository.getEventBySlug(marketRecord.event.slug, '', locale)
-  if (!event) return null
+  if (!event) {
+    return null
+  }
 
   const market = event.markets.find(m => m.slug === slug)
-  if (!market) return null
+  if (!market) {
+    return null
+  }
 
   return { market, event }
 }
@@ -150,7 +156,7 @@ async function EmbedMarketContent({
 
   // Resolve site identity
   const runtimeTheme = await loadRuntimeThemeState()
-  const siteName = runtimeTheme.site.name || 'Kuest'
+  const siteName = runtimeTheme.site.name || 'Axes'
   const siteUrl = normalizeBaseUrl(process.env.SITE_URL ?? '')
   const logoSvg = runtimeTheme.site.logoSvg
 
@@ -234,9 +240,13 @@ async function EmbedMarketContent({
       // Multi-outcome: one line per outcome
       const seriesResults = await Promise.all(
         sortedOutcomes.map(async (outcome, index) => {
-          if (!outcome.token_id) return null
+          if (!outcome.token_id) {
+            return null
+          }
           const points = await fetchEmbedPriceHistory(outcome.token_id, event.created_at, event.resolved_at)
-          if (points.length === 0) return null
+          if (points.length === 0) {
+            return null
+          }
           return {
             key: `${market.condition_id}-${outcome.outcome_index}`,
             color: outcomes[index]?.color ?? resolveChartLineColor(index),
