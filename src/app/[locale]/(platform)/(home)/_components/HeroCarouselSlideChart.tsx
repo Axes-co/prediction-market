@@ -42,7 +42,11 @@ interface HeroCarouselSlideChartProps {
   sportsModel?: HomeSportsMoneylineModel | null
 }
 
-const HERO_CHART_RANGE = '1W' as const
+// Polymarket carousel chart ranges (from their JS bundle CAROUSEL_CHART_OPTIONS):
+//   Sports cards: forcedWindow="1d"
+//   All other cards: forcedWindow="all"
+const SPORTS_CHART_RANGE = '1D' as const
+const DEFAULT_CHART_RANGE = 'ALL' as const
 const MAX_HERO_SERIES = 4
 const MIN_CHART_WIDTH = 200
 const MIN_CHART_HEIGHT = 150
@@ -265,9 +269,11 @@ export default function HeroCarouselSlideChart({
     [event, variant, sportsModel, chances],
   )
 
+  const chartRange = variant === 'sports' ? SPORTS_CHART_RANGE : DEFAULT_CHART_RANGE
+
   const { normalizedHistory } = useEventPriceHistory({
     eventId: event.id,
-    range: HERO_CHART_RANGE,
+    range: chartRange,
     targets: chartConfig.targets,
     eventCreatedAt: event.created_at,
     eventResolvedAt: event.resolved_at,
@@ -347,7 +353,7 @@ export default function HeroCarouselSlideChart({
               xDomain={xDomain}
               xAxisTickCount={3}
               autoscale
-              cursorStepMs={CURSOR_STEP_MS[HERO_CHART_RANGE]}
+              cursorStepMs={CURSOR_STEP_MS[chartRange]}
               onCursorDataChange={setCursorSnapshot}
               showEndOfLineLabels={showEndOfLineLabels}
               leadingGapStart={leadingGapStart}
