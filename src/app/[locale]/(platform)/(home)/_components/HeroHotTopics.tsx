@@ -56,7 +56,7 @@ export default function HeroHotTopics({ events }: HeroHotTopicsProps) {
   return (
     <div className="flex flex-col gap-3 rounded-lg">
       <AppLink href={'/predictions?_sort=volume' as never} className="group flex items-center gap-1 hover:underline">
-        <h2 className="text-[18px] font-[580] text-foreground">{t('Hot topics')}</h2>
+        <h2 className="text-lg font-semibold text-foreground">{t('Hot topics')}</h2>
         <ChevronRightIcon className="size-3.5 text-muted-foreground transition-colors group-hover:text-foreground" />
       </AppLink>
 
