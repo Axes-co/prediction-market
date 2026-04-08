@@ -199,8 +199,8 @@
   "dMvvqr": "Vendido",
   "4Fb8FZ": "Comprado",
   "DJ2jrV": "Carregando mais histórico...",
-  "EnCOBJ": "Comprar",
   "9AgXoz": "Vender",
+  "EnCOBJ": "Comprar",
   "ixovN5": "Até cancelamento",
   "F9l7AF": "Cancelar ordem de {side} para {outcome}",
   "0ix6PR": "Ordem cancelada",
@@ -803,8 +803,5 @@
   "ClnFH6": "Obtenha Amoy USDC grátis no Discord com",
   "CCIrox": "Abrir Discord",
   "Pg+LLi": "Sobe",
-  "xhBLiY": "Desce",
-  "embed.viewMarket": "Ver mercado",
-  "embed.allTime": "Todo o período",
-  "embed.viewOn": "Ver em"
+  "xhBLiY": "Desce"
 }

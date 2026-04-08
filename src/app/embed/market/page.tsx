@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import type { EmbedOutcome } from '@/components/embed/MarketEmbedCard'
 import type { SupportedLocale } from '@/i18n/locales'
 import type { EmbedTheme } from '@/lib/embed-theme'
+import type { Event } from '@/types'
 import { eq } from 'drizzle-orm'
 import { Suspense } from 'react'
 import MarketEmbedCard from '@/components/embed/MarketEmbedCard'
@@ -32,6 +33,7 @@ import {
   normalizeOutcomePrice,
   parseBoolParam,
 } from '@/lib/embed-utils'
+import { cacheKeys, cacheTTL, withCache } from '@/lib/redis'
 import { loadRuntimeThemeState } from '@/lib/theme-settings'
 
 // ---------------------------------------------------------------------------
@@ -79,7 +81,7 @@ async function resolveMarketBySlug(slug: string, locale: SupportedLocale) {
     return null
   }
 
-  const { data: event } = await EventRepository.getEventBySlug(marketRecord.event.slug, '', locale)
+  const event = await resolveEventBySlug(marketRecord.event.slug, locale)
   if (!event) {
     return null
   }
@@ -92,9 +94,16 @@ async function resolveMarketBySlug(slug: string, locale: SupportedLocale) {
   return { market, event }
 }
 
-async function resolveEventBySlug(slug: string, locale: SupportedLocale) {
-  const { data: event } = await EventRepository.getEventBySlug(slug, '', locale)
-  return event ?? null
+async function resolveEventBySlug(slug: string, locale: SupportedLocale): Promise<Event | null> {
+  return withCache(
+    cacheKeys.eventBySlug(slug, locale),
+    async () => {
+      const { data } = await EventRepository.getEventBySlug(slug, '', locale)
+      return data ?? null
+    },
+    cacheTTL.eventBySlug,
+    data => data !== null,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +161,9 @@ async function EmbedMarketContent({
     viewMarket: messages['embed.viewMarket'] ?? 'View Market',
     allTime: messages['embed.allTime'] ?? 'All time',
     viewOn: messages['embed.viewOn'] ?? 'View on',
+    vol: messages['embed.vol'] ?? 'Vol.',
+    live: messages['embed.live'] ?? 'Live',
+    startsIn: messages['embed.startsIn'] ?? 'Starts in',
   }
 
   // Resolve site identity
@@ -206,7 +218,8 @@ async function EmbedMarketContent({
     }
   })
 
-  const multiOutcome = isMultiOutcomeMarket(outcomes)
+  const isSportsEvent = Boolean(event.sports_sport_slug)
+  const multiOutcome = isMultiOutcomeMarket(outcomes, { isSportsEvent })
 
   // Strip icons/colors for binary markets (they use simple green/red)
   const resolvedOutcomes: EmbedOutcome[] = multiOutcome
@@ -264,7 +277,7 @@ async function EmbedMarketContent({
 
   return (
     <MarketEmbedCard
-      title={market.question || market.title || market.slug}
+      title={event.title || market.question || market.title || market.slug}
       iconUrl={market.icon_url || event.icon_url || ''}
       marketUrl={marketUrl}
       siteUrl={siteUrl}
@@ -284,6 +297,7 @@ async function EmbedMarketContent({
       showBorder={showBorder}
       startTime={event.sports_start_time ?? event.start_date ?? null}
       labels={labels}
+      isSportsEvent={isSportsEvent}
     />
   )
 }

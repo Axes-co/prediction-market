@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react'
 import type { EmbedChartData } from '@/lib/embed-chart'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CHART_DOT_RADIUS,
   CHART_PADDING,
@@ -123,6 +123,10 @@ export default function EmbedChartCrosshair({
     [chart.lines],
   )
 
+  // Chart plot area boundaries in SVG coordinates
+  const plotLeft = CHART_PADDING.left
+  const plotRight = chart.viewBoxWidth - CHART_PADDING.right
+
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const container = containerRef.current
     if (!container || parsedLines.length === 0) {
@@ -133,21 +137,34 @@ export default function EmbedChartCrosshair({
     const relativeX = e.clientX - rect.left
     const svgX = (relativeX / rect.width) * chart.viewBoxWidth
 
+    // Only show crosshair within the chart plot area
+    if (svgX < plotLeft || svgX > plotRight) {
+      setCursor(null)
+      return
+    }
+
     // Interpolate Y position on every line at this X coordinate
     const lines: LineCursorState[] = parsedLines
       .filter(line => line.points.length > 0)
-      .map(line => ({
-        svgY: interpolateY(line.points, svgX),
-        percent: yToPercent(interpolateY(line.points, svgX), chart.viewBoxHeight),
-        color: line.color,
-      }))
+      .map((line) => {
+        const svgY = interpolateY(line.points, svgX)
+        return {
+          svgY,
+          percent: yToPercent(svgY, chart.viewBoxHeight),
+          color: line.color,
+        }
+      })
 
     setCursor({ svgX, cssX: relativeX, lines })
-  }, [chart.viewBoxWidth, chart.viewBoxHeight, parsedLines])
+  }, [chart.viewBoxWidth, chart.viewBoxHeight, parsedLines, plotLeft, plotRight])
 
-  const handleMouseLeave = useCallback(() => {
-    setCursor(null)
-  }, [])
+  const clearCursor = useCallback(() => setCursor(null), [])
+
+  // Clear crosshair when mouse leaves the iframe boundary
+  useEffect(() => {
+    document.addEventListener('mouseleave', clearCursor)
+    return () => document.removeEventListener('mouseleave', clearCursor)
+  }, [clearCursor])
 
   const isHovering = cursor !== null
   const primaryLine = cursor?.lines[0] ?? null
@@ -158,7 +175,7 @@ export default function EmbedChartCrosshair({
       className="relative min-h-0 flex-1"
       style={{ touchAction: 'pan-y pan-x' }}
       onMouseMove={handleMouseMove}
-      onMouseLeave={handleMouseLeave}
+      onMouseLeave={clearCursor}
     >
       {svgChart}
 

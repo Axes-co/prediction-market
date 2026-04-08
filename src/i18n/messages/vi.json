@@ -199,8 +199,8 @@
   "dMvvqr": "Đã bán",
   "4Fb8FZ": "Đã mua",
   "DJ2jrV": "Đang tải thêm lịch sử...",
-  "EnCOBJ": "Mua",
   "9AgXoz": "Bán",
+  "EnCOBJ": "Mua",
   "ixovN5": "Cho đến khi hủy",
   "F9l7AF": "Hủy lệnh {side} cho {outcome}",
   "0ix6PR": "Lệnh đã hủy",
@@ -803,8 +803,5 @@
   "ClnFH6": "Nhận USDC Amoy miễn phí trong Discord với",
   "CCIrox": "Mở Discord",
   "Pg+LLi": "Tăng",
-  "xhBLiY": "Giảm",
-  "embed.viewMarket": "Xem thị trường",
-  "embed.allTime": "Tất cả thời gian",
-  "embed.viewOn": "Xem trên"
+  "xhBLiY": "Giảm"
 }

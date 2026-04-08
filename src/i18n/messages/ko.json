@@ -199,8 +199,8 @@
   "dMvvqr": "매도됨",
   "4Fb8FZ": "매수됨",
   "DJ2jrV": "추가 이력 불러오는 중...",
-  "EnCOBJ": "매수",
   "9AgXoz": "매도",
+  "EnCOBJ": "매수",
   "ixovN5": "취소 시까지",
   "F9l7AF": "{outcome}에 대한 {side} 주문 취소",
   "0ix6PR": "주문이 취소되었습니다",
@@ -803,8 +803,5 @@
   "ClnFH6": "Discord에서 무료 Amoy USDC를 받으세요:",
   "CCIrox": "Discord 열기",
   "Pg+LLi": "상승",
-  "xhBLiY": "하락",
-  "embed.viewMarket": "마켓 보기",
-  "embed.allTime": "전체 기간",
-  "embed.viewOn": "에서 보기"
+  "xhBLiY": "하락"
 }

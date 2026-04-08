@@ -199,8 +199,8 @@
   "dMvvqr": "Terjual",
   "4Fb8FZ": "Terbeli",
   "DJ2jrV": "Memuat lebih banyak riwayat...",
-  "EnCOBJ": "Beli",
   "9AgXoz": "Jual",
+  "EnCOBJ": "Beli",
   "ixovN5": "Sampai Dibatalkan",
   "F9l7AF": "Batalkan order {side} untuk {outcome}",
   "0ix6PR": "Order dibatalkan",
@@ -803,8 +803,5 @@
   "ClnFH6": "Dapatkan USDC Amoy gratis di Discord dengan",
   "CCIrox": "Buka Discord",
   "Pg+LLi": "Naik",
-  "xhBLiY": "Turun",
-  "embed.viewMarket": "Lihat Pasar",
-  "embed.allTime": "Sepanjang waktu",
-  "embed.viewOn": "Lihat di"
+  "xhBLiY": "Turun"
 }

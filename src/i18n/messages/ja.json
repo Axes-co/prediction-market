@@ -199,8 +199,8 @@
   "dMvvqr": "売却済み",
   "4Fb8FZ": "購入済み",
   "DJ2jrV": "履歴をさらに読み込み中...",
-  "EnCOBJ": "購入",
   "9AgXoz": "売却",
+  "EnCOBJ": "購入",
   "ixovN5": "キャンセルまで有効",
   "F9l7AF": "{outcome}の{side}注文をキャンセル",
   "0ix6PR": "注文がキャンセルされました",
@@ -803,8 +803,5 @@
   "ClnFH6": "Discordで無料のAmoy USDCを取得するには",
   "CCIrox": "Discordを開く",
   "Pg+LLi": "上昇",
-  "xhBLiY": "下降",
-  "embed.viewMarket": "マーケットを見る",
-  "embed.allTime": "全期間",
-  "embed.viewOn": "で見る"
+  "xhBLiY": "下降"
 }

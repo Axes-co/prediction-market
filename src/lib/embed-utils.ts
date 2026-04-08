@@ -15,8 +15,12 @@ import type { Market, Outcome } from '@/types'
 const FALLBACK_PRICE = 0.5
 
 export function clampPrice(value: number): number {
-  if (!Number.isFinite(value) || value < 0) return 0
-  if (value > 1) return 1
+  if (!Number.isFinite(value) || value < 0) {
+    return 0
+  }
+  if (value > 1) {
+    return 1
+  }
   return value
 }
 
@@ -49,10 +53,23 @@ const BINARY_LABELS = new Set(['yes', 'no', 'up', 'down'])
 /**
  * Returns true when outcomes represent distinct entities (teams, candidates,
  * dates) rather than simple Yes/No or Up/Down.
+ *
+ * Sports events are always multi-outcome (head-to-head) even when outcome
+ * labels fall back to generic "Yes"/"No" due to missing team data.
  */
-export function isMultiOutcomeMarket(outcomes: Array<{ label: string }>): boolean {
-  if (outcomes.length > 2) return true
-  if (outcomes.length <= 1) return false
+export function isMultiOutcomeMarket(
+  outcomes: Array<{ label: string }>,
+  options?: { isSportsEvent?: boolean },
+): boolean {
+  if (outcomes.length > 2) {
+    return true
+  }
+  if (outcomes.length <= 1) {
+    return false
+  }
+  if (options?.isSportsEvent) {
+    return true
+  }
   return !outcomes.every(o => BINARY_LABELS.has(o.label.toLowerCase()))
 }
 
@@ -100,7 +117,9 @@ export function buildMarketUrl(
 // ---------------------------------------------------------------------------
 
 export function parseBoolParam(value: string | undefined, defaultValue: boolean): boolean {
-  if (value === undefined) return defaultValue
+  if (value === undefined) {
+    return defaultValue
+  }
   return value !== 'false' && value !== '0'
 }
 

@@ -199,8 +199,8 @@
   "dMvvqr": "تم البيع",
   "4Fb8FZ": "تم الشراء",
   "DJ2jrV": "جارٍ تحميل المزيد من السجل...",
-  "EnCOBJ": "شراء",
   "9AgXoz": "بيع",
+  "EnCOBJ": "شراء",
   "ixovN5": "حتى الإلغاء",
   "F9l7AF": "إلغاء أمر {side} لـ {outcome}",
   "0ix6PR": "تم إلغاء الأمر",
@@ -803,8 +803,5 @@
   "ClnFH6": "احصل على USDC مجاني على شبكة Amoy في Discord باستخدام",
   "CCIrox": "فتح Discord",
   "Pg+LLi": "أعلى",
-  "xhBLiY": "أسفل",
-  "embed.viewMarket": "عرض السوق",
-  "embed.allTime": "كل الأوقات",
-  "embed.viewOn": "عرض على"
+  "xhBLiY": "أسفل"
 }

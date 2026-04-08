@@ -1,26 +1,26 @@
 import type { EmbedChartData } from '@/lib/embed-chart'
 import type { EmbedTheme } from '@/lib/embed-theme'
 import EmbedChartCrosshair from '@/components/embed/EmbedChartCrosshair'
+import EmbedHeader from '@/components/embed/EmbedHeader'
+import EmbedOutcomeButtons from '@/components/embed/EmbedOutcomeButtons'
+import EmbedSvgChart from '@/components/embed/EmbedSvgChart'
 import {
   BANNER_ICON_SIZE_PX,
   BANNER_PADDING,
   BANNER_TITLE_MAX_WIDTH,
   CARD_PADDING,
   CARD_PADDING_MULTI_OUTCOME,
+  isBannerLayout,
   MARKET_ICON_SIZE_PX,
   PRICE_LABEL_FONT_SIZE,
   PRICE_LABEL_STROKE_WIDTH,
   PRICE_LABEL_X_SCALE,
   PRICE_LABEL_Y_SCALE,
   TITLE_FONT_SIZE,
-  isBannerLayout,
 } from '@/lib/embed-dimensions'
 import { resolveEmbedPalette } from '@/lib/embed-theme'
 import { isMultiOutcomeMarket } from '@/lib/embed-utils'
 import { formatVolume } from '@/lib/formatters'
-import EmbedHeader from '@/components/embed/EmbedHeader'
-import EmbedOutcomeButtons from '@/components/embed/EmbedOutcomeButtons'
-import EmbedSvgChart from '@/components/embed/EmbedSvgChart'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,40 +57,52 @@ export interface MarketEmbedCardProps {
   startTime?: string | null
   /** Translated UI labels for the widget */
   labels?: EmbedLabels
+  /** Whether this market belongs to a sports event (forces multi-outcome rendering) */
+  isSportsEvent?: boolean
 }
 
 export interface EmbedLabels {
   viewMarket: string
   allTime: string
   viewOn: string
+  vol: string
+  live: string
+  startsIn: string
 }
 
 const DEFAULT_LABELS: EmbedLabels = {
   viewMarket: 'View Market',
   allTime: 'All time',
   viewOn: 'View on',
+  vol: 'Vol.',
+  live: 'Live',
+  startsIn: 'Starts in',
 }
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function CountdownLabel({ startTime, color }: { startTime: string, color: string }) {
+function CountdownLabel({ startTime, color, labels }: { startTime: string, color: string, labels: EmbedLabels }) {
   const startMs = new Date(startTime).getTime()
   const diffMs = startMs - Date.now()
 
   let label: string
   if (diffMs <= 0) {
-    label = 'Live'
+    label = labels.live
   }
   else {
     const totalMinutes = Math.floor(diffMs / 60000)
     const hours = Math.floor(totalMinutes / 60)
     const minutes = totalMinutes % 60
     const days = Math.floor(hours / 24)
-    if (days > 0) label = `Starts in ${days}d ${hours % 24}h`
-    else if (hours > 0) label = `Starts in ${hours}h ${minutes}m`
-    else label = `Starts in ${minutes}m`
+    if (days > 0) {
+      label = `${labels.startsIn} ${days}d ${hours % 24}h`
+    }
+    else if (hours > 0) {
+      label = `${labels.startsIn} ${hours}h ${minutes}m`
+    }
+    else { label = `${labels.startsIn} ${minutes}m` }
   }
 
   return (
@@ -105,18 +117,20 @@ function CountdownLabel({ startTime, color }: { startTime: string, color: string
 }
 
 function PriceLabel({ lines, strokeBg }: { lines: EmbedChartData['lines'], strokeBg: string }) {
-  if (lines.length === 0) return null
+  if (lines.length === 0) {
+    return null
+  }
   const primary = lines[0]
 
   return (
     <div
-      className="absolute left-1 top-0 pointer-events-none z-10"
+      className="pointer-events-none absolute top-0 left-1 z-10"
       style={{
         transform: `translateX(${primary.lastX * PRICE_LABEL_X_SCALE}px) translateY(${primary.lastY * PRICE_LABEL_Y_SCALE}px)`,
       }}
     >
       <span
-        className="font-semibold leading-none whitespace-nowrap"
+        className="leading-none font-semibold whitespace-nowrap"
         style={{
           WebkitTextStroke: `${PRICE_LABEL_STROKE_WIDTH} ${strokeBg}`,
           fontSize: PRICE_LABEL_FONT_SIZE,
@@ -124,19 +138,20 @@ function PriceLabel({ lines, strokeBg }: { lines: EmbedChartData['lines'], strok
           paintOrder: 'stroke',
         }}
       >
-        {primary.lastPercent}%
+        {primary.lastPercent}
+        %
       </span>
     </div>
   )
 }
 
-function VolumeRow({ volume, marketUrl, color, allTimeLabel }: { volume: number, marketUrl: string, color: string, allTimeLabel: string }) {
+function VolumeRow({ volume, marketUrl, color, allTimeLabel, volLabel }: { volume: number, marketUrl: string, color: string, allTimeLabel: string, volLabel: string }) {
   return (
     <div className="flex items-center justify-between">
       <span className="text-xs font-medium" style={{ color }}>
         {formatVolume(volume)}
         {' '}
-        Vol.
+        {volLabel}
       </span>
       <a
         className="flex items-center gap-1 text-xs font-medium no-underline"
@@ -146,7 +161,7 @@ function VolumeRow({ volume, marketUrl, color, allTimeLabel }: { volume: number,
         target="_blank"
       >
         <span>{allTimeLabel}</span>
-        <svg className="w-3 h-3" fill="none" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg">
+        <svg className="size-3" fill="none" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg">
           <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
         </svg>
       </a>
@@ -159,19 +174,20 @@ function MultiOutcomeRows({ outcomes, fg }: { outcomes: EmbedOutcome[], fg: stri
     <div className="flex flex-col gap-1">
       {outcomes.map(outcome => (
         <div key={outcome.outcomeIndex} className="flex items-center justify-between">
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex min-w-0 items-center gap-3">
             {outcome.iconUrl && (
-              <img className="w-8 h-8 object-contain shrink-0" alt={outcome.label} src={outcome.iconUrl} />
+              <img className="size-8 shrink-0 object-contain" alt={outcome.label} src={outcome.iconUrl} />
             )}
-            <span className="text-lg font-semibold tracking-tight truncate" style={{ color: fg }}>
+            <span className="truncate text-lg font-semibold tracking-tight" style={{ color: fg }}>
               {outcome.label}
             </span>
           </div>
           <span
-            className="text-lg font-semibold tracking-tight shrink-0 ml-2"
+            className="ml-2 shrink-0 text-lg font-semibold tracking-tight"
             style={{ color: outcome.color ?? fg }}
           >
-            {Math.round(outcome.price * 100)}%
+            {Math.round(outcome.price * 100)}
+            %
           </span>
         </div>
       ))}
@@ -184,7 +200,17 @@ function MultiOutcomeRows({ outcomes, fg }: { outcomes: EmbedOutcome[], fg: stri
 // ---------------------------------------------------------------------------
 
 function ChartSection({
-  chart, theme, showYAxis, showGridRows, showVolume, volume, marketUrl, palette, multiOutcome, allTimeLabel,
+  chart,
+  theme,
+  showYAxis,
+  showGridRows,
+  showVolume,
+  volume,
+  marketUrl,
+  palette,
+  multiOutcome,
+  allTimeLabel,
+  volLabel,
 }: {
   chart: EmbedChartData
   theme: EmbedTheme
@@ -196,10 +222,11 @@ function ChartSection({
   palette: ReturnType<typeof resolveEmbedPalette>
   multiOutcome: boolean
   allTimeLabel: string
+  volLabel: string
 }) {
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
-      <div className="flex flex-col gap-1 w-full flex-1 min-h-0">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 w-full flex-1 flex-col gap-1">
         <EmbedChartCrosshair
           chart={chart}
           strokeBg={palette.priceStrokeBg}
@@ -208,7 +235,7 @@ function ChartSection({
             ? <PriceLabel lines={chart.lines} strokeBg={palette.priceStrokeBg} />
             : undefined}
         />
-        {showVolume && <VolumeRow volume={volume} marketUrl={marketUrl} color={palette.muted} allTimeLabel={allTimeLabel} />}
+        {showVolume && <VolumeRow volume={volume} marketUrl={marketUrl} color={palette.muted} allTimeLabel={allTimeLabel} volLabel={volLabel} />}
       </div>
     </div>
   )
@@ -227,7 +254,7 @@ function BannerLayout(props: MarketEmbedCardProps) {
 
   return (
     <div
-      className="flex items-center gap-1 rounded-2xl overflow-hidden"
+      className="flex items-center gap-1 overflow-hidden rounded-2xl"
       style={{
         fontFamily: 'var(--font-sans), system-ui, sans-serif',
         padding: BANNER_PADDING,
@@ -239,24 +266,28 @@ function BannerLayout(props: MarketEmbedCardProps) {
         color: palette.fg,
       }}
     >
-      <div className="flex items-center gap-1 w-full h-full">
+      <div className="flex size-full items-center gap-1">
         {iconUrl && (
           <img
-            className="rounded-xl object-cover shrink-0"
+            className="shrink-0 rounded-xl object-cover"
             alt={title}
             src={iconUrl}
             style={{ height: BANNER_ICON_SIZE_PX, width: BANNER_ICON_SIZE_PX }}
           />
         )}
 
-        <div className="flex flex-col justify-center gap-1 shrink-0 px-2" style={{ maxWidth: BANNER_TITLE_MAX_WIDTH }}>
-          <p className="font-bold leading-snug line-clamp-2 text-sm" style={{ color: palette.fg, margin: 0 }}>
+        <div className="flex shrink-0 flex-col justify-center gap-1 px-2" style={{ maxWidth: BANNER_TITLE_MAX_WIDTH }}>
+          <p className="line-clamp-2 text-sm/snug font-bold" style={{ color: palette.fg, margin: 0 }}>
             {title}
           </p>
           <div className="flex items-center gap-1 text-xs font-medium" style={{ color: palette.muted }}>
             {showVolume !== false && (
               <>
-                <span>{formatVolume(volume)} Vol.</span>
+                <span>
+                  {formatVolume(volume)}
+                  {' '}
+                  {labels.vol}
+                </span>
                 <span>·</span>
               </>
             )}
@@ -266,8 +297,8 @@ function BannerLayout(props: MarketEmbedCardProps) {
         </div>
 
         {showChart !== false && chart && chart.lines.length > 0 && (
-          <div className="flex-1 min-w-0 flex flex-col" style={{ height: BANNER_ICON_SIZE_PX }}>
-            <div className="flex flex-col gap-1 w-full flex-1 min-h-0">
+          <div className="flex min-w-0 flex-1 flex-col" style={{ height: BANNER_ICON_SIZE_PX }}>
+            <div className="flex min-h-0 w-full flex-1 flex-col gap-1">
               <EmbedChartCrosshair
                 chart={chart}
                 strokeBg={palette.priceStrokeBg}
@@ -294,16 +325,30 @@ function BannerLayout(props: MarketEmbedCardProps) {
 
 function CardLayout(props: MarketEmbedCardProps) {
   const {
-    title, iconUrl, marketUrl, siteName, logoSvg,
-    outcomes, chart, volume, theme,
-    width, height, startTime,
-    showChart, showButtons, showVolume, showYAxis, showGridRows,
+    title,
+    iconUrl,
+    marketUrl,
+    siteName,
+    logoSvg,
+    outcomes,
+    chart,
+    volume,
+    theme,
+    width,
+    height,
+    startTime,
+    showChart,
+    showButtons,
+    showVolume,
+    showYAxis,
+    showGridRows,
     labels: rawLabels,
+    isSportsEvent,
   } = props
 
   const palette = resolveEmbedPalette(theme)
   const labels = rawLabels ?? DEFAULT_LABELS
-  const multiOutcome = isMultiOutcomeMarket(outcomes)
+  const multiOutcome = isMultiOutcomeMarket(outcomes, { isSportsEvent })
   const hasStartTime = Boolean(startTime)
   const padding = multiOutcome ? CARD_PADDING_MULTI_OUTCOME : CARD_PADDING
 
@@ -339,29 +384,29 @@ function CardLayout(props: MarketEmbedCardProps) {
                 rel="noopener"
                 target="_blank"
               >
-                <CountdownLabel startTime={startTime!} color={palette.muted} />
+                <CountdownLabel startTime={startTime!} color={palette.muted} labels={labels} />
               </a>
               <EmbedHeader siteName={siteName} logoSvg={logoSvg} marketUrl={marketUrl} theme={theme} viewMarketLabel={labels.viewMarket} />
             </div>
           )
         : <EmbedHeader siteName={siteName} logoSvg={logoSvg} marketUrl={marketUrl} theme={theme} viewMarketLabel={labels.viewMarket} />}
 
-      <div className="flex flex-col gap-2 flex-1 min-h-0">
+      <div className="flex min-h-0 flex-1 flex-col gap-2">
         {/* Market info — outcome rows for multi-outcome, image+title for binary */}
         {multiOutcome
           ? <MultiOutcomeRows outcomes={outcomes} fg={palette.fg} />
           : (
               <div className="flex items-center justify-between gap-3">
-                <a className="flex items-start gap-3 no-underline flex-1 min-w-0" href={marketUrl} rel="noopener" target="_blank">
+                <a className="flex min-w-0 flex-1 items-start gap-3 no-underline" href={marketUrl} rel="noopener" target="_blank">
                   {iconUrl && (
                     <img
-                      className="rounded-lg object-cover shrink-0"
+                      className="shrink-0 rounded-lg object-cover"
                       alt={title}
                       src={iconUrl}
                       style={{ width: MARKET_ICON_SIZE_PX, height: MARKET_ICON_SIZE_PX }}
                     />
                   )}
-                  <p className="font-bold leading-snug line-clamp-3" style={{ fontSize: TITLE_FONT_SIZE, color: palette.fg, margin: 0 }}>
+                  <p className="line-clamp-3 leading-snug font-bold" style={{ fontSize: TITLE_FONT_SIZE, color: palette.fg, margin: 0 }}>
                     {title}
                   </p>
                 </a>
@@ -382,10 +427,11 @@ function CardLayout(props: MarketEmbedCardProps) {
                 palette={palette}
                 multiOutcome={multiOutcome}
                 allTimeLabel={labels.allTime}
+                volLabel={labels.vol}
               />
             )
           : showVolume !== false
-            ? <VolumeRow volume={volume} marketUrl={marketUrl} color={palette.muted} allTimeLabel={labels.allTime} />
+            ? <VolumeRow volume={volume} marketUrl={marketUrl} color={palette.muted} allTimeLabel={labels.allTime} volLabel={labels.vol} />
             : null}
 
         {/* Outcome buttons */}

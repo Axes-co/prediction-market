@@ -199,8 +199,8 @@
   "dMvvqr": "बेचा गया",
   "4Fb8FZ": "खरीदा गया",
   "DJ2jrV": "और इतिहास लोड हो रहा है...",
-  "EnCOBJ": "खरीदें",
   "9AgXoz": "बेचें",
+  "EnCOBJ": "खरीदें",
   "ixovN5": "रद्द होने तक",
   "F9l7AF": "{outcome} के लिए {side} ऑर्डर रद्द करें",
   "0ix6PR": "ऑर्डर रद्द हो गया",
@@ -803,8 +803,5 @@
   "ClnFH6": "Discord में मुफ़्त Amoy USDC प्राप्त करें",
   "CCIrox": "Discord खोलें",
   "Pg+LLi": "ऊपर",
-  "xhBLiY": "नीचे",
-  "embed.viewMarket": "बाज़ार देखें",
-  "embed.allTime": "सभी समय",
-  "embed.viewOn": "पर देखें"
+  "xhBLiY": "नीचे"
 }
