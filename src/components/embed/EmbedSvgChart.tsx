@@ -25,6 +25,7 @@ export default function EmbedSvgChart({
   const { lines, axisTicks, viewBoxWidth, viewBoxHeight } = chart
   const palette = resolveEmbedPalette(theme)
   const axisLabelX = viewBoxWidth - CHART_PADDING.right - 2
+  const isSingleLine = lines.filter(l => l.pathD).length <= 1
 
   if (lines.length === 0) {
     return null
@@ -51,53 +52,82 @@ export default function EmbedSvgChart({
       ))}
 
       {showYAxis && axisTicks.map((tick, i) => (
-        <text
-          key={`label-${i}`}
-          fill={palette.axisText}
-          fontFamily="sans-serif"
-          fontSize={CHART_AXIS_FONT_SIZE}
-          x={axisLabelX}
-          y={tick.y + 5}
-        >
-          {tick.label}
-        </text>
+        isSingleLine
+          ? (
+              <g key={`label-${i}`}>
+                <rect
+                  fill={palette.bg}
+                  height={CHART_AXIS_FONT_SIZE + 4}
+                  width={CHART_PADDING.right - 2}
+                  x={axisLabelX - 4}
+                  y={tick.y - (CHART_AXIS_FONT_SIZE / 2) - 2}
+                />
+                <text
+                  fill={palette.axisText}
+                  fontFamily="sans-serif"
+                  fontSize={CHART_AXIS_FONT_SIZE}
+                  x={axisLabelX}
+                  y={tick.y + 5}
+                >
+                  {tick.label}
+                </text>
+              </g>
+            )
+          : (
+              <text
+                key={`label-${i}`}
+                fill={palette.axisText}
+                fontFamily="sans-serif"
+                fontSize={CHART_AXIS_FONT_SIZE}
+                x={axisLabelX}
+                y={tick.y + 5}
+              >
+                {tick.label}
+              </text>
+            )
       ))}
 
+      {/* Render all paths first, then all dots — matches Polymarket z-order */}
       {lines.map(line => (
         line.pathD
           ? (
-              <g key={line.key}>
-                <path
-                  className="pointer-events-none"
-                  d={line.pathD}
-                  fill="transparent"
-                  pathLength={1}
-                  stroke={line.color}
-                  strokeDasharray="1 1"
-                  strokeDashoffset="0"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={CHART_LINE_STROKE_WIDTH}
+              <path
+                key={line.key}
+                className="pointer-events-none"
+                d={line.pathD}
+                fill="transparent"
+                pathLength={1}
+                stroke={line.color}
+                strokeDasharray="1 1"
+                strokeDashoffset="0"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={CHART_LINE_STROKE_WIDTH}
+              />
+            )
+          : null
+      ))}
+      {lines.map(line => (
+        line.pathD
+          ? (
+              <g key={`dot-${line.key}`} className="pointer-events-none">
+                <circle
+                  cx={line.lastX}
+                  cy={line.lastY}
+                  fill={line.color}
+                  r={CHART_DOT_RADIUS}
                 />
-                <g className="pointer-events-none">
-                  <circle
-                    cx={line.lastX}
-                    cy={line.lastY}
-                    fill={line.color}
-                    r={CHART_DOT_RADIUS}
-                  />
-                  <circle
-                    cx={line.lastX}
-                    cy={line.lastY}
-                    fill={line.color}
-                    r={CHART_DOT_RADIUS}
-                    style={{
-                      transformOrigin: '50% 50%',
-                      transformBox: 'fill-box' as const,
-                      animation: 'embed-pulse 2s ease-in-out infinite',
-                    }}
-                  />
-                </g>
+                <circle
+                  cx={line.lastX}
+                  cy={line.lastY}
+                  fill={line.color}
+                  r={CHART_DOT_RADIUS}
+                  style={{
+                    transformOrigin: '50% 50%',
+                    transformBox: 'fill-box' as const,
+                    animation: 'embed-pulse 2s ease-in-out infinite',
+                  }}
+                />
               </g>
             )
           : null

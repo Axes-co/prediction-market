@@ -1,7 +1,7 @@
 'use client'
 
-import type { EmbedChartData, EmbedChartLine } from '@/lib/embed-chart'
 import type { ReactNode } from 'react'
+import type { EmbedChartData } from '@/lib/embed-chart'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   CHART_DOT_RADIUS,
@@ -43,31 +43,44 @@ interface CursorState {
 // ---------------------------------------------------------------------------
 
 function parseSvgPath(pathD: string): ParsedPoint[] {
-  if (!pathD) return []
+  if (!pathD) {
+    return []
+  }
   const points: ParsedPoint[] = []
   const regex = /[ML]\s*([\d.]+)\s*,\s*([\d.]+)/g
-  let match: RegExpExecArray | null
-  while ((match = regex.exec(pathD)) !== null) {
+  let match: RegExpExecArray | null = regex.exec(pathD)
+  while (match !== null) {
     const x = Number(match[1])
     const y = Number(match[2])
     if (Number.isFinite(x) && Number.isFinite(y)) {
       points.push({ x, y })
     }
+    match = regex.exec(pathD)
   }
   return points
 }
 
 function interpolateY(points: ParsedPoint[], targetX: number): number {
-  if (points.length === 0) return 0
-  if (targetX <= points[0].x) return points[0].y
-  if (targetX >= points[points.length - 1].x) return points[points.length - 1].y
+  if (points.length === 0) {
+    return 0
+  }
+  if (targetX <= points[0].x) {
+    return points[0].y
+  }
+  if (targetX >= points.at(-1)!.x) {
+    return points.at(-1)!.y
+  }
 
   let lo = 0
   let hi = points.length - 1
   while (lo < hi - 1) {
     const mid = (lo + hi) >> 1
-    if (points[mid].x <= targetX) lo = mid
-    else hi = mid
+    if (points[mid].x <= targetX) {
+      lo = mid
+    }
+    else {
+      hi = mid
+    }
   }
 
   const p0 = points[lo]
@@ -80,7 +93,9 @@ function yToPercent(y: number, viewBoxHeight: number): number {
   const plotTop = CHART_PADDING.top
   const plotBottom = viewBoxHeight - CHART_PADDING.bottom
   const plotHeight = plotBottom - plotTop
-  if (plotHeight <= 0) return 0
+  if (plotHeight <= 0) {
+    return 0
+  }
   const normalized = (plotBottom - y) / plotHeight
   return Math.round(Math.min(100, Math.max(0, normalized * 100)))
 }
@@ -110,7 +125,9 @@ export default function EmbedChartCrosshair({
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const container = containerRef.current
-    if (!container || parsedLines.length === 0) return
+    if (!container || parsedLines.length === 0) {
+      return
+    }
 
     const rect = container.getBoundingClientRect()
     const relativeX = e.clientX - rect.left
@@ -138,7 +155,8 @@ export default function EmbedChartCrosshair({
   return (
     <div
       ref={containerRef}
-      className="relative w-full flex-1 min-h-0"
+      className="relative min-h-0 flex-1"
+      style={{ touchAction: 'pan-y pan-x' }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
@@ -147,7 +165,7 @@ export default function EmbedChartCrosshair({
       {/* Overlay SVG — tracking dots on ALL chart lines */}
       {isHovering && cursor.lines.length > 0 && (
         <svg
-          className="absolute inset-0 w-full h-full pointer-events-none"
+          className="pointer-events-none absolute inset-0 size-full"
           preserveAspectRatio="none"
           viewBox={`0 0 ${chart.viewBoxWidth} ${chart.viewBoxHeight}`}
           style={{ width: '100%', height: '100%', display: 'block' }}
@@ -174,7 +192,7 @@ export default function EmbedChartCrosshair({
       {/* Dynamic percentage label — shows primary line value above its dot */}
       {isHovering && primaryLine && (
         <div
-          className="absolute pointer-events-none z-10"
+          className="pointer-events-none absolute z-10"
           style={{
             left: `${cursor.cssX}px`,
             top: `${Math.max(0, (primaryLine.svgY / chart.viewBoxHeight) * (containerRef.current?.getBoundingClientRect().height ?? 0) - 28)}px`,
@@ -182,7 +200,7 @@ export default function EmbedChartCrosshair({
           }}
         >
           <span
-            className="font-semibold leading-none whitespace-nowrap"
+            className="leading-none font-semibold whitespace-nowrap"
             style={{
               WebkitTextStroke: `${PRICE_LABEL_STROKE_WIDTH} ${strokeBg}`,
               fontSize: PRICE_LABEL_FONT_SIZE,
@@ -190,7 +208,8 @@ export default function EmbedChartCrosshair({
               paintOrder: 'stroke',
             }}
           >
-            {primaryLine.percent}%
+            {primaryLine.percent}
+            %
           </span>
         </div>
       )}

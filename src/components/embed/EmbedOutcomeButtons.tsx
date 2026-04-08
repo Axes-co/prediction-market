@@ -41,7 +41,7 @@ function getFallbackButtonClasses(index: number): string {
 
 export default function EmbedOutcomeButtons({
   outcomes,
-  theme,
+  theme: _theme,
   stacked = false,
   teamStyle = false,
 }: EmbedOutcomeButtonsProps) {
@@ -51,7 +51,9 @@ export default function EmbedOutcomeButtons({
 
   const containerClass = stacked
     ? 'flex flex-col gap-1 shrink-0 ml-2'
-    : 'flex mt-auto gap-1.5'
+    : teamStyle
+      ? 'flex mt-auto gap-2'
+      : 'flex mt-auto gap-1.5'
 
   return (
     <div className={containerClass}>
@@ -61,21 +63,26 @@ export default function EmbedOutcomeButtons({
 
         // Multi-outcome: team-colored buttons with custom color
         if (teamStyle && outcome.color) {
+          const widthClass = outcomes.length === 2 ? 'w-1/2' : 'flex-1'
           return (
             <a
               key={outcome.outcomeIndex}
-              className="group flex-1 flex items-center justify-center rounded-lg text-white text-sm no-underline gap-1 transition-all hover:brightness-125"
+              className={`group ${widthClass}
+                flex items-center justify-center gap-1 rounded-lg text-sm text-white no-underline transition-colors
+              `}
               style={{
                 backgroundColor: `color-mix(in srgb, ${outcome.color} 80%, transparent)`,
-                height: stacked ? undefined : '40px',
-                padding: stacked ? '4px 16px' : undefined,
+                ...(stacked ? { padding: '4px 16px' } : { height: '40px' }),
               }}
               href={href}
               rel="noopener"
               target="_blank"
             >
-              <span className="opacity-70 text-xs">{outcome.label}</span>
-              <span className="font-bold text-[15px]"> {centsLabel}</span>
+              <span className="text-xs opacity-70">{outcome.label}</span>
+              <span className="text-[15px] font-bold">
+                {' '}
+                {centsLabel}
+              </span>
             </a>
           )
         }
@@ -87,7 +94,10 @@ export default function EmbedOutcomeButtons({
         return (
           <a
             key={outcome.outcomeIndex}
-            className={`flex-1 flex items-center justify-center rounded-lg transition-colors no-underline gap-1 h-7 text-xs ${colorClasses}`}
+            className={`
+              flex h-7 flex-1 items-center justify-center gap-1 rounded-lg text-xs no-underline transition-colors
+              ${colorClasses}
+            `}
             style={stacked ? { height: 'auto', padding: '4px 16px' } : undefined}
             href={href}
             rel="noopener"

@@ -18,6 +18,7 @@ import Image from 'next/image'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import EventBookmark from '@/app/[locale]/(platform)/event/[slug]/_components/EventBookmark'
+import EventEmbedWidget from '@/app/[locale]/(platform)/event/[slug]/_components/EventEmbedWidget'
 import { useOrderBookSummaries } from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderBook'
 import EventOrderPanelForm from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelForm'
 import EventOrderPanelMobile from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelMobile'
@@ -4007,6 +4008,7 @@ export default function SportsEventCenter({
               <div className="absolute right-0 flex items-center gap-1 text-foreground">
                 <EventBookmark event={heroCard.event} />
                 <SportsEventShareButton event={heroCard.event} />
+                <EventEmbedWidget event={heroCard.event} />
               </div>
             </div>
 
