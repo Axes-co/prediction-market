@@ -72,7 +72,7 @@ export default function HeroHotTopics({ events }: HeroHotTopicsProps) {
             </div>
             <div className="flex w-full items-center justify-between gap-2">
               <div className="flex flex-1 items-center justify-between gap-1.5">
-                <div className="text-base font-medium text-foreground group-hover:underline">
+                <div className="text-sm font-medium text-foreground group-hover:underline">
                   {topic.name}
                 </div>
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
