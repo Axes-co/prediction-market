@@ -2,31 +2,17 @@
 
 import type { Metadata } from 'next'
 import type { SupportedLocale } from '@/i18n/locales'
-import { getExtracted, setRequestLocale } from 'next-intl/server'
+import { setRequestLocale } from 'next-intl/server'
 import { notFound } from 'next/navigation'
 import SportsGamesCenter from '@/app/[locale]/(platform)/sports/_components/SportsGamesCenter'
 import { buildSportsGamesCards } from '@/app/[locale]/(platform)/sports/_utils/sports-games-data'
 import { findSportsHrefBySlug } from '@/app/[locale]/(platform)/sports/_utils/sports-menu-routing'
 import { EventRepository } from '@/lib/db/queries/event'
 import { SportsMenuRepository } from '@/lib/db/queries/sports-menu'
-import { buildPageMetadata } from '@/lib/seo'
 import { STATIC_PARAMS_PLACEHOLDER } from '@/lib/static-params'
 
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ locale: string, sport: string, week: string }>
-}): Promise<Metadata> {
-  const { locale, sport, week } = await params
-  setRequestLocale(locale)
-  const t = await getExtracted()
-
-  return buildPageMetadata({
-    title: t('Sports Games'),
-    description: t('Sports games for the week. Trade on upcoming match outcomes.'),
-    path: `/sports/${sport}/games/week/${week}`,
-    locale: locale as SupportedLocale,
-  })
+export const metadata: Metadata = {
+  title: 'Sports Games',
 }
 
 export async function generateStaticParams() {
