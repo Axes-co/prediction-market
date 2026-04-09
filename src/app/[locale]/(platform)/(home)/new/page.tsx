@@ -1,5 +1,3 @@
-'use cache'
-
 import type { Metadata } from 'next'
 import type { SupportedLocale } from '@/i18n/locales'
 import { getExtracted, setRequestLocale } from 'next-intl/server'
