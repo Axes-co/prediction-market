@@ -12,6 +12,10 @@ import { useWindowSize } from '@/hooks/useWindowSize'
 import { formatCurrency } from '@/lib/formatters'
 import { cn } from '@/lib/utils'
 import { createWebSocketReconnectController } from '@/lib/websocket-reconnect'
+import {
+  resolveLiveSeriesPriceDisplayDigits,
+  resolveLiveSeriesTopicPriceDigits,
+} from '../_utils/liveSeriesPricePrecision'
 import EventChart from './EventChart'
 import EventSeriesPills from './EventSeriesPills'
 
@@ -408,8 +412,7 @@ function normalizeLiveChartPrice(price: number, topic: string) {
     return null
   }
 
-  const normalizedTopic = topic.trim().toLowerCase()
-  const digits = normalizedTopic === 'equity_prices' ? 2 : 4
+  const digits = resolveLiveSeriesTopicPriceDigits(topic)
   const factor = 10 ** digits
   return Math.round(price * factor) / factor
 }
@@ -698,9 +701,6 @@ export default function EventLiveSeriesChart({
   const site = useSiteIdentity()
   const { width: windowWidth } = useWindowSize()
   const liveColor = config.line_color || '#F59E0B'
-  const priceDisplayDigits = config.show_price_decimals ? 2 : 0
-  const headerPriceDisplayDigits = Math.max(2, priceDisplayDigits)
-  const deltaDisplayDigits = 0
   const subscriptionSymbol = useMemo(
     () => normalizeSubscriptionSymbol(config.topic, config.symbol),
     [config.symbol, config.topic],
@@ -1180,6 +1180,20 @@ export default function EventLiveSeriesChart({
     : fallbackCurrentPrice
   const axisSourceData = data.length > 0 ? data : renderData
   const resolvedBaselinePrice = baselinePrice ?? referenceSnapshot?.opening_price ?? null
+  const precisionReferencePrice = currentPrice
+    ?? resolvedBaselinePrice
+    ?? referenceSnapshot?.latest_price
+    ?? referenceSnapshot?.closing_price
+    ?? referenceSnapshot?.opening_price
+    ?? persistedFallbackPrice?.price
+    ?? null
+  const priceDisplayDigits = resolveLiveSeriesPriceDisplayDigits(
+    config.topic,
+    config.show_price_decimals,
+    precisionReferencePrice,
+  )
+  const headerPriceDisplayDigits = Math.max(2, priceDisplayDigits)
+  const deltaDisplayDigits = priceDisplayDigits >= 4 ? 4 : 0
   const delta = currentPrice != null && resolvedBaselinePrice != null
     ? currentPrice - resolvedBaselinePrice
     : null
