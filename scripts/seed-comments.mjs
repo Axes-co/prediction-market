@@ -17,11 +17,9 @@
  *   4. Posts 4-6 comments on each hero event
  */
 
-import { createWalletClient, http } from 'viem'
-import { privateKeyToAccount } from 'viem/accounts'
-import { polygon } from 'viem/chains'
-import postgres from 'postgres'
 import { randomBytes } from 'node:crypto'
+import postgres from 'postgres'
+import { privateKeyToAccount } from 'viem/accounts'
 
 // ---------------------------------------------------------------------------
 // Config
@@ -151,7 +149,7 @@ async function setProfileUsername(token, username) {
   const res = await fetch(`${COMMUNITY_URL}/profile`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${token}`,
+      Authorization: `Bearer ${token}`,
     },
     body: form,
   })

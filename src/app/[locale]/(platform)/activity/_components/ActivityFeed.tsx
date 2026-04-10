@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useOutcomeLabel } from '@/hooks/useOutcomeLabel'
 import { useRouter } from '@/i18n/navigation'
 import { filterActivitiesByMinAmount } from '@/lib/activity/filter'
+import { PUBLIC_ALLOWED_MARKET_CREATORS_PATH } from '@/lib/allowed-market-creators'
 import { MICRO_UNIT } from '@/lib/constants'
 import { mapDataApiActivityToActivityOrder } from '@/lib/data-api/user'
 import { formatCurrency, formatSharePriceLabel, formatTimeAgo, toMicro } from '@/lib/formatters'
@@ -25,6 +26,7 @@ import { createWebSocketReconnectController } from '@/lib/websocket-reconnect'
 
 type LiveActivityPayload = DataApiActivity & {
   category?: string
+  creator?: string
   mainCategory?: string
   main_category?: string
   tag?: string
@@ -184,6 +186,19 @@ function hasText(value?: string | null) {
   return Boolean(value && value.trim())
 }
 
+function normalizeWalletAddress(value?: string | null) {
+  if (!value) {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase()
+  return normalized || null
+}
+
+function resolveActivityCreatorWallet(payload: LiveActivityPayload) {
+  return normalizeWalletAddress(payload.creator)
+}
+
 export default function ActivityFeed() {
   const t = useExtracted()
   const normalizeOutcomeLabel = useOutcomeLabel()
@@ -194,6 +209,7 @@ export default function ActivityFeed() {
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [minAmountFilter, setMinAmountFilter] = useState<string>('none')
   const [items, setItems] = useState<LiveActivityItem[]>([])
+  const [allowedCreatorWallets, setAllowedCreatorWallets] = useState<ReadonlySet<string> | null>(null)
   const [baseVisibleCount, setBaseVisibleCount] = useState<number>(20)
   const [visibleCount, setVisibleCount] = useState<number>(20)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
@@ -205,13 +221,51 @@ export default function ActivityFeed() {
   )
 
   useEffect(() => {
+    const abortController = new AbortController()
+
+    async function loadAllowedCreators() {
+      try {
+        const response = await fetch(PUBLIC_ALLOWED_MARKET_CREATORS_PATH, {
+          signal: abortController.signal,
+          cache: 'no-store',
+        })
+
+        if (!response.ok) {
+          setAllowedCreatorWallets(new Set())
+          return
+        }
+
+        const payload = await response.json() as { wallets: string[] }
+
+        const wallets = payload.wallets
+          .map(wallet => normalizeWalletAddress(wallet))
+          .filter((wallet): wallet is string => Boolean(wallet))
+        setAllowedCreatorWallets(new Set(wallets))
+      }
+      catch (error) {
+        if (abortController.signal.aborted) {
+          return
+        }
+        console.error('Failed to load allowed market creator wallets:', error)
+        setAllowedCreatorWallets(new Set())
+      }
+    }
+
+    void loadAllowedCreators()
+
+    return () => {
+      abortController.abort()
+    }
+  }, [])
+
+  useEffect(() => {
     if (categoryFilter !== 'all' && !categoryValues.has(categoryFilter)) {
       setCategoryFilter('all')
     }
   }, [categoryFilter, categoryValues])
 
   useEffect(() => {
-    if (!wsUrl) {
+    if (!wsUrl || !allowedCreatorWallets) {
       return
     }
     wsUrlRef.current = wsUrl
@@ -259,6 +313,11 @@ export default function ActivityFeed() {
       const nextItems: LiveActivityItem[] = []
 
       for (const rawPayload of rawItems) {
+        const creatorWallet = resolveActivityCreatorWallet(rawPayload)
+        if (!creatorWallet || !allowedCreatorWallets?.has(creatorWallet)) {
+          continue
+        }
+
         const hasTitle = hasText(rawPayload.title)
         const hasMarketSlug = hasText(rawPayload.slug)
         const hasUser = hasText(rawPayload.pseudonym) || hasText(rawPayload.name) || hasText(rawPayload.proxyWallet)
@@ -382,7 +441,7 @@ export default function ActivityFeed() {
         ws.close()
       }
     }
-  }, [categoryValues, wsUrl])
+  }, [allowedCreatorWallets, categoryValues, wsUrl])
 
   useEffect(() => {
     function updateBaseCount() {

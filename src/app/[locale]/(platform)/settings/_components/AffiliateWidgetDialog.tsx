@@ -1,13 +1,13 @@
 'use client'
 
-import type { EmbedCodeFormat, EmbedToggles } from '@/lib/embed-widget'
 import type { EmbedTheme } from '@/lib/embed-theme'
+import type { EmbedCodeFormat, EmbedToggles } from '@/lib/embed-widget'
 import type { Event } from '@/types'
 import { CheckIcon, ChevronLeftIcon, CodeIcon, CopyIcon } from 'lucide-react'
 import { useExtracted, useLocale } from 'next-intl'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button } from '@/components/ui/button'
 import EmbedCodeHighlight from '@/components/embed/EmbedCodeHighlight'
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -22,8 +22,8 @@ import {
   MIN_EMBED_HEIGHT,
   MIN_EMBED_WIDTH,
 } from '@/lib/embed-dimensions'
-import { buildEmbedCode, buildEmbedSrc, buildPreviewSrc } from '@/lib/embed-widget'
 import { buildMarketLabel, normalizeBaseUrl } from '@/lib/embed-utils'
+import { buildEmbedCode, buildEmbedSrc, buildPreviewSrc } from '@/lib/embed-widget'
 import { useUser } from '@/stores/useUser'
 
 // ---------------------------------------------------------------------------
@@ -56,7 +56,9 @@ const DIM_STEP = 10
 const SITE_URL = normalizeBaseUrl(
   (() => {
     const v = process.env.SITE_URL
-    if (!v?.trim()) throw new Error('SITE_URL is required for embeds.')
+    if (!v?.trim()) {
+      throw new Error('SITE_URL is required for embeds.')
+    }
     return v
   })(),
 )
@@ -81,8 +83,8 @@ function HeightDimensionInput({ value, min, max, onChange }: { value: number, mi
   const clamp = useCallback((v: number) => Math.min(max, Math.max(min, v)), [min, max])
   return (
     <div className="group/dim relative before:absolute before:inset-[-12px] before:content-['']">
-      <button type="button" className={`${DIM_BTN_BASE} left-1/2 -translate-x-1/2 bottom-full mb-1`} onClick={() => onChange(clamp(value + DIM_STEP))}>+</button>
-      <button type="button" className={`${DIM_BTN_BASE} left-1/2 -translate-x-1/2 top-full mt-1`} onClick={() => onChange(clamp(value - DIM_STEP))}>−</button>
+      <button type="button" className={`${DIM_BTN_BASE} bottom-full left-1/2 mb-1 -translate-x-1/2`} onClick={() => onChange(clamp(value + DIM_STEP))}>+</button>
+      <button type="button" className={`${DIM_BTN_BASE} top-full left-1/2 mt-1 -translate-x-1/2`} onClick={() => onChange(clamp(value - DIM_STEP))}>−</button>
       <input type="number" min={min} max={max} step={DIM_STEP} value={value} onChange={e => onChange(clamp(Number(e.target.value) || value))} className={DIM_INPUT_CLASS} />
     </div>
   )
@@ -92,8 +94,8 @@ function WidthDimensionInput({ value, min, max, onChange }: { value: number, min
   const clamp = useCallback((v: number) => Math.min(max, Math.max(min, v)), [min, max])
   return (
     <div className="group/dim relative before:absolute before:inset-[-12px] before:content-['']">
-      <button type="button" className={`${DIM_BTN_BASE} top-1/2 -translate-y-1/2 right-full mr-1`} onClick={() => onChange(clamp(value - DIM_STEP))}>−</button>
-      <button type="button" className={`${DIM_BTN_BASE} top-1/2 -translate-y-1/2 left-full ml-1`} onClick={() => onChange(clamp(value + DIM_STEP))}>+</button>
+      <button type="button" className={`${DIM_BTN_BASE} top-1/2 right-full mr-1 -translate-y-1/2`} onClick={() => onChange(clamp(value - DIM_STEP))}>−</button>
+      <button type="button" className={`${DIM_BTN_BASE} top-1/2 left-full ml-1 -translate-y-1/2`} onClick={() => onChange(clamp(value + DIM_STEP))}>+</button>
       <input type="number" min={min} max={max} step={DIM_STEP} value={value} onChange={e => onChange(clamp(Number(e.target.value) || value))} className={DIM_INPUT_CLASS} />
     </div>
   )
@@ -106,7 +108,9 @@ function WidthDimensionInput({ value, min, max, onChange }: { value: number, min
 async function fetchCategoryMarkets(tag: string, locale: string, signal: AbortSignal): Promise<WidgetMarket[]> {
   const params = new URLSearchParams({ tag, status: 'active', offset: '0', locale })
   const response = await fetch(`/api/events?${params.toString()}`, { method: 'GET', cache: 'no-store', signal })
-  if (!response.ok) throw new Error('Failed to fetch category events.')
+  if (!response.ok) {
+    throw new Error('Failed to fetch category events.')
+  }
   const events = await response.json() as Event[]
   return events
     .flatMap(event => event.markets.map(market => ({ id: `${event.id}:${market.condition_id}`, slug: market.slug, label: buildMarketLabel(market) })))
@@ -119,7 +123,10 @@ async function fetchCategoryMarkets(tag: string, locale: string, signal: AbortSi
 // ---------------------------------------------------------------------------
 
 export default function AffiliateWidgetDialog({
-  open, onOpenChange, categories, eventSlug,
+  open,
+  onOpenChange,
+  categories,
+  eventSlug,
 }: AffiliateWidgetDialogProps) {
   const t = useExtracted()
   const locale = useLocale()
@@ -149,7 +156,9 @@ export default function AffiliateWidgetDialog({
 
   // Reset on open
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      return
+    }
     setView('preview')
     setTheme('dark')
     setCodeFormat('default')
@@ -166,11 +175,17 @@ export default function AffiliateWidgetDialog({
 
   // Affiliate settings
   useEffect(() => {
-    if (!affiliateCode) { setAffiliateSharePercent(null); setTradeFeePercent(null); return }
+    if (!affiliateCode) {
+      setAffiliateSharePercent(null)
+      setTradeFeePercent(null)
+      return
+    }
     let active = true
     fetchAffiliateSettingsFromAPI()
       .then((r) => {
-        if (!active) return
+        if (!active) {
+          return
+        }
         if (r.success) {
           const s = Number.parseFloat(r.data.affiliateSharePercent)
           const f = Number.parseFloat(r.data.tradeFeePercent)
@@ -178,14 +193,25 @@ export default function AffiliateWidgetDialog({
           setTradeFeePercent(Number.isFinite(f) && f > 0 ? f : null)
         }
       })
-      .catch(() => { if (active) { setAffiliateSharePercent(null); setTradeFeePercent(null) } })
-    return () => { active = false }
+      .catch(() => {
+        if (active) {
+          setAffiliateSharePercent(null)
+          setTradeFeePercent(null)
+        }
+      })
+    return () => {
+      active = false
+    }
   }, [affiliateCode])
 
   // Fetch markets when category changes
   useEffect(() => {
-    if (!open || !selectedCategory || eventSlug) return
-    if (marketsByCategory[selectedCategory] !== undefined) return
+    if (!open || !selectedCategory || eventSlug) {
+      return
+    }
+    if (marketsByCategory[selectedCategory] !== undefined) {
+      return
+    }
     const ac = new AbortController()
     const slug = selectedCategory
     setLoadingCategorySlug(slug)
@@ -193,20 +219,33 @@ export default function AffiliateWidgetDialog({
     fetchCategoryMarkets(slug, locale, ac.signal)
       .then(markets => setMarketsByCategory(prev => ({ ...prev, [slug]: markets })))
       .catch((err) => {
-        if (ac.signal.aborted) return
+        if (ac.signal.aborted) {
+          return
+        }
         console.error('Failed to fetch affiliate widget markets', err)
         setCategoryLoadFailed(true)
         setMarketsByCategory(prev => ({ ...prev, [slug]: [] }))
       })
-      .finally(() => { if (!ac.signal.aborted) setLoadingCategorySlug(c => c === slug ? null : c) })
+      .finally(() => {
+        if (!ac.signal.aborted) {
+          setLoadingCategorySlug(c => c === slug ? null : c)
+        }
+      })
     return () => ac.abort()
   }, [open, selectedCategory, locale, marketsByCategory, eventSlug])
 
   // Sync market selection
   useEffect(() => {
-    if (!open) return
-    if (currentMarkets.length === 0) { setSelectedMarketId(''); return }
-    if (!currentMarkets.some(m => m.id === selectedMarketId)) setSelectedMarketId(currentMarkets[0].id)
+    if (!open) {
+      return
+    }
+    if (currentMarkets.length === 0) {
+      setSelectedMarketId('')
+      return
+    }
+    if (!currentMarkets.some(m => m.id === selectedMarketId)) {
+      setSelectedMarketId(currentMarkets[0].id)
+    }
   }, [open, currentMarkets, selectedMarketId])
 
   // URLs
@@ -217,21 +256,32 @@ export default function AffiliateWidgetDialog({
   const localePath = locale && locale !== 'en' ? `/${locale}` : ''
   const eventUrl = `${SITE_URL}${localePath}/event/${resolvedSlug}`
   const embedCode = useMemo(() => buildEmbedCode(codeFormat, {
-    src: embedSrc, width, height,
+    src: embedSrc,
+    width,
+    height,
     title: `${selectedMarket?.label ?? resolvedSlug} — ${site.name} Prediction Market`,
-    slug: resolvedSlug, siteName: site.name, siteUrl: SITE_URL,
-    question: selectedMarket?.label ?? resolvedSlug, yesPercent: 50, noPercent: 50, eventUrl,
+    slug: resolvedSlug,
+    siteName: site.name,
+    siteUrl: SITE_URL,
+    question: selectedMarket?.label ?? resolvedSlug,
+    yesPercent: 50,
+    noPercent: 50,
+    eventUrl,
   }), [codeFormat, embedSrc, width, height, resolvedSlug, selectedMarket?.label, site.name, eventUrl])
 
   async function handleCopy() {
-    if (!resolvedSlug) return
+    if (!resolvedSlug) {
+      return
+    }
     try {
       await navigator.clipboard.writeText(embedCode)
       setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
+      window.setTimeout(setCopied, 1500, false)
       maybeShowAffiliateToast({ affiliateCode, affiliateSharePercent, tradeFeePercent, siteName: site.name, context: 'embed' })
     }
-    catch (e) { console.error(e) }
+    catch (e) {
+      console.error(e)
+    }
   }
 
   function updateToggle(key: keyof EmbedToggles, value: boolean) {
@@ -245,28 +295,39 @@ export default function AffiliateWidgetDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] w-[calc(100%-1rem)] max-w-4xl overflow-y-auto p-3 sm:p-6 lg:w-fit! lg:max-w-fit!">
+      <DialogContent className="
+        max-h-[90vh] w-[calc(100%-1rem)] max-w-4xl overflow-y-auto p-3
+        sm:p-6
+        lg:w-fit! lg:max-w-fit!
+      "
+      >
         <DialogHeader className="flex-row items-center">
           <DialogTitle className="text-xl font-semibold">{t('Embed')}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-col lg:flex-row gap-4 lg:gap-12 min-h-0">
+        <div className="flex min-h-0 flex-col gap-4 lg:flex-row lg:gap-12">
           {/* RIGHT — Preview or Code */}
-          <div className="w-full lg:w-fit lg:order-last lg:h-fit">
+          <div className="w-full lg:order-last lg:size-fit">
             {view === 'preview'
               ? (
                   <>
                     {/* Desktop: full preview with H/W dimension controls */}
-                    <div className="hidden lg:flex w-[500px] h-[400px] flex-col pb-2 pl-6">
-                      <div className="grid grid-cols-[auto_1fr] grid-rows-[1fr_auto] w-fit h-fit">
-                        <div className="flex flex-col items-center gap-2 w-12 justify-center">
+                    <div className="hidden h-[400px] w-[500px] flex-col pb-2 pl-6 lg:flex">
+                      <div className="grid size-fit grid-cols-[auto_1fr] grid-rows-[1fr_auto]">
+                        <div className="flex w-12 flex-col items-center justify-center gap-2">
                           <div className="flex flex-col items-center gap-2 transition-[height] duration-150" style={{ height: `${scaledHeight}px` }}>
-                            <span className="flex-1 w-px bg-muted-foreground/20" />
+                            <span className="w-px flex-1 bg-muted-foreground/20" />
                             <div className="relative">
-                              <span className="text-xs text-muted-foreground font-semibold leading-none absolute -left-4 top-1/2 -translate-y-1/2">H</span>
+                              <span className="
+                                absolute top-1/2 -left-4 -translate-y-1/2 text-xs leading-none font-semibold
+                                text-muted-foreground
+                              "
+                              >
+                                H
+                              </span>
                               <HeightDimensionInput value={height} min={MIN_EMBED_HEIGHT} max={MAX_EMBED_HEIGHT} onChange={setHeight} />
                             </div>
-                            <span className="flex-1 w-px bg-muted-foreground/20" />
+                            <span className="w-px flex-1 bg-muted-foreground/20" />
                           </div>
                         </div>
                         <div className="flex items-center justify-center" style={{ width: `${PREVIEW_CONTAINER_WIDTH}px`, height: `${PREVIEW_CONTAINER_HEIGHT}px` }}>
@@ -285,23 +346,29 @@ export default function AffiliateWidgetDialog({
                                 )}
                         </div>
                         <div />
-                        <div className="flex items-center justify-center h-8">
+                        <div className="flex h-8 items-center justify-center">
                           <div className="flex items-center gap-2 transition-[width] duration-150" style={{ width: `${PREVIEW_CONTAINER_WIDTH}px` }}>
-                            <span className="flex-1 h-px bg-muted-foreground/20" />
+                            <span className="h-px flex-1 bg-muted-foreground/20" />
                             <div className="relative">
-                              <span className="text-xs text-muted-foreground font-semibold leading-none absolute -bottom-4 left-1/2 -translate-x-1/2">W</span>
+                              <span className="
+                                absolute -bottom-4 left-1/2 -translate-x-1/2 text-xs leading-none font-semibold
+                                text-muted-foreground
+                              "
+                              >
+                                W
+                              </span>
                               <WidthDimensionInput value={width} min={MIN_EMBED_WIDTH} max={MAX_EMBED_WIDTH} onChange={setWidth} />
                             </div>
-                            <span className="flex-1 h-px bg-muted-foreground/20" />
+                            <span className="h-px flex-1 bg-muted-foreground/20" />
                           </div>
                         </div>
                       </div>
                     </div>
 
                     {/* Mobile: simple scaled preview */}
-                    <div className="lg:hidden w-full overflow-hidden rounded-2xl">
+                    <div className="w-full overflow-hidden rounded-2xl lg:hidden">
                       {isLoadingCategory
-                        ? <p className="text-sm text-muted-foreground py-8 text-center">{t('Searching events...')}</p>
+                        ? <p className="py-8 text-center text-sm text-muted-foreground">{t('Searching events...')}</p>
                         : previewUrl
                           ? (
                               <div style={{ height: `${height * Math.min(1, 320 / width)}px` }}>
@@ -317,14 +384,21 @@ export default function AffiliateWidgetDialog({
                   </>
                 )
               : (
-                  <div className="w-full lg:w-[500px] h-[300px] lg:h-[400px] flex flex-col">
-                    <div className="flex flex-col gap-2 h-full min-h-0">
-                      <p className="text-sm text-muted-foreground shrink-0">{t('Copy and paste this code into your website')}</p>
+                  <div className="flex h-[300px] w-full flex-col lg:h-[400px] lg:w-[500px]">
+                    <div className="flex h-full min-h-0 flex-col gap-2">
+                      <p className="shrink-0 text-sm text-muted-foreground">{t('Copy and paste this code into your website')}</p>
                       <div className="group relative min-w-0 flex-1 overflow-auto rounded-lg bg-muted/50">
                         <div className="p-3 pt-7 text-[0.7rem] leading-relaxed">
                           <EmbedCodeHighlight code={embedCode} />
                         </div>
-                        <button type="button" className="absolute top-1 right-1 p-1.5 cursor-pointer text-muted-foreground hover:text-foreground" onClick={handleCopy}>
+                        <button
+                          type="button"
+                          className="
+                            absolute top-1 right-1 cursor-pointer p-1.5 text-muted-foreground
+                            hover:text-foreground
+                          "
+                          onClick={handleCopy}
+                        >
                           {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
                         </button>
                       </div>
@@ -334,17 +408,21 @@ export default function AffiliateWidgetDialog({
           </div>
 
           {/* LEFT — Controls */}
-          <div className="flex flex-col gap-4 w-full lg:w-64 shrink-0 lg:overflow-y-auto min-h-0 lg:h-[400px] lg:max-h-[500px]">
+          <div className="
+            flex min-h-0 w-full shrink-0 flex-col gap-4
+            lg:h-[400px] lg:max-h-[500px] lg:w-64 lg:overflow-y-auto
+          "
+          >
             {view === 'preview'
               ? (
                   <>
                     {/* Category selector */}
                     {!eventSlug && (
-                      <div className="flex items-center justify-between gap-2 min-w-0">
-                        <span className="text-sm text-foreground shrink-0">{t('Category')}</span>
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <span className="shrink-0 text-sm text-foreground">{t('Category')}</span>
                         <div className="min-w-0">
                           <Select value={selectedCategory} onValueChange={setSelectedCategory} disabled={categories.length === 0}>
-                            <SelectTrigger className="max-w-full overflow-hidden justify-between gap-2 h-9 px-4">
+                            <SelectTrigger className="h-9 max-w-full justify-between gap-2 overflow-hidden px-4">
                               <SelectValue placeholder={t('Categories')} />
                             </SelectTrigger>
                             <SelectContent>
@@ -357,11 +435,11 @@ export default function AffiliateWidgetDialog({
 
                     {/* Market selector */}
                     {showMarketSelector && (
-                      <div className="flex items-center justify-between gap-2 min-w-0">
-                        <span className="text-sm text-foreground shrink-0">{t('Market')}</span>
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <span className="shrink-0 text-sm text-foreground">{t('Market')}</span>
                         <div className="min-w-0">
                           <Select value={selectedMarketId} onValueChange={setSelectedMarketId}>
-                            <SelectTrigger className="max-w-full overflow-hidden justify-between gap-2 h-9 px-4">
+                            <SelectTrigger className="h-9 max-w-full justify-between gap-2 overflow-hidden px-4">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -418,9 +496,9 @@ export default function AffiliateWidgetDialog({
               : (
                   <>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm text-foreground shrink-0">{t('Code style')}</span>
+                      <span className="shrink-0 text-sm text-foreground">{t('Code style')}</span>
                       <Select value={codeFormat} onValueChange={v => setCodeFormat(v as EmbedCodeFormat)}>
-                        <SelectTrigger className="justify-between gap-2 h-9 px-4">
+                        <SelectTrigger className="h-9 justify-between gap-2 px-4">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>

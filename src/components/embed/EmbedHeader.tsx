@@ -45,7 +45,7 @@ export default function EmbedHeader({
           dangerouslySetInnerHTML={{ __html: logoSvg }}
         />
         <span className="text-xs font-semibold">{siteName}</span>
-        <ChevronRight className="w-2 h-2 transition-transform group-hover:translate-x-0.5" color={palette.muted} />
+        <ChevronRight className="size-2 transition-transform group-hover:translate-x-0.5" color={palette.muted} />
       </a>
     )
   }
@@ -76,7 +76,7 @@ export default function EmbedHeader({
         target="_blank"
       >
         <span>{viewMarketLabel}</span>
-        <ChevronRight className="w-3 h-3 transition-transform group-hover:translate-x-0.5" color={palette.muted} />
+        <ChevronRight className="size-3 transition-transform group-hover:translate-x-0.5" color={palette.muted} />
       </a>
     </div>
   )

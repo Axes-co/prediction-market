@@ -1,9 +1,17 @@
 import { MinusIcon, PlusIcon } from 'lucide-react'
 import * as React from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+
+function formatNumberInputValue(value: number) {
+  if (!Number.isFinite(value) || value === 0) {
+    return ''
+  }
+
+  return value.toFixed(1).replace(/\.0$/, '')
+}
 
 export function NumberInput({
   value,
@@ -15,25 +23,20 @@ export function NumberInput({
   step?: number
 }) {
   const MAX = 99.9
-  const initialString = value === 0 ? '' : value.toFixed(1).replace(/\.0$/, '')
-  const [inputValue, setInputValue] = useState<string>(initialString)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const hasValue = inputValue.trim() !== ''
-  const inputSize = inputValue.trim() ? Math.max(inputValue.length, 1) : 3
+  const [isEditing, setIsEditing] = useState(false)
+  const [inputValue, setInputValue] = useState<string>(() => formatNumberInputValue(value))
 
-  useEffect(() => {
-    const newVal = value === 0 ? '' : value.toFixed(1).replace(/\.0$/, '')
-    if (newVal !== inputValue) {
-      setInputValue(newVal)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value])
+  const displayValue = isEditing ? inputValue : formatNumberInputValue(value)
+
+  const inputRef = useRef<HTMLInputElement>(null)
+  const hasValue = displayValue.trim() !== ''
+  const inputSize = displayValue.trim() ? Math.max(displayValue.length, 1) : 3
 
   function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const input = e.target
     const raw = input.value
     const selectionStart = input.selectionStart ?? raw.length
-    const prev = inputValue
+    const prev = displayValue
     const dotIndex = prev.indexOf('.')
     const isDelete = prev.length > raw.length
 
@@ -85,28 +88,14 @@ export function NumberInput({
     else {
       onChange(0)
     }
-    if (!Number.isNaN(clamped) && clamped !== 0) {
-      setInputValue(clamped.toFixed(1).replace(/\.0$/, ''))
-    }
-    else {
-      setInputValue('')
-    }
-  }
-
-  function handleBlur() {
-    commitInput(inputValue)
+    setInputValue(formatNumberInputValue(clamped))
   }
 
   function handleStep(delta: number) {
     let newValue = Number((value + delta).toFixed(1))
     newValue = Math.max(0, Math.min(newValue, MAX))
     onChange(newValue)
-    if (newValue !== 0) {
-      setInputValue(newValue.toFixed(1).replace(/\.0$/, ''))
-    }
-    else {
-      setInputValue('')
-    }
+    setInputValue(formatNumberInputValue(newValue))
   }
 
   return (
@@ -126,9 +115,16 @@ export function NumberInput({
           ref={inputRef}
           type="text"
           inputMode="decimal"
-          value={inputValue}
+          value={displayValue}
+          onFocus={() => {
+            setInputValue(formatNumberInputValue(value))
+            setIsEditing(true)
+          }}
           onChange={handleInputChange}
-          onBlur={handleBlur}
+          onBlur={() => {
+            commitInput(displayValue)
+            setIsEditing(false)
+          }}
           maxLength={5}
           placeholder="0.0"
           className={`

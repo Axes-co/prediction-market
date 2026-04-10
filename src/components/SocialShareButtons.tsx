@@ -41,7 +41,7 @@ export function SocialShareButtons({
       openSocialShare(platform, { text: buildShareText(siteTag), url: shareUrl })
     }
     finally {
-      window.setTimeout(() => setActivePlatform(null), 200)
+      window.setTimeout(setActivePlatform, 200, null)
     }
   }, [buildShareText, shareUrl, site])
 

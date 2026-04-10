@@ -110,14 +110,22 @@ export function resolveChartViewBoxHeight(
   height: number,
   isMultiOutcome: boolean,
 ): number {
-  if (height <= BANNER_HEIGHT_THRESHOLD) return CHART_VIEWBOX_BANNER
-  if (isMultiOutcome) return CHART_VIEWBOX_MULTI
+  if (height <= BANNER_HEIGHT_THRESHOLD) {
+    return CHART_VIEWBOX_BANNER
+  }
+  if (isMultiOutcome) {
+    return CHART_VIEWBOX_MULTI
+  }
   return CHART_VIEWBOX_CARD
 }
 
 export function clampDimension(value: string | undefined, defaultValue: number, min: number, max: number): number {
-  if (!value) return defaultValue
+  if (!value) {
+    return defaultValue
+  }
   const parsed = Number.parseInt(value, 10)
-  if (!Number.isFinite(parsed)) return defaultValue
+  if (!Number.isFinite(parsed)) {
+    return defaultValue
+  }
   return Math.min(max, Math.max(min, parsed))
 }

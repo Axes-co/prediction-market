@@ -16,7 +16,7 @@ import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, ShareIcon } from 'lucide-
 import { useLocale } from 'next-intl'
 import Image from 'next/image'
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import EventBookmark from '@/app/[locale]/(platform)/event/[slug]/_components/EventBookmark'
 import EventEmbedWidget from '@/app/[locale]/(platform)/event/[slug]/_components/EventEmbedWidget'
 import { useOrderBookSummaries } from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderBook'
@@ -105,6 +105,43 @@ const SPORTS_EVENT_ODDS_FORMAT_STORAGE_KEY = 'sports:event:odds-format'
 const EMPTY_QUERY_SELECTION: SportsEventQuerySelection = {
   conditionId: null,
   outcomeIndex: null,
+}
+
+function resolveInitialOddsFormat(): OddsFormat {
+  if (typeof window === 'undefined') {
+    return 'price'
+  }
+
+  const storedOddsFormat = window.localStorage.getItem(SPORTS_EVENT_ODDS_FORMAT_STORAGE_KEY)
+  const matchedOption = ODDS_FORMAT_OPTIONS.find(option => option.value === storedOddsFormat)
+  return matchedOption?.value ?? 'price'
+}
+
+function subscribeToOddsFormatStorage(listener: () => void) {
+  if (typeof window === 'undefined') {
+    return function unsubscribeFromOddsFormatStorage() {}
+  }
+
+  function handleStorage(event: StorageEvent) {
+    if (event.key && event.key !== SPORTS_EVENT_ODDS_FORMAT_STORAGE_KEY) {
+      return
+    }
+
+    listener()
+  }
+
+  window.addEventListener('storage', handleStorage)
+  return function unsubscribeFromOddsFormatStorage() {
+    window.removeEventListener('storage', handleStorage)
+  }
+}
+
+function getStoredOddsFormatClientSnapshot(): OddsFormat {
+  return resolveInitialOddsFormat()
+}
+
+function getStoredOddsFormatServerSnapshot(): OddsFormat {
+  return 'price'
 }
 
 function areRecordValuesEqual<T extends string | null | undefined>(
@@ -285,7 +322,7 @@ function SportsSegmentNumberPicker({
   onPick: (number: number) => void
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
-  const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const buttonRefsRef = useRef<Record<string, HTMLButtonElement | null>>({})
   const [startSpacer, setStartSpacer] = useState(0)
   const [endSpacer, setEndSpacer] = useState(0)
 
@@ -334,7 +371,7 @@ function SportsSegmentNumberPicker({
       return
     }
 
-    const activeButton = buttonRefs.current[activeOption.key]
+    const activeButton = buttonRefsRef.current[activeOption.key]
     if (!activeButton) {
       return
     }
@@ -356,8 +393,8 @@ function SportsSegmentNumberPicker({
 
     const firstOptionKey = options[0]?.key
     const lastOptionKey = options.at(-1)?.key
-    const firstButton = firstOptionKey ? buttonRefs.current[firstOptionKey] : null
-    const lastButton = lastOptionKey ? buttonRefs.current[lastOptionKey] : null
+    const firstButton = firstOptionKey ? buttonRefsRef.current[firstOptionKey] : null
+    const lastButton = lastOptionKey ? buttonRefsRef.current[lastOptionKey] : null
     const fallbackButtonWidth = 40
     const inferredButtonWidth = firstButton?.offsetWidth
       ?? lastButton?.offsetWidth
@@ -470,7 +507,7 @@ function SportsSegmentNumberPicker({
                   type="button"
                   onClick={() => pickOption(index)}
                   ref={(node) => {
-                    buttonRefs.current[option.key] = node
+                    buttonRefsRef.current[option.key] = node
                   }}
                   className={cn(
                     `w-10 shrink-0 snap-center text-center text-sm font-medium text-muted-foreground transition-colors`,
@@ -522,6 +559,8 @@ function SportsEventQuerySync({
       conditionId: searchParams.get('conditionId')?.trim() ?? null,
       outcomeIndex: parseRequestedOutcomeIndex(searchParams.get('outcomeIndex')),
     })
+
+    return () => {}
   }, [onSelectionChange, searchParams])
 
   return null
@@ -1491,8 +1530,11 @@ export default function SportsEventCenter({
   const orderOutcomeIndex = useOrder(state => state.outcome?.outcome_index ?? null)
   const user = useUser()
   const [querySelection, setQuerySelection] = useState<SportsEventQuerySelection>(EMPTY_QUERY_SELECTION)
-  const [oddsFormat, setOddsFormat] = useState<OddsFormat>('price')
-  const [hasLoadedOddsFormat, setHasLoadedOddsFormat] = useState(false)
+  const oddsFormat = useSyncExternalStore(
+    subscribeToOddsFormatStorage,
+    getStoredOddsFormatClientSnapshot,
+    getStoredOddsFormatServerSnapshot,
+  )
   const [claimedConditionIds, setClaimedConditionIds] = useState<Record<string, true>>({})
   const [redeemSectionKey, setRedeemSectionKey] = useState<EventSectionKey | null>(null)
   const [redeemDefaultConditionId, setRedeemDefaultConditionId] = useState<string | null>(null)
@@ -1549,6 +1591,8 @@ export default function SportsEventCenter({
 
   useEffect(() => {
     setActiveMarketViewKey(resolvedInitialMarketViewKey)
+
+    return () => {}
   }, [resolvedInitialMarketViewKey])
 
   const activeMarketView = useMemo(
@@ -1664,6 +1708,8 @@ export default function SportsEventCenter({
 
   useEffect(() => {
     setActiveEsportsSegmentTabKey(initialEsportsSegmentTabKey)
+
+    return () => {}
   }, [initialEsportsSegmentTabKey])
 
   useEffect(() => {
@@ -1672,6 +1718,8 @@ export default function SportsEventCenter({
         ? current
         : (esportsSegmentTabNumbers[0] ?? null)
     ))
+
+    return () => {}
   }, [esportsSegmentTabNumbers])
 
   useEffect(() => {
@@ -1680,6 +1728,8 @@ export default function SportsEventCenter({
         ? current
         : (esportsSegmentTabNumbers[0] ?? null)
     ))
+
+    return () => {}
   }, [esportsSegmentTabNumbers])
 
   const { data: userPositions } = useQuery<UserPosition[]>({
@@ -1698,30 +1748,12 @@ export default function SportsEventCenter({
   })
 
   useEffect(() => {
-    setClaimedConditionIds({})
-    setRedeemSectionKey(null)
-    setRedeemDefaultConditionId(null)
+    setClaimedConditionIds(() => (activeCard.id ? {} : {}))
+    setRedeemSectionKey(() => (activeCard.id ? null : null))
+    setRedeemDefaultConditionId(() => (activeCard.id ? null : null))
+
+    return () => {}
   }, [activeCard.id])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const storedOddsFormat = window.localStorage.getItem(SPORTS_EVENT_ODDS_FORMAT_STORAGE_KEY)
-    const matchedOption = ODDS_FORMAT_OPTIONS.find(option => option.value === storedOddsFormat)
-    if (matchedOption) {
-      setOddsFormat(matchedOption.value)
-    }
-    setHasLoadedOddsFormat(true)
-  }, [])
-
-  useEffect(() => {
-    if (!hasLoadedOddsFormat || typeof window === 'undefined') {
-      return
-    }
-    window.localStorage.setItem(SPORTS_EVENT_ODDS_FORMAT_STORAGE_KEY, oddsFormat)
-  }, [hasLoadedOddsFormat, oddsFormat])
 
   const formatButtonOdds = useCallback((cents: number) => {
     if (oddsFormat === 'price') {
@@ -2327,6 +2359,35 @@ export default function SportsEventCenter({
 
     return map
   }, [auxiliaryPanelsForSelection])
+  const updateSectionSelection = useCallback((
+    sectionKey: EventSectionKey,
+    buttonKey: string,
+    options?: { panelMode?: 'full' | 'partial' | 'preserve' },
+  ) => {
+    setSelectedButtonBySection((current) => {
+      if (current[sectionKey] === buttonKey) {
+        return current
+      }
+      return {
+        ...current,
+        [sectionKey]: buttonKey,
+      }
+    })
+
+    setActiveTradeButtonKey(buttonKey)
+
+    const panelMode = options?.panelMode ?? 'full'
+    const shouldOpenMobileSheetOnly = isMobile && panelMode === 'full'
+
+    if (shouldOpenMobileSheetOnly) {
+      setIsMobileOrderPanelOpen(true)
+    }
+
+    if (panelMode === 'full' && !shouldOpenMobileSheetOnly) {
+      setOpenAuxiliaryConditionId(null)
+      setOpenSectionKey(sectionKey)
+    }
+  }, [isMobile, setIsMobileOrderPanelOpen])
 
   const handlePickSeriesPreviewSegmentNumber = useCallback((number: number) => {
     setActiveSeriesPreviewSegmentNumber(number)
@@ -2406,6 +2467,8 @@ export default function SportsEventCenter({
     }
 
     setActiveSeriesSpreadPickerNumber(current => current === selectedNumber ? current : selectedNumber)
+
+    return () => {}
   }, [detailMarketByConditionId, selectedSpreadSectionButton])
 
   useEffect(() => {
@@ -2507,7 +2570,7 @@ export default function SportsEventCenter({
         return defaultTradeButton
       })
 
-      setOpenSectionKey(null)
+      setOpenSectionKey(() => (activeCard.id ? null : null))
       setOpenAuxiliaryConditionId((current) => {
         if (marketMatchedAuxiliaryConditionId) {
           return marketMatchedAuxiliaryConditionId
@@ -2637,6 +2700,8 @@ export default function SportsEventCenter({
     if (marketSlugSelectionSignature) {
       appliedMarketSlugSelectionRef.current = marketSlugSelectionSignature
     }
+
+    return () => {}
   }, [
     activeCard,
     activeCard.id,
@@ -2670,6 +2735,8 @@ export default function SportsEventCenter({
     }
 
     setActiveEsportsSegmentTabKey('series')
+
+    return () => {}
   }, [activeCard.buttons, detailMarketByConditionId, hasEsportsSegmentedLayout, marketSlugToButtonKey])
 
   const moneylineButtonKey = selectedButtonBySection.moneyline ?? groupedButtons.moneyline[0]?.key ?? null
@@ -2819,6 +2886,8 @@ export default function SportsEventCenter({
         [auxiliaryPanelKey]: matchedButton.key,
       }
     })
+
+    return () => {}
   }, [
     activeCard.buttons,
     auxiliaryPanelKeyByButtonKey,
@@ -2932,6 +3001,8 @@ export default function SportsEventCenter({
     setOrderMarket(market)
     setOrderOutcome(outcome)
     setOrderSide(ORDER_SIDE.BUY)
+
+    return () => {}
   }, [
     activeCard,
     activeTradeContextButtonKey,
@@ -3001,36 +3072,6 @@ export default function SportsEventCenter({
     const activeConditionButtons = activeConditionId ? (byConditionId.get(activeConditionId) ?? []) : []
 
     return sortSectionButtons(sectionKey, activeConditionButtons)
-  }
-
-  function updateSectionSelection(
-    sectionKey: EventSectionKey,
-    buttonKey: string,
-    options?: { panelMode?: 'full' | 'partial' | 'preserve' },
-  ) {
-    setSelectedButtonBySection((current) => {
-      if (current[sectionKey] === buttonKey) {
-        return current
-      }
-      return {
-        ...current,
-        [sectionKey]: buttonKey,
-      }
-    })
-
-    setActiveTradeButtonKey(buttonKey)
-
-    const panelMode = options?.panelMode ?? 'full'
-    const shouldOpenMobileSheetOnly = isMobile && panelMode === 'full'
-
-    if (shouldOpenMobileSheetOnly) {
-      setIsMobileOrderPanelOpen(true)
-    }
-
-    if (panelMode === 'full' && !shouldOpenMobileSheetOnly) {
-      setOpenAuxiliaryConditionId(null)
-      setOpenSectionKey(sectionKey)
-    }
   }
 
   function updateAuxiliarySelection(

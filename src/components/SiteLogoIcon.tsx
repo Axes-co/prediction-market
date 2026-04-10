@@ -11,8 +11,8 @@ interface SiteLogoIconProps {
   size?: number
 }
 
-const HARDCODED_FILL_PATTERN = /\bfill\s*=\s*"(?!none|transparent|currentColor)#?[^"]+"/gi
-const HARDCODED_STROKE_PATTERN = /\bstroke\s*=\s*"(?!none|transparent|currentColor)#?[^"]+"/gi
+const HARDCODED_FILL_PATTERN = /\bfill\s*=\s*"(?!none|transparent|currentColor)[^"]+"/gi
+const HARDCODED_STROKE_PATTERN = /\bstroke\s*=\s*"(?!none|transparent|currentColor)[^"]+"/gi
 
 function makeThemeAware(svg: string) {
   return svg
