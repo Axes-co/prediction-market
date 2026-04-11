@@ -47,7 +47,6 @@ function ProfitLossCard({
   const platformName = site.name ?? ''
   const [activeTimeframe, setActiveTimeframe] = useState<(typeof PNL_TIMEFRAMES)[number]>('ALL')
   const [cursorX, setCursorX] = useState<number | null>(null)
-  const [pnlSeries, setPnlSeries] = useState<PnlPoint[]>([])
   const timeRangeContainerRef = useRef<HTMLDivElement | null>(null)
   const timeRangeRef = useRef<(HTMLButtonElement | null)[]>([])
   const [timeRangeIndicator, setTimeRangeIndicator] = useState({ width: 0, left: 0 })
@@ -61,10 +60,15 @@ function ProfitLossCard({
     .replace(/fill="url\([^"]+\)"/gi, 'fill="currentColor"')
   const pnlAddress = portfolioAddress
   const pnlBaseUrl = process.env.USER_PNL_URL!
+  const pnlSeriesKey = `${pnlAddress ?? ''}:${pnlBaseUrl}:${activeTimeframe}`
+  const [pnlSeriesState, setPnlSeriesState] = useState<{ key: string, series: PnlPoint[] }>({
+    key: pnlSeriesKey,
+    series: [],
+  })
+  const pnlSeries = pnlSeriesState.key === pnlSeriesKey ? pnlSeriesState.series : []
 
   useEffect(() => {
     if (!pnlAddress || !pnlBaseUrl) {
-      setPnlSeries([])
       return
     }
 
@@ -94,7 +98,7 @@ function ProfitLossCard({
       })
       .then((data) => {
         if (!Array.isArray(data)) {
-          setPnlSeries([])
+          setPnlSeriesState({ key: pnlSeriesKey, series: [] })
           return
         }
 
@@ -108,20 +112,20 @@ function ProfitLossCard({
           .sort((a, b) => a.date.getTime() - b.date.getTime())
 
         if (normalized.length === 0) {
-          setPnlSeries([])
+          setPnlSeriesState({ key: pnlSeriesKey, series: [] })
           return
         }
 
-        setPnlSeries(normalized)
+        setPnlSeriesState({ key: pnlSeriesKey, series: normalized })
       })
       .catch((error) => {
         if (error?.name !== 'AbortError') {
-          setPnlSeries([])
+          setPnlSeriesState({ key: pnlSeriesKey, series: [] })
         }
       })
 
     return () => controller.abort()
-  }, [activeTimeframe, pnlAddress, pnlBaseUrl])
+  }, [activeTimeframe, pnlAddress, pnlBaseUrl, pnlSeriesKey])
 
   const updateIndicator = useCallback(() => {
     const activeIndex = PNL_TIMEFRAMES.findIndex(range => range === activeTimeframe)
@@ -280,10 +284,11 @@ function ProfitLossCard({
       top: `${(cursorY / innerHeight) * 100}%`,
     }
   }, [clampedCursorX, cursorY, innerHeight, innerWidth])
-  const displayValue = clampedCursorX == null ? endValue : cursorValue
-  const deltaValue = displayValue - startValue
-  const isDeltaPositive = deltaValue > 0
-  const isDeltaNegative = deltaValue < 0
+  const displayAbsoluteValue = clampedCursorX == null ? endValue : cursorValue
+  const displayBaselineValue = activeTimeframe === 'ALL' ? 0 : startValue
+  const displayNetValue = displayAbsoluteValue - displayBaselineValue
+  const isDeltaPositive = displayNetValue > 0
+  const isDeltaNegative = displayNetValue < 0
   const areValuesHidden = usePortfolioValueVisibility(state => state.isHidden)
   const [gainTotal, lossTotal] = useMemo(() => {
     if (!chartData.length) {
@@ -293,6 +298,7 @@ function ProfitLossCard({
     const targetTime = (cursorDate ?? endDate).getTime()
     const firstPoint = chartData[0]
     const firstTime = firstPoint.date.getTime()
+    const baseline = activeTimeframe === 'ALL' ? 0 : firstPoint.value
 
     if (targetTime < firstTime) {
       return [0, 0]
@@ -300,17 +306,16 @@ function ProfitLossCard({
 
     let gain = 0
     let loss = 0
-    let prevValue = 0
+    let prevValue = firstPoint.value
     let prevTime = firstTime
 
-    const initialDelta = firstPoint.value - prevValue
+    const initialDelta = firstPoint.value - baseline
     if (initialDelta >= 0) {
       gain += initialDelta
     }
     else {
       loss += Math.abs(initialDelta)
     }
-    prevValue = firstPoint.value
 
     for (let index = 1; index < chartData.length; index += 1) {
       const point = chartData[index]
@@ -345,7 +350,7 @@ function ProfitLossCard({
     }
 
     return [gain, loss]
-  }, [chartData, cursorDate, endDate])
+  }, [activeTimeframe, chartData, cursorDate, endDate])
   const timeframeLabel = ({
     'ALL': 'All-Time',
     '1D': 'Past Day',
@@ -428,8 +433,8 @@ function ProfitLossCard({
                     ? '****'
                     : (
                         <>
-                          {displayValue < 0 ? '-' : '+'}
-                          {formatCurrency(Math.abs(displayValue))}
+                          {displayNetValue < 0 ? '-' : '+'}
+                          {formatCurrency(Math.abs(displayNetValue))}
                         </>
                       )}
                 </span>
@@ -482,8 +487,8 @@ function ProfitLossCard({
                             ? '****'
                             : (
                                 <>
-                                  {displayValue < 0 ? '-' : '+'}
-                                  {formatCurrency(Math.abs(displayValue))}
+                                  {displayNetValue < 0 ? '-' : '+'}
+                                  {formatCurrency(Math.abs(displayNetValue))}
                                 </>
                               )}
                         </span>

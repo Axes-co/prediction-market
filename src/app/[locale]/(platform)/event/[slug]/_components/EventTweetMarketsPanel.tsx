@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import { formatCompactCount } from '@/lib/formatters'
 
 interface EventTweetMarketsPanelProps {
@@ -67,28 +67,56 @@ function buildCountdownUnits(
   ]
 }
 
+const COUNTDOWN_TICK_INTERVAL_MS = 1000
+
+function hasValidCountdownTarget(countdownTargetMs: number | null): countdownTargetMs is number {
+  return countdownTargetMs != null && Number.isFinite(countdownTargetMs)
+}
+
+function subscribeToNow(
+  onStoreChange: () => void,
+  countdownTargetMs: number | null,
+  isFinal: boolean,
+) {
+  if (isFinal || !hasValidCountdownTarget(countdownTargetMs)) {
+    return () => {}
+  }
+
+  const targetMs = countdownTargetMs
+  if (targetMs <= Date.now()) {
+    return () => {}
+  }
+
+  const interval = window.setInterval(() => {
+    onStoreChange()
+    if (Date.now() >= targetMs) {
+      window.clearInterval(interval)
+    }
+  }, COUNTDOWN_TICK_INTERVAL_MS)
+
+  return () => {
+    window.clearInterval(interval)
+  }
+}
+
+function getNowSnapshot() {
+  return Date.now()
+}
+
+function getServerNowSnapshot() {
+  return 0
+}
+
 export default function EventTweetMarketsPanel({
   tweetCount,
   countdownTargetMs,
   isFinal = false,
 }: EventTweetMarketsPanelProps) {
-  const [nowMs, setNowMs] = useState(0)
-
-  useEffect(() => {
-    if (countdownTargetMs == null || !Number.isFinite(countdownTargetMs)) {
-      return
-    }
-
-    setNowMs(Date.now())
-
-    const interval = window.setInterval(() => {
-      setNowMs(Date.now())
-    }, 1000)
-
-    return () => {
-      window.clearInterval(interval)
-    }
-  }, [countdownTargetMs])
+  const subscribeToNowForCountdown = useCallback(
+    (onStoreChange: () => void) => subscribeToNow(onStoreChange, countdownTargetMs, isFinal),
+    [countdownTargetMs, isFinal],
+  )
+  const nowMs = useSyncExternalStore(subscribeToNowForCountdown, getNowSnapshot, getServerNowSnapshot)
 
   const countdownUnits = useMemo(
     () => buildCountdownUnits(countdownTargetMs, nowMs, isFinal),

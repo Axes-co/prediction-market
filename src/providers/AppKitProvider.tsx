@@ -16,45 +16,15 @@ import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 import { defaultNetwork, networks, projectId, wagmiAdapter, wagmiConfig } from '@/lib/appkit'
 import { authClient } from '@/lib/auth-client'
 import { IS_BROWSER } from '@/lib/constants'
-import { buildTwoFactorRedirectPath, stripLocalePrefix } from '@/lib/locale-path'
 import { clearBrowserStorage, clearNonHttpOnlyCookies } from '@/lib/utils'
 import { mergeSessionUserState, useUser } from '@/stores/useUser'
 
 let hasInitializedAppKit = false
 let appKitInstance: AppKit | null = null
-const SIWE_TWO_FACTOR_INTENT_COOKIE = 'siwe_2fa_intent'
 const SignaturePrompt = dynamic(
   () => import('@/components/SignaturePrompt').then(mod => mod.SignaturePrompt),
   { ssr: false },
 )
-
-function setSiweTwoFactorIntentCookie() {
-  if (!IS_BROWSER) {
-    return
-  }
-
-  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
-  document.cookie = `${SIWE_TWO_FACTOR_INTENT_COOKIE}=1; Max-Age=180; Path=/; SameSite=Lax${secure}`
-}
-
-function hasSiweTwoFactorIntentCookie() {
-  if (!IS_BROWSER) {
-    return false
-  }
-
-  return document.cookie
-    .split('; ')
-    .some(cookie => cookie.startsWith(`${SIWE_TWO_FACTOR_INTENT_COOKIE}=`))
-}
-
-function clearSiweTwoFactorIntentCookie() {
-  if (!IS_BROWSER) {
-    return
-  }
-
-  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
-  document.cookie = `${SIWE_TWO_FACTOR_INTENT_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax${secure}`
-}
 
 function clearAppKitState() {
   if (!IS_BROWSER) {
@@ -135,14 +105,6 @@ function initializeAppKitSingleton(
               walletAddress: address,
               chainId: defaultNetwork.id,
             })
-            // @ts-expect-error does not recognize twoFactorRedirect
-            if (data?.twoFactorRedirect && typeof window !== 'undefined') {
-              if (stripLocalePrefix(window.location.pathname) !== '/2fa' && hasSiweTwoFactorIntentCookie()) {
-                clearSiweTwoFactorIntentCookie()
-                window.location.href = buildTwoFactorRedirectPath(window.location.pathname, window.location.search)
-              }
-              return false
-            }
             return Boolean(data?.success)
           }
           catch {
@@ -219,7 +181,6 @@ export default function AppKitProvider({ children }: { children: ReactNode }) {
       setCanSyncTheme(true)
       setAppKitValue({
         open: async (options) => {
-          setSiweTwoFactorIntentCookie()
           await instance.open(options)
         },
         close: async () => {

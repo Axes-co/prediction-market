@@ -142,21 +142,11 @@ export default async function proxy(request: NextRequest) {
     return intlMiddleware(request)
   }
 
-  const hasTwoFactorCookie = Boolean(
-    request.cookies.get('__Secure-better-auth.siwe_2fa_pending')
-    ?? request.cookies.get('better-auth.siwe_2fa_pending'),
-  )
   const session = await auth.api.getSession({
     headers: request.headers,
   })
 
   if (!session) {
-    if (hasTwoFactorCookie) {
-      const twoFactorUrl = new URL(withLocale('/2fa', locale), request.url)
-      const localizedPathname = withLocale(pathname, locale)
-      twoFactorUrl.searchParams.set('next', `${localizedPathname}${url.search}`)
-      return NextResponse.redirect(twoFactorUrl)
-    }
     return NextResponse.redirect(new URL(withLocale('/', locale), request.url))
   }
 
