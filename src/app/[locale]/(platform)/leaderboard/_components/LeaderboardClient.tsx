@@ -56,6 +56,10 @@ const PAGE_SIZE = 20
 const BIGGEST_WINS_CACHE = new Map<string, BiggestWinEntry[]>()
 const BIGGEST_WINS_IN_FLIGHT = new Map<string, Promise<BiggestWinEntry[]>>()
 
+interface TimeframePnlBatchResponse {
+  values?: Record<string, number>
+}
+
 async function fetchBiggestWins(category: string, period: string) {
   const params = new URLSearchParams({
     limit: '20',
@@ -160,6 +164,18 @@ function formatSignedCurrency(value: number) {
   return safeValue >= 0 ? `+${formatted}` : `-${formatted}`
 }
 
+function formatVolumeCurrency(value: number) {
+  if (!Number.isFinite(value)) {
+    return '—'
+  }
+
+  const safeValue = Math.abs(value)
+  return formatCurrency(safeValue, {
+    minimumFractionDigits: safeValue > 0 && safeValue < 1 ? 2 : 0,
+    maximumFractionDigits: safeValue > 0 && safeValue < 1 ? 2 : 0,
+  })
+}
+
 function formatValueOrDash(value?: number) {
   if (!Number.isFinite(value)) {
     return '—'
@@ -173,6 +189,117 @@ function buildFiltersKey(filters: LeaderboardFilters) {
 
 function buildLeaderboardScopeKey(filters: LeaderboardFilters, searchQuery: string) {
   return `${buildFiltersKey(filters)}:${searchQuery}`
+}
+
+function normalizeWalletAddress(value?: string) {
+  return (value ?? '').trim().toLowerCase()
+}
+
+async function fetchTimeframePnlBatch(
+  userAddresses: string[],
+  period: LeaderboardFilters['period'],
+  signal: AbortSignal,
+): Promise<Map<string, number>> {
+  const response = await fetch('/api/leaderboard/timeframe-pnl', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      period,
+      addresses: userAddresses,
+    }),
+    signal,
+  })
+
+  if (!response.ok) {
+    return new Map()
+  }
+
+  const payload = await response.json() as TimeframePnlBatchResponse
+  if (!payload || typeof payload !== 'object' || !payload.values || typeof payload.values !== 'object') {
+    return new Map()
+  }
+
+  const values = new Map<string, number>()
+  for (const [address, rawValue] of Object.entries(payload.values)) {
+    const normalizedAddress = normalizeWalletAddress(address)
+    if (!normalizedAddress) {
+      continue
+    }
+    if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+      values.set(normalizedAddress, rawValue)
+    }
+  }
+
+  return values
+}
+
+async function hydrateEntriesWithPortfolioPnl(
+  entries: LeaderboardEntry[],
+  filters: LeaderboardFilters,
+  signal: AbortSignal,
+): Promise<LeaderboardEntry[]> {
+  if (entries.length === 0) {
+    return entries
+  }
+
+  if (filters.category !== 'overall') {
+    return entries
+  }
+
+  const addresses = Array.from(
+    new Set(
+      entries
+        .map(entry => normalizeWalletAddress(entry.proxyWallet))
+        .filter(address => address.length > 0),
+    ),
+  )
+
+  if (addresses.length === 0) {
+    return entries
+  }
+
+  const pnlByAddress = await fetchTimeframePnlBatch(addresses, filters.period, signal).catch(() => new Map())
+
+  if (pnlByAddress.size === 0) {
+    return entries
+  }
+
+  return entries.map((entry) => {
+    const address = normalizeWalletAddress(entry.proxyWallet)
+    const pnl = pnlByAddress.get(address)
+    if (typeof pnl !== 'number') {
+      return entry
+    }
+    return { ...entry, pnl }
+  })
+}
+
+function sortEntriesForDisplay(
+  entries: LeaderboardEntry[],
+  filters: LeaderboardFilters,
+  page: number,
+): LeaderboardEntry[] {
+  if (entries.length === 0 || filters.category !== 'overall' || filters.order !== 'profit') {
+    return entries
+  }
+
+  const sorted = [...entries].sort((left, right) => {
+    const leftPnl = Number.isFinite(left.pnl) ? Number(left.pnl) : Number.NEGATIVE_INFINITY
+    const rightPnl = Number.isFinite(right.pnl) ? Number(right.pnl) : Number.NEGATIVE_INFINITY
+    if (leftPnl !== rightPnl) {
+      return rightPnl - leftPnl
+    }
+
+    return normalizeWalletAddress(left.proxyWallet).localeCompare(normalizeWalletAddress(right.proxyWallet))
+  })
+
+  const rankOffset = (page - 1) * PAGE_SIZE
+  return sorted.map((entry, index) => ({
+    ...entry,
+    rank: String(rankOffset + index + 1),
+  }))
 }
 
 export default function LeaderboardClient({ initialFilters }: { initialFilters: LeaderboardFilters }) {
@@ -205,6 +332,14 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
     () => (user?.proxy_wallet_address ?? user?.address ?? '').trim(),
     [user?.address, user?.proxy_wallet_address],
   )
+  const currentFilters = useMemo<LeaderboardFilters>(
+    () => ({
+      category: filters.category,
+      period: filters.period,
+      order: filters.order,
+    }),
+    [filters.category, filters.period, filters.order],
+  )
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -236,8 +371,13 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
         }
         return response.json()
       })
-      .then((result) => {
-        setEntries(normalizeLeaderboardResponse(result))
+      .then(async (result) => {
+        const normalized = normalizeLeaderboardResponse(result)
+        const hydrated = await hydrateEntriesWithPortfolioPnl(normalized, currentFilters, controller.signal)
+        if (controller.signal.aborted) {
+          return
+        }
+        setEntries(sortEntriesForDisplay(hydrated, currentFilters, page))
       })
       .catch((_error) => {
         if (controller.signal.aborted) {
@@ -252,7 +392,7 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
       })
 
     return () => controller.abort()
-  }, [filters.category, filters.period, filters.order, searchQuery, page, leaderboardRequestKey])
+  }, [filters.category, filters.period, filters.order, searchQuery, page, leaderboardRequestKey, currentFilters])
 
   useEffect(() => {
     if (!userAddress) {
@@ -278,9 +418,18 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
         }
         return response.json()
       })
-      .then((result) => {
+      .then(async (result) => {
         const [entry] = normalizeLeaderboardResponse(result)
-        setUserEntry(entry ?? null)
+        if (!entry) {
+          setUserEntry(null)
+          return
+        }
+
+        const [hydrated] = await hydrateEntriesWithPortfolioPnl([entry], currentFilters, controller.signal)
+        if (controller.signal.aborted) {
+          return
+        }
+        setUserEntry(hydrated ?? entry)
       })
       .catch((_error) => {
         if (controller.signal.aborted) {
@@ -290,7 +439,7 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
       })
 
     return () => controller.abort()
-  }, [filters.category, filters.period, filters.order, userAddress])
+  }, [filters.category, filters.period, filters.order, userAddress, currentFilters])
 
   useEffect(() => {
     const category = resolveCategoryApiValue(filters.category)
@@ -421,10 +570,13 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
       return null
     }
 
-    const address = userEntry?.proxyWallet || userAddress
-    const rawUsername = userEntry?.userName || userEntry?.xUsername || user?.username || ''
+    const normalizedUserAddress = normalizeWalletAddress(userAddress)
+    const visibleEntry = entries.find(entry => normalizeWalletAddress(entry.proxyWallet) === normalizedUserAddress)
+    const sourceEntry = visibleEntry ?? userEntry
+    const address = sourceEntry?.proxyWallet || userAddress
+    const rawUsername = sourceEntry?.userName || sourceEntry?.xUsername || user?.username || ''
     const username = rawUsername || address
-    const rankNumber = Number(userEntry?.rank ?? Number.NaN)
+    const rankNumber = Number(sourceEntry?.rank ?? Number.NaN)
     const medalSrc = rankNumber === 1
       ? '/images/medals/gold.svg'
       : rankNumber === 2
@@ -441,23 +593,23 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
           : ''
 
     return {
-      rank: userEntry?.rank ?? '—',
+      rank: sourceEntry?.rank ?? '—',
       address,
       username,
-      profileImage: userEntry?.profileImage || user?.image || '',
-      pnl: userEntry?.pnl,
-      vol: userEntry?.vol,
+      profileImage: sourceEntry?.profileImage || user?.image || '',
+      pnl: sourceEntry?.pnl,
+      vol: sourceEntry?.vol,
       medalSrc,
       medalAlt,
     }
-  }, [userAddress, userEntry, user?.image, user?.username])
+  }, [entries, userAddress, userEntry, user?.image, user?.username])
   const pinnedProfitValue = pinnedEntry?.pnl
   const pinnedVolumeValue = pinnedEntry?.vol
   const pinnedProfitLabel = Number.isFinite(pinnedProfitValue)
     ? formatSignedCurrency(Number(pinnedProfitValue))
     : '—'
   const pinnedVolumeLabel = Number.isFinite(pinnedVolumeValue)
-    ? formatCurrency(Number(pinnedVolumeValue), { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+    ? formatVolumeCurrency(Number(pinnedVolumeValue))
     : '—'
   const pinnedMobileLabel = filters.order === 'profit' ? pinnedProfitLabel : pinnedVolumeLabel
   const pinnedMobileClass = filters.order === 'profit' ? profitColumnClass : volumeColumnClass
@@ -665,7 +817,7 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
                   const profitValue = Number(entry.pnl ?? 0)
                   const volumeValue = Number(entry.vol ?? 0)
                   const profitLabel = formatSignedCurrency(profitValue)
-                  const volumeLabel = formatCurrency(volumeValue, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+                  const volumeLabel = formatVolumeCurrency(volumeValue)
                   const mobileValueLabel = filters.order === 'profit' ? profitLabel : volumeLabel
                   const mobileValueClass = filters.order === 'profit' ? profitColumnClass : volumeColumnClass
                   const rankNumber = Number(rank)

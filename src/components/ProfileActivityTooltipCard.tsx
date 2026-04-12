@@ -69,6 +69,10 @@ function formatStatValue(value?: number | string | null) {
     return `$${formatted}k`
   }
 
+  if (absValue > 0 && absValue < 1) {
+    return `$${absValue.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`
+  }
+
   return `$${Math.round(absValue)}`
 }
 

@@ -24,7 +24,18 @@ interface AdminLocalesSettingsFormProps {
   isOpenRouterConfigured: boolean
 }
 
-export default function AdminLocalesSettingsForm({
+function buildEnabledState(
+  supportedLocales: readonly SupportedLocale[],
+  enabledLocales: SupportedLocale[],
+) {
+  const enabledSet = new Set(enabledLocales)
+  return supportedLocales.reduce<Record<SupportedLocale, boolean>>((acc, locale) => {
+    acc[locale] = enabledSet.has(locale)
+    return acc
+  }, {} as Record<SupportedLocale, boolean>)
+}
+
+function AdminLocalesSettingsFormInner({
   supportedLocales,
   enabledLocales,
   automaticTranslationsEnabled,
@@ -33,26 +44,12 @@ export default function AdminLocalesSettingsForm({
   const t = useExtracted()
   const [state, formAction, isPending] = useActionState(updateLocalesSettingsAction, initialState)
   const wasPendingRef = useRef(isPending)
-  const initialStateMap = useMemo(() => {
-    const enabledSet = new Set(enabledLocales)
-    return supportedLocales.reduce<Record<SupportedLocale, boolean>>((acc, locale) => {
-      acc[locale] = enabledSet.has(locale)
-      return acc
-    }, {} as Record<SupportedLocale, boolean>)
-  }, [enabledLocales, supportedLocales])
-  const initialAutomaticTranslationsState = useMemo(() => {
-    return isOpenRouterConfigured && automaticTranslationsEnabled
-  }, [automaticTranslationsEnabled, isOpenRouterConfigured])
-  const [enabledState, setEnabledState] = useState(initialStateMap)
-  const [automaticTranslationsState, setAutomaticTranslationsState] = useState(initialAutomaticTranslationsState)
-
-  useEffect(() => {
-    setEnabledState(initialStateMap)
-  }, [initialStateMap])
-
-  useEffect(() => {
-    setAutomaticTranslationsState(initialAutomaticTranslationsState)
-  }, [initialAutomaticTranslationsState])
+  const [enabledState, setEnabledState] = useState<Record<SupportedLocale, boolean>>(
+    () => buildEnabledState(supportedLocales, enabledLocales),
+  )
+  const [automaticTranslationsState, setAutomaticTranslationsState] = useState(
+    () => isOpenRouterConfigured && automaticTranslationsEnabled,
+  )
 
   useEffect(() => {
     const transitionedToIdle = wasPendingRef.current && !isPending
@@ -152,4 +149,20 @@ export default function AdminLocalesSettingsForm({
       </Button>
     </Form>
   )
+}
+
+export default function AdminLocalesSettingsForm(props: AdminLocalesSettingsFormProps) {
+  const formResetKey = useMemo(() => JSON.stringify({
+    supportedLocales: props.supportedLocales,
+    enabledLocales: props.enabledLocales,
+    automaticTranslationsEnabled: props.automaticTranslationsEnabled,
+    isOpenRouterConfigured: props.isOpenRouterConfigured,
+  }), [
+    props.supportedLocales,
+    props.enabledLocales,
+    props.automaticTranslationsEnabled,
+    props.isOpenRouterConfigured,
+  ])
+
+  return <AdminLocalesSettingsFormInner key={formResetKey} {...props} />
 }

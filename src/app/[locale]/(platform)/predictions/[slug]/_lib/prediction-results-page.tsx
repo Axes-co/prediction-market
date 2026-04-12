@@ -6,6 +6,11 @@ import type {
 } from '@/lib/prediction-results-filters'
 import type { Event } from '@/types'
 import { getExtracted } from 'next-intl/server'
+import { connection } from 'next/server'
+import {
+  buildPredictionResultsOgImageUrl,
+  buildPredictionResultsPageUrl,
+} from '@/app/[locale]/(platform)/_lib/prediction-results-metadata'
 import PredictionResultsClient from '@/app/[locale]/(platform)/predictions/[slug]/_components/PredictionResultsClient'
 import { TagRepository } from '@/lib/db/queries/tag'
 import { listHomeEventsPage } from '@/lib/home-events-page'
@@ -15,6 +20,7 @@ import {
   resolvePredictionResultsRequestedApiStatus,
 } from '@/lib/prediction-results-filters'
 import { resolvePredictionSearchContext } from '@/lib/prediction-search'
+import { loadRuntimeThemeState } from '@/lib/theme-settings'
 
 async function getPredictionPageContext(locale: SupportedLocale, slug: string) {
   const t = await getExtracted({ locale })
@@ -38,10 +44,60 @@ export async function generatePredictionResultsMetadata({
   locale: SupportedLocale
   slug: string
 }): Promise<Metadata> {
-  const context = await getPredictionPageContext(locale, slug)
+  await connection()
+  const t = await getExtracted({ locale })
+  const [context, runtimeTheme] = await Promise.all([
+    getPredictionPageContext(locale, slug),
+    loadRuntimeThemeState(),
+  ])
+  const dateLabel = new Intl.DateTimeFormat(locale, {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date())
+  const title = t('{slug} Predictions & Real-Time Odds', {
+    slug: context.label,
+  })
+  const description = t('Explore live {slug} prediction markets as of {date}.', {
+    slug: context.label,
+    date: dateLabel,
+  })
+  const siteName = runtimeTheme.site.name
+  const pageUrl = buildPredictionResultsPageUrl({
+    locale,
+    slug,
+  })
+  const imageUrl = buildPredictionResultsOgImageUrl({
+    locale,
+    slug,
+    label: context.label,
+    version: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+  })
+  const socialImage = {
+    url: imageUrl,
+    width: 1200,
+    height: 630,
+    alt: `${context.label} prediction markets on ${siteName}`,
+    type: 'image/png',
+  } as const
 
   return {
-    title: `${context.label} Odds & Predictions`,
+    title,
+    description,
+    openGraph: {
+      type: 'website',
+      url: pageUrl,
+      title,
+      description,
+      siteName,
+      images: [socialImage],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [socialImage],
+    },
   }
 }
 

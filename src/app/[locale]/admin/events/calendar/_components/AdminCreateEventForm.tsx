@@ -794,6 +794,34 @@ function createInitialForm(input?: {
   }
 }
 
+function areCategoryItemsEqual(left: CategoryItem[], right: CategoryItem[]) {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every((item, index) => {
+    const candidate = right[index]
+    return candidate?.label === item.label && candidate.slug === item.slug
+  })
+}
+
+function areOptionItemsEqual(left: OptionItem[], right: OptionItem[]) {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every((item, index) => {
+    const candidate = right[index]
+    return candidate?.id === item.id
+      && candidate.question === item.question
+      && candidate.title === item.title
+      && candidate.shortName === item.shortName
+      && candidate.slug === item.slug
+      && candidate.outcomeYes === item.outcomeYes
+      && candidate.outcomeNo === item.outcomeNo
+  })
+}
+
 function isEventCreationRecurrenceUnit(value: unknown): value is EventCreationRecurrenceUnit {
   return value === 'minute'
     || value === 'hour'
@@ -1274,12 +1302,17 @@ export default function AdminCreateEventForm({
   const [isBinaryOutcomesEditable, setIsBinaryOutcomesEditable] = useState(false)
   const [areMultiOutcomesEditable, setAreMultiOutcomesEditable] = useState(false)
   const [slugSeed, setSlugSeed] = useState('0')
-  const [clientNowMs, setClientNowMs] = useState(0)
-  const [previewSiteOrigin, setPreviewSiteOrigin] = useState('https://your-site.com')
+  const [clientNowMs] = useState(() => Date.now())
+  const [previewSiteOrigin] = useState(() => {
+    if (typeof window !== 'undefined' && window.location.origin) {
+      return window.location.origin
+    }
+
+    return 'https://your-site.com'
+  })
   const [isCustomSportSlug, setIsCustomSportSlug] = useState(false)
   const [isCustomLeagueSlug, setIsCustomLeagueSlug] = useState(false)
 
-  const titleTimeoutRef = useRef<number | null>(null)
   const copyTimeoutRef = useRef<number | null>(null)
   const draftAutosaveTimeoutRef = useRef<number | null>(null)
   const lastDraftAutosaveFingerprintRef = useRef<string | null>(null)
@@ -1290,6 +1323,25 @@ export default function AdminCreateEventForm({
   const lastPreSignChecksResultRef = useRef(false)
   const skipNextSignatureResetRef = useRef(false)
   const pendingResumeKeyRef = useRef<string | null>(null)
+  const contentCheckResetFingerprintRef = useRef<string | null>(null)
+  const signatureResetFingerprintRef = useRef<string | null>(null)
+  const signatureStorageFingerprintRef = useRef<string | null>(null)
+  const preSignChecksAutoFingerprintRef = useRef<string | null>(null)
+  const serverDraftSyncDepsRef = useRef<{
+    creationMode: EventCreationMode
+    initialRecurrenceInterval: string
+    initialRecurrenceUnit: EventCreationRecurrenceUnit | ''
+    initialSlugTemplate: string
+    initialTitleTemplate: string
+    initialWalletAddress: string
+    normalizedInitialEndDateIso: string
+    normalizedInitialSlug: string
+    normalizedInitialTitle: string
+    serverAssetPayload: EventCreationAssetPayload | null
+    serverDraftPayload: Record<string, unknown> | null
+  } | null>(null)
+  const autoSlugFingerprintRef = useRef<string | null>(null)
+  const slugResetValueRef = useRef<string | null>(null)
   const eventEndDateInputRef = useRef<HTMLInputElement | null>(null)
   const sportsStartTimeInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -1399,39 +1451,19 @@ export default function AdminCreateEventForm({
     [baseEventSlug, sportsForm],
   )
 
-  useEffect(() => {
-    setClientNowMs(Date.now())
-  }, [])
-
-  useEffect(() => {
-    if (!sportsForm.sportSlug.trim()) {
-      return
+  if (sportsForm.sportSlug.trim()) {
+    const nextCustomSportSlug = !isKnownSportSlug
+    if (nextCustomSportSlug !== isCustomSportSlug) {
+      setIsCustomSportSlug(nextCustomSportSlug)
     }
+  }
 
-    if (!isKnownSportSlug) {
-      setIsCustomSportSlug(true)
-      return
+  if (sportsForm.leagueSlug.trim()) {
+    const nextCustomLeagueSlug = !isKnownLeagueSlug
+    if (nextCustomLeagueSlug !== isCustomLeagueSlug) {
+      setIsCustomLeagueSlug(nextCustomLeagueSlug)
     }
-
-    if (isCustomSportSlug) {
-      setIsCustomSportSlug(false)
-    }
-  }, [isCustomSportSlug, isKnownSportSlug, sportsForm.sportSlug])
-
-  useEffect(() => {
-    if (!sportsForm.leagueSlug.trim()) {
-      return
-    }
-
-    if (!isKnownLeagueSlug) {
-      setIsCustomLeagueSlug(true)
-      return
-    }
-
-    if (isCustomLeagueSlug) {
-      setIsCustomLeagueSlug(false)
-    }
-  }, [isCustomLeagueSlug, isKnownLeagueSlug, sportsForm.leagueSlug])
+  }
   const marketCount = useMemo(() => {
     if (form.marketMode === 'binary') {
       return 1
@@ -2106,10 +2138,6 @@ export default function AdminCreateEventForm({
 
   useEffect(() => {
     return () => {
-      if (titleTimeoutRef.current !== null) {
-        window.clearTimeout(titleTimeoutRef.current)
-      }
-
       if (copyTimeoutRef.current !== null) {
         window.clearTimeout(copyTimeoutRef.current)
       }
@@ -2122,13 +2150,6 @@ export default function AdminCreateEventForm({
         window.clearTimeout(contentCheckFinishedTimeoutRef.current)
       }
     }
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.location.origin) {
-      return
-    }
-    setPreviewSiteOrigin(window.location.origin)
   }, [])
 
   useEffect(() => {
@@ -2146,20 +2167,30 @@ export default function AdminCreateEventForm({
     }
   }, [authChallengeExpiresAtMs])
 
-  useEffect(() => {
-    if (currentStep !== 4 && finalPreviewDialogOpen) {
-      setFinalPreviewDialogOpen(false)
-    }
-  }, [currentStep, finalPreviewDialogOpen])
+  if (currentStep !== 4 && finalPreviewDialogOpen) {
+    setFinalPreviewDialogOpen(false)
+  }
 
-  useEffect(() => {
-    setContentCheckState('idle')
-    setContentCheckIssues([])
-    setContentCheckWarnings([])
-    setBypassedIssueKeys([])
-    setContentCheckError('')
-    setContentCheckProgressLine('')
-  }, [
+  const contentCheckResetFingerprint = useMemo(() => JSON.stringify({
+    automaticWalletAddress,
+    creationMode,
+    title: form.title,
+    slug: form.slug,
+    endDateIso: form.endDateIso,
+    mainCategorySlug: form.mainCategorySlug,
+    categories: form.categories,
+    marketMode: form.marketMode,
+    binaryQuestion: form.binaryQuestion,
+    binaryOutcomeYes: form.binaryOutcomeYes,
+    binaryOutcomeNo: form.binaryOutcomeNo,
+    options: form.options,
+    resolutionSource: form.resolutionSource,
+    resolutionRules: form.resolutionRules,
+    recurrenceInterval,
+    recurrenceUnit,
+    slugTemplate,
+    titleTemplate,
+  }), [
     automaticWalletAddress,
     creationMode,
     form.title,
@@ -2180,41 +2211,87 @@ export default function AdminCreateEventForm({
     titleTemplate,
   ])
 
-  useEffect(() => {
-    if (skipNextSignatureResetRef.current) {
-      skipNextSignatureResetRef.current = false
-      return
-    }
+  if (contentCheckResetFingerprintRef.current === null) {
+    contentCheckResetFingerprintRef.current = contentCheckResetFingerprint
+  }
+  else if (contentCheckResetFingerprintRef.current !== contentCheckResetFingerprint) {
+    contentCheckResetFingerprintRef.current = contentCheckResetFingerprint
+    setContentCheckState('idle')
+    setContentCheckIssues([])
+    setContentCheckWarnings([])
+    setBypassedIssueKeys([])
+    setContentCheckError('')
+    setContentCheckProgressLine('')
+  }
 
-    setIsSigningAuth(false)
-    setIsPreparingSignaturePlan(false)
-    setIsExecutingSignatures(false)
-    setIsFinalizingSignatureFlow(false)
-    setAuthChallengeExpiresAtMs(null)
-    setPreparedSignaturePlan(null)
-    setSignatureTxs([])
-    setSignatureFlowDone(false)
-    setSignatureFlowError('')
-  }, [
+  const signatureResetFingerprint = useMemo(() => JSON.stringify({
+    eoaAddress,
+    eventImageFileName: eventImageFile?.name ?? '',
+    optionImageKeys: Object.keys(optionImageFiles).sort(),
+    form,
+    targetChainId,
+  }), [
     eoaAddress,
     eventImageFile,
     optionImageFiles,
-    form.title,
-    form.slug,
-    form.endDateIso,
-    form.mainCategorySlug,
-    form.categories,
-    form.marketMode,
-    form.binaryQuestion,
-    form.binaryOutcomeYes,
-    form.binaryOutcomeNo,
-    form.options,
-    form.resolutionSource,
-    form.resolutionRules,
+    form,
     targetChainId,
   ])
 
-  useEffect(() => {
+  if (signatureResetFingerprintRef.current === null) {
+    signatureResetFingerprintRef.current = signatureResetFingerprint
+  }
+  else if (signatureResetFingerprintRef.current !== signatureResetFingerprint) {
+    signatureResetFingerprintRef.current = signatureResetFingerprint
+    if (skipNextSignatureResetRef.current) {
+      skipNextSignatureResetRef.current = false
+    }
+    else {
+      setIsSigningAuth(false)
+      setIsPreparingSignaturePlan(false)
+      setIsExecutingSignatures(false)
+      setIsFinalizingSignatureFlow(false)
+      setAuthChallengeExpiresAtMs(null)
+      setPreparedSignaturePlan(null)
+      setSignatureTxs([])
+      setSignatureFlowDone(false)
+      setSignatureFlowError('')
+    }
+  }
+
+  const preSignChecksAutoFingerprint = useMemo(() => JSON.stringify({
+    allowedCreatorCheckState,
+    allowedCreatorHasIssue,
+    contentHasIssue,
+    contentIndicatorState,
+    fundingCheckState,
+    fundingHasIssue,
+    nativeGasCheckState,
+    nativeGasHasIssue,
+    openRouterCheckState,
+    openRouterHasIssue,
+    slugHasIssue,
+    slugValidationState,
+  }), [
+    allowedCreatorCheckState,
+    allowedCreatorHasIssue,
+    contentHasIssue,
+    contentIndicatorState,
+    fundingCheckState,
+    fundingHasIssue,
+    nativeGasCheckState,
+    nativeGasHasIssue,
+    openRouterCheckState,
+    openRouterHasIssue,
+    slugHasIssue,
+    slugValidationState,
+  ])
+
+  if (preSignChecksAutoFingerprintRef.current === null) {
+    preSignChecksAutoFingerprintRef.current = preSignChecksAutoFingerprint
+  }
+  else if (preSignChecksAutoFingerprintRef.current !== preSignChecksAutoFingerprint) {
+    preSignChecksAutoFingerprintRef.current = preSignChecksAutoFingerprint
     setExpandedPreSignChecks((previous) => {
       const next = { ...previous }
       let changed = false
@@ -2243,20 +2320,7 @@ export default function AdminCreateEventForm({
 
       return changed ? next : previous
     })
-  }, [
-    allowedCreatorCheckState,
-    allowedCreatorHasIssue,
-    contentHasIssue,
-    contentIndicatorState,
-    fundingCheckState,
-    fundingHasIssue,
-    nativeGasCheckState,
-    nativeGasHasIssue,
-    openRouterCheckState,
-    openRouterHasIssue,
-    slugHasIssue,
-    slugValidationState,
-  ])
+  }
 
   useEffect(() => {
     async function loadMainCategories() {
@@ -2305,272 +2369,282 @@ export default function AdminCreateEventForm({
     })()
   }, [])
 
-  useEffect(() => {
-    if (automaticWalletAddress) {
-      return
-    }
-
-    if (creationMode === 'recurring') {
-      if (signers.length === 1) {
-        setAutomaticWalletAddress(signers[0]!.address)
-      }
-      return
-    }
-
-    if (!eoaAddress && signers.length === 1) {
+  if (!automaticWalletAddress && signers.length === 1) {
+    if (creationMode === 'recurring' || !eoaAddress) {
       setAutomaticWalletAddress(signers[0]!.address)
     }
-  }, [automaticWalletAddress, creationMode, eoaAddress, signers])
+  }
 
-  useEffect(() => {
+  const shouldSyncServerDraft = (() => {
+    const previous = serverDraftSyncDepsRef.current
+    if (!previous) {
+      return true
+    }
+
+    return previous.creationMode !== creationMode
+      || previous.initialRecurrenceInterval !== initialRecurrenceInterval
+      || previous.initialRecurrenceUnit !== initialRecurrenceUnit
+      || previous.initialSlugTemplate !== initialSlugTemplate
+      || previous.initialTitleTemplate !== initialTitleTemplate
+      || previous.initialWalletAddress !== initialWalletAddress
+      || previous.normalizedInitialEndDateIso !== normalizedInitialEndDateIso
+      || previous.normalizedInitialSlug !== normalizedInitialSlug
+      || previous.normalizedInitialTitle !== normalizedInitialTitle
+      || previous.serverAssetPayload !== serverAssetPayload
+      || previous.serverDraftPayload !== serverDraftPayload
+  })()
+
+  if (shouldSyncServerDraft) {
+    serverDraftSyncDepsRef.current = {
+      creationMode,
+      initialRecurrenceInterval,
+      initialRecurrenceUnit,
+      initialSlugTemplate,
+      initialTitleTemplate,
+      initialWalletAddress,
+      normalizedInitialEndDateIso,
+      normalizedInitialSlug,
+      normalizedInitialTitle,
+      serverAssetPayload,
+      serverDraftPayload,
+    }
+
     const source = serverDraftPayload
 
     if (!source) {
       setSlugSeed(Math.floor(Date.now() / 1000).toString())
       setStoredAssets(normalizeEventCreationAssetPayload(serverAssetPayload))
-      return
     }
+    else {
+      try {
+        const parsed = (typeof source === 'string' ? JSON.parse(source) : source) as {
+          form?: Partial<FormState>
+          sportsForm?: Partial<AdminSportsFormState>
+          titleTemplate?: unknown
+          slugTemplate?: unknown
+          walletAddress?: unknown
+          recurrenceUnit?: unknown
+          recurrenceInterval?: unknown
+          currentStep?: number
+          maxVisitedStep?: number
+          slugSeed?: string
+          isBinaryOutcomesEditable?: boolean
+          areMultiOutcomesEditable?: boolean
+        }
+        setStoredAssets(normalizeEventCreationAssetPayload(serverAssetPayload))
 
-    try {
-      const parsed = (typeof source === 'string' ? JSON.parse(source) : source) as {
-        form?: Partial<FormState>
-        sportsForm?: Partial<AdminSportsFormState>
-        titleTemplate?: unknown
-        slugTemplate?: unknown
-        walletAddress?: unknown
-        recurrenceUnit?: unknown
-        recurrenceInterval?: unknown
-        currentStep?: number
-        maxVisitedStep?: number
-        slugSeed?: string
-        isBinaryOutcomesEditable?: boolean
-        areMultiOutcomesEditable?: boolean
-      }
-      setStoredAssets(normalizeEventCreationAssetPayload(serverAssetPayload))
+        setSlugSeed(
+          typeof parsed.slugSeed === 'string' && parsed.slugSeed.trim()
+            ? parsed.slugSeed.trim()
+            : Math.floor(Date.now() / 1000).toString(),
+        )
+        setTitleTemplate(typeof parsed.titleTemplate === 'string' ? parsed.titleTemplate : initialTitleTemplate)
+        setSlugTemplate(typeof parsed.slugTemplate === 'string' ? parsed.slugTemplate : initialSlugTemplate)
+        setAutomaticWalletAddress(typeof parsed.walletAddress === 'string' ? parsed.walletAddress : initialWalletAddress)
+        setRecurrenceUnit(isEventCreationRecurrenceUnit(parsed.recurrenceUnit) ? parsed.recurrenceUnit : initialRecurrenceUnit)
+        setRecurrenceInterval(
+          typeof parsed.recurrenceInterval === 'string' && parsed.recurrenceInterval.trim()
+            ? parsed.recurrenceInterval.replace(/\D/g, '') || '1'
+            : typeof parsed.recurrenceInterval === 'number' && Number.isFinite(parsed.recurrenceInterval)
+              ? String(Math.max(1, Math.floor(parsed.recurrenceInterval)))
+              : initialRecurrenceInterval,
+        )
 
-      setSlugSeed(
-        typeof parsed.slugSeed === 'string' && parsed.slugSeed.trim()
-          ? parsed.slugSeed.trim()
-          : Math.floor(Date.now() / 1000).toString(),
-      )
-      setTitleTemplate(typeof parsed.titleTemplate === 'string' ? parsed.titleTemplate : initialTitleTemplate)
-      setSlugTemplate(typeof parsed.slugTemplate === 'string' ? parsed.slugTemplate : initialSlugTemplate)
-      setAutomaticWalletAddress(typeof parsed.walletAddress === 'string' ? parsed.walletAddress : initialWalletAddress)
-      setRecurrenceUnit(isEventCreationRecurrenceUnit(parsed.recurrenceUnit) ? parsed.recurrenceUnit : initialRecurrenceUnit)
-      setRecurrenceInterval(
-        typeof parsed.recurrenceInterval === 'string' && parsed.recurrenceInterval.trim()
-          ? parsed.recurrenceInterval.replace(/\D/g, '') || '1'
-          : typeof parsed.recurrenceInterval === 'number' && Number.isFinite(parsed.recurrenceInterval)
-            ? String(Math.max(1, Math.floor(parsed.recurrenceInterval)))
-            : initialRecurrenceInterval,
-      )
-
-      if (parsed.form && typeof parsed.form === 'object') {
-        const fallback = createInitialForm({
-          title: normalizedInitialTitle,
-          slug: normalizedInitialSlug,
-          endDateIso: normalizedInitialEndDateIso,
-        })
-        const parsedOptions = Array.isArray(parsed.form.options)
-          ? parsed.form.options
-              .map((item, optionIndex) => {
-                if (!item || typeof item !== 'object') {
-                  return null
-                }
-                const candidate = item as Partial<OptionItem>
-                return {
-                  id: typeof candidate.id === 'string' && candidate.id.trim()
-                    ? candidate.id
-                    : `opt-loaded-${optionIndex + 1}`,
-                  question: typeof candidate.question === 'string' ? candidate.question : '',
-                  title: typeof candidate.title === 'string' ? candidate.title : '',
-                  shortName: typeof candidate.shortName === 'string' ? candidate.shortName : '',
-                  slug: typeof candidate.slug === 'string' ? candidate.slug : '',
-                  outcomeYes: typeof candidate.outcomeYes === 'string' && candidate.outcomeYes.trim()
-                    ? candidate.outcomeYes
-                    : 'Yes',
-                  outcomeNo: typeof candidate.outcomeNo === 'string' && candidate.outcomeNo.trim()
-                    ? candidate.outcomeNo
-                    : 'No',
-                } satisfies OptionItem
-              })
-              .filter((item): item is OptionItem => Boolean(item))
-          : []
-
-        setForm({
-          title: typeof parsed.form.title === 'string' ? parsed.form.title : fallback.title,
-          slug: typeof parsed.form.slug === 'string' ? parsed.form.slug : fallback.slug,
-          endDateIso: creationMode === 'recurring' && normalizedInitialEndDateIso
-            ? normalizedInitialEndDateIso
-            : typeof parsed.form.endDateIso === 'string'
-              ? normalizeDateTimeLocalValue(parsed.form.endDateIso)
-              : fallback.endDateIso,
-          mainCategorySlug: typeof parsed.form.mainCategorySlug === 'string' ? parsed.form.mainCategorySlug : fallback.mainCategorySlug,
-          categories: Array.isArray(parsed.form.categories)
-            ? parsed.form.categories
-                .map((item) => {
+        if (parsed.form && typeof parsed.form === 'object') {
+          const fallback = createInitialForm({
+            title: normalizedInitialTitle,
+            slug: normalizedInitialSlug,
+            endDateIso: normalizedInitialEndDateIso,
+          })
+          const parsedOptions = Array.isArray(parsed.form.options)
+            ? parsed.form.options
+                .map((item, optionIndex) => {
                   if (!item || typeof item !== 'object') {
                     return null
                   }
-                  const category = item as Partial<CategoryItem>
-                  const label = typeof category.label === 'string' ? category.label.trim() : ''
-                  const slug = typeof category.slug === 'string' ? category.slug.trim() : ''
-                  if (!label || !slug) {
+                  const candidate = item as Partial<OptionItem>
+                  return {
+                    id: typeof candidate.id === 'string' && candidate.id.trim()
+                      ? candidate.id
+                      : `opt-loaded-${optionIndex + 1}`,
+                    question: typeof candidate.question === 'string' ? candidate.question : '',
+                    title: typeof candidate.title === 'string' ? candidate.title : '',
+                    shortName: typeof candidate.shortName === 'string' ? candidate.shortName : '',
+                    slug: typeof candidate.slug === 'string' ? candidate.slug : '',
+                    outcomeYes: typeof candidate.outcomeYes === 'string' && candidate.outcomeYes.trim()
+                      ? candidate.outcomeYes
+                      : 'Yes',
+                    outcomeNo: typeof candidate.outcomeNo === 'string' && candidate.outcomeNo.trim()
+                      ? candidate.outcomeNo
+                      : 'No',
+                  } satisfies OptionItem
+                })
+                .filter((item): item is OptionItem => Boolean(item))
+            : []
+
+          setForm({
+            title: typeof parsed.form.title === 'string' ? parsed.form.title : fallback.title,
+            slug: typeof parsed.form.slug === 'string' ? parsed.form.slug : fallback.slug,
+            endDateIso: creationMode === 'recurring' && normalizedInitialEndDateIso
+              ? normalizedInitialEndDateIso
+              : typeof parsed.form.endDateIso === 'string'
+                ? normalizeDateTimeLocalValue(parsed.form.endDateIso)
+                : fallback.endDateIso,
+            mainCategorySlug: typeof parsed.form.mainCategorySlug === 'string' ? parsed.form.mainCategorySlug : fallback.mainCategorySlug,
+            categories: Array.isArray(parsed.form.categories)
+              ? parsed.form.categories
+                  .map((item) => {
+                    if (!item || typeof item !== 'object') {
+                      return null
+                    }
+                    const category = item as Partial<CategoryItem>
+                    const label = typeof category.label === 'string' ? category.label.trim() : ''
+                    const slug = typeof category.slug === 'string' ? category.slug.trim() : ''
+                    if (!label || !slug) {
+                      return null
+                    }
+                    return { label, slug } satisfies CategoryItem
+                  })
+                  .filter((item): item is CategoryItem => Boolean(item))
+              : fallback.categories,
+            marketMode: parsed.form.marketMode === 'binary'
+              || parsed.form.marketMode === 'multi_multiple'
+              || parsed.form.marketMode === 'multi_unique'
+              ? parsed.form.marketMode
+              : fallback.marketMode,
+            binaryQuestion: typeof parsed.form.binaryQuestion === 'string' ? parsed.form.binaryQuestion : fallback.binaryQuestion,
+            binaryOutcomeYes: typeof parsed.form.binaryOutcomeYes === 'string' && parsed.form.binaryOutcomeYes.trim()
+              ? parsed.form.binaryOutcomeYes
+              : fallback.binaryOutcomeYes,
+            binaryOutcomeNo: typeof parsed.form.binaryOutcomeNo === 'string' && parsed.form.binaryOutcomeNo.trim()
+              ? parsed.form.binaryOutcomeNo
+              : fallback.binaryOutcomeNo,
+            options: parsedOptions.length > 0 ? parsedOptions : fallback.options,
+            resolutionSource: typeof parsed.form.resolutionSource === 'string' ? parsed.form.resolutionSource : fallback.resolutionSource,
+            resolutionRules: typeof parsed.form.resolutionRules === 'string' ? parsed.form.resolutionRules : fallback.resolutionRules,
+          })
+        }
+
+        if (parsed.sportsForm && typeof parsed.sportsForm === 'object') {
+          const fallbackSports = createInitialAdminSportsForm()
+          const candidateTeams = Array.isArray(parsed.sportsForm.teams)
+            ? parsed.sportsForm.teams
+                .map((team, index) => {
+                  if (!team || typeof team !== 'object') {
                     return null
                   }
-                  return { label, slug } satisfies CategoryItem
+
+                  const item = team as Partial<AdminSportsFormState['teams'][number]>
+                  const hostStatus = index === 0 ? 'home' : 'away'
+                  return {
+                    hostStatus,
+                    name: typeof item.name === 'string' ? item.name : '',
+                    abbreviation: typeof item.abbreviation === 'string' ? item.abbreviation : '',
+                  }
                 })
-                .filter((item): item is CategoryItem => Boolean(item))
-            : fallback.categories,
-          marketMode: parsed.form.marketMode === 'binary'
-            || parsed.form.marketMode === 'multi_multiple'
-            || parsed.form.marketMode === 'multi_unique'
-            ? parsed.form.marketMode
-            : fallback.marketMode,
-          binaryQuestion: typeof parsed.form.binaryQuestion === 'string' ? parsed.form.binaryQuestion : fallback.binaryQuestion,
-          binaryOutcomeYes: typeof parsed.form.binaryOutcomeYes === 'string' && parsed.form.binaryOutcomeYes.trim()
-            ? parsed.form.binaryOutcomeYes
-            : fallback.binaryOutcomeYes,
-          binaryOutcomeNo: typeof parsed.form.binaryOutcomeNo === 'string' && parsed.form.binaryOutcomeNo.trim()
-            ? parsed.form.binaryOutcomeNo
-            : fallback.binaryOutcomeNo,
-          options: parsedOptions.length > 0 ? parsedOptions : fallback.options,
-          resolutionSource: typeof parsed.form.resolutionSource === 'string' ? parsed.form.resolutionSource : fallback.resolutionSource,
-          resolutionRules: typeof parsed.form.resolutionRules === 'string' ? parsed.form.resolutionRules : fallback.resolutionRules,
-        })
+                .filter((item): item is AdminSportsFormState['teams'][number] => Boolean(item))
+            : []
+          const candidateProps = Array.isArray(parsed.sportsForm.props)
+            ? parsed.sportsForm.props
+                .map((prop, index) => {
+                  if (!prop || typeof prop !== 'object') {
+                    return null
+                  }
+
+                  const item = prop as Partial<AdminSportsPropState>
+                  return {
+                    id: typeof item.id === 'string' && item.id.trim() ? item.id : `prop-loaded-${index + 1}`,
+                    playerName: typeof item.playerName === 'string' ? item.playerName : '',
+                    statType: item.statType === 'points'
+                      || item.statType === 'rebounds'
+                      || item.statType === 'assists'
+                      || item.statType === 'receiving_yards'
+                      || item.statType === 'rushing_yards'
+                      ? item.statType
+                      : '',
+                    line: typeof item.line === 'string' ? item.line : '',
+                    teamHostStatus: item.teamHostStatus === 'home' || item.teamHostStatus === 'away'
+                      ? item.teamHostStatus
+                      : '',
+                  } satisfies AdminSportsPropState
+                })
+                .filter((item): item is AdminSportsPropState => Boolean(item))
+            : []
+          const candidateCustomMarkets = Array.isArray(parsed.sportsForm.customMarkets)
+            ? parsed.sportsForm.customMarkets
+                .map((market, index) => {
+                  if (!market || typeof market !== 'object') {
+                    return null
+                  }
+
+                  const item = market as Partial<AdminSportsCustomMarketState>
+                  return {
+                    id: typeof item.id === 'string' && item.id.trim() ? item.id : `market-loaded-${index + 1}`,
+                    sportsMarketType: typeof item.sportsMarketType === 'string' ? item.sportsMarketType : '',
+                    question: typeof item.question === 'string' ? item.question : '',
+                    title: typeof item.title === 'string' ? item.title : '',
+                    shortName: typeof item.shortName === 'string' ? item.shortName : '',
+                    slug: typeof item.slug === 'string' ? item.slug : '',
+                    outcomeOne: typeof item.outcomeOne === 'string' ? item.outcomeOne : '',
+                    outcomeTwo: typeof item.outcomeTwo === 'string' ? item.outcomeTwo : '',
+                    line: typeof item.line === 'string' ? item.line : '',
+                    groupItemTitle: typeof item.groupItemTitle === 'string' ? item.groupItemTitle : '',
+                    iconAssetKey: item.iconAssetKey === 'home' || item.iconAssetKey === 'away'
+                      ? item.iconAssetKey
+                      : '',
+                  } satisfies AdminSportsCustomMarketState
+                })
+                .filter((item): item is AdminSportsCustomMarketState => Boolean(item))
+            : []
+
+          setSportsForm({
+            section: parsed.sportsForm.section === 'games' || parsed.sportsForm.section === 'props'
+              ? parsed.sportsForm.section
+              : fallbackSports.section,
+            eventVariant: parsed.sportsForm.eventVariant === 'standard'
+              || parsed.sportsForm.eventVariant === 'more_markets'
+              || parsed.sportsForm.eventVariant === 'exact_score'
+              || parsed.sportsForm.eventVariant === 'halftime_result'
+              || parsed.sportsForm.eventVariant === 'custom'
+              ? parsed.sportsForm.eventVariant
+              : fallbackSports.eventVariant,
+            sportSlug: typeof parsed.sportsForm.sportSlug === 'string' ? parsed.sportsForm.sportSlug : fallbackSports.sportSlug,
+            leagueSlug: typeof parsed.sportsForm.leagueSlug === 'string' ? parsed.sportsForm.leagueSlug : fallbackSports.leagueSlug,
+            startTime: typeof parsed.sportsForm.startTime === 'string'
+              ? normalizeDateTimeLocalValue(parsed.sportsForm.startTime)
+              : fallbackSports.startTime,
+            includeDraw: Boolean(parsed.sportsForm.includeDraw),
+            includeBothTeamsToScore: parsed.sportsForm.includeBothTeamsToScore !== false,
+            includeSpreads: parsed.sportsForm.includeSpreads !== false,
+            includeTotals: parsed.sportsForm.includeTotals !== false,
+            teams: candidateTeams.length === 2
+              ? [candidateTeams[0], candidateTeams[1]]
+              : fallbackSports.teams,
+            props: candidateProps.length > 0 ? candidateProps : fallbackSports.props,
+            customMarkets: candidateCustomMarkets.length > 0 ? candidateCustomMarkets : fallbackSports.customMarkets,
+          })
+        }
+
+        const parsedCurrentStep = Number(parsed.currentStep ?? 1)
+        const parsedMaxVisitedStep = Number(parsed.maxVisitedStep ?? 1)
+        const nextCurrentStep = Number.isFinite(parsedCurrentStep)
+          ? Math.min(TOTAL_STEPS, Math.max(1, Math.floor(parsedCurrentStep)))
+          : 1
+        const nextMaxVisitedStep = Number.isFinite(parsedMaxVisitedStep)
+          ? Math.min(TOTAL_STEPS, Math.max(nextCurrentStep, Math.floor(parsedMaxVisitedStep)))
+          : nextCurrentStep
+
+        setCurrentStep(nextCurrentStep)
+        setMaxVisitedStep(nextMaxVisitedStep)
+        setIsBinaryOutcomesEditable(Boolean(parsed.isBinaryOutcomesEditable))
+        setAreMultiOutcomesEditable(Boolean(parsed.areMultiOutcomesEditable))
       }
-
-      if (parsed.sportsForm && typeof parsed.sportsForm === 'object') {
-        const fallbackSports = createInitialAdminSportsForm()
-        const candidateTeams = Array.isArray(parsed.sportsForm.teams)
-          ? parsed.sportsForm.teams
-              .map((team, index) => {
-                if (!team || typeof team !== 'object') {
-                  return null
-                }
-
-                const item = team as Partial<AdminSportsFormState['teams'][number]>
-                const hostStatus = index === 0 ? 'home' : 'away'
-                return {
-                  hostStatus,
-                  name: typeof item.name === 'string' ? item.name : '',
-                  abbreviation: typeof item.abbreviation === 'string' ? item.abbreviation : '',
-                }
-              })
-              .filter((item): item is AdminSportsFormState['teams'][number] => Boolean(item))
-          : []
-        const candidateProps = Array.isArray(parsed.sportsForm.props)
-          ? parsed.sportsForm.props
-              .map((prop, index) => {
-                if (!prop || typeof prop !== 'object') {
-                  return null
-                }
-
-                const item = prop as Partial<AdminSportsPropState>
-                return {
-                  id: typeof item.id === 'string' && item.id.trim() ? item.id : `prop-loaded-${index + 1}`,
-                  playerName: typeof item.playerName === 'string' ? item.playerName : '',
-                  statType: item.statType === 'points'
-                    || item.statType === 'rebounds'
-                    || item.statType === 'assists'
-                    || item.statType === 'receiving_yards'
-                    || item.statType === 'rushing_yards'
-                    ? item.statType
-                    : '',
-                  line: typeof item.line === 'string' ? item.line : '',
-                  teamHostStatus: item.teamHostStatus === 'home' || item.teamHostStatus === 'away'
-                    ? item.teamHostStatus
-                    : '',
-                } satisfies AdminSportsPropState
-              })
-              .filter((item): item is AdminSportsPropState => Boolean(item))
-          : []
-        const candidateCustomMarkets = Array.isArray(parsed.sportsForm.customMarkets)
-          ? parsed.sportsForm.customMarkets
-              .map((market, index) => {
-                if (!market || typeof market !== 'object') {
-                  return null
-                }
-
-                const item = market as Partial<AdminSportsCustomMarketState>
-                return {
-                  id: typeof item.id === 'string' && item.id.trim() ? item.id : `market-loaded-${index + 1}`,
-                  sportsMarketType: typeof item.sportsMarketType === 'string' ? item.sportsMarketType : '',
-                  question: typeof item.question === 'string' ? item.question : '',
-                  title: typeof item.title === 'string' ? item.title : '',
-                  shortName: typeof item.shortName === 'string' ? item.shortName : '',
-                  slug: typeof item.slug === 'string' ? item.slug : '',
-                  outcomeOne: typeof item.outcomeOne === 'string' ? item.outcomeOne : '',
-                  outcomeTwo: typeof item.outcomeTwo === 'string' ? item.outcomeTwo : '',
-                  line: typeof item.line === 'string' ? item.line : '',
-                  groupItemTitle: typeof item.groupItemTitle === 'string' ? item.groupItemTitle : '',
-                  iconAssetKey: item.iconAssetKey === 'home' || item.iconAssetKey === 'away'
-                    ? item.iconAssetKey
-                    : '',
-                } satisfies AdminSportsCustomMarketState
-              })
-              .filter((item): item is AdminSportsCustomMarketState => Boolean(item))
-          : []
-
-        setSportsForm({
-          section: parsed.sportsForm.section === 'games' || parsed.sportsForm.section === 'props'
-            ? parsed.sportsForm.section
-            : fallbackSports.section,
-          eventVariant: parsed.sportsForm.eventVariant === 'standard'
-            || parsed.sportsForm.eventVariant === 'more_markets'
-            || parsed.sportsForm.eventVariant === 'exact_score'
-            || parsed.sportsForm.eventVariant === 'halftime_result'
-            || parsed.sportsForm.eventVariant === 'custom'
-            ? parsed.sportsForm.eventVariant
-            : fallbackSports.eventVariant,
-          sportSlug: typeof parsed.sportsForm.sportSlug === 'string' ? parsed.sportsForm.sportSlug : fallbackSports.sportSlug,
-          leagueSlug: typeof parsed.sportsForm.leagueSlug === 'string' ? parsed.sportsForm.leagueSlug : fallbackSports.leagueSlug,
-          startTime: typeof parsed.sportsForm.startTime === 'string'
-            ? normalizeDateTimeLocalValue(parsed.sportsForm.startTime)
-            : fallbackSports.startTime,
-          includeDraw: Boolean(parsed.sportsForm.includeDraw),
-          includeBothTeamsToScore: parsed.sportsForm.includeBothTeamsToScore !== false,
-          includeSpreads: parsed.sportsForm.includeSpreads !== false,
-          includeTotals: parsed.sportsForm.includeTotals !== false,
-          teams: candidateTeams.length === 2
-            ? [candidateTeams[0], candidateTeams[1]]
-            : fallbackSports.teams,
-          props: candidateProps.length > 0 ? candidateProps : fallbackSports.props,
-          customMarkets: candidateCustomMarkets.length > 0 ? candidateCustomMarkets : fallbackSports.customMarkets,
-        })
+      catch (error) {
+        console.error('Error loading create-event draft:', error)
+        setSlugSeed(Math.floor(Date.now() / 1000).toString())
       }
-
-      const parsedCurrentStep = Number(parsed.currentStep ?? 1)
-      const parsedMaxVisitedStep = Number(parsed.maxVisitedStep ?? 1)
-      const nextCurrentStep = Number.isFinite(parsedCurrentStep)
-        ? Math.min(TOTAL_STEPS, Math.max(1, Math.floor(parsedCurrentStep)))
-        : 1
-      const nextMaxVisitedStep = Number.isFinite(parsedMaxVisitedStep)
-        ? Math.min(TOTAL_STEPS, Math.max(nextCurrentStep, Math.floor(parsedMaxVisitedStep)))
-        : nextCurrentStep
-
-      setCurrentStep(nextCurrentStep)
-      setMaxVisitedStep(nextMaxVisitedStep)
-      setIsBinaryOutcomesEditable(Boolean(parsed.isBinaryOutcomesEditable))
-      setAreMultiOutcomesEditable(Boolean(parsed.areMultiOutcomesEditable))
     }
-    catch (error) {
-      console.error('Error loading create-event draft:', error)
-      setSlugSeed(Math.floor(Date.now() / 1000).toString())
-    }
-  }, [
-    creationMode,
-    initialRecurrenceInterval,
-    initialRecurrenceUnit,
-    initialSlugTemplate,
-    initialTitleTemplate,
-    initialWalletAddress,
-    normalizedInitialEndDateIso,
-    normalizedInitialSlug,
-    normalizedInitialTitle,
-    serverAssetPayload,
-    serverDraftPayload,
-  ])
+  }
 
   useEffect(() => {
     if (!draftId || typeof window === 'undefined') {
@@ -2680,136 +2754,113 @@ export default function AdminCreateEventForm({
     titleTemplate,
   ])
 
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
+  const signatureStorageFingerprint = useMemo(() => JSON.stringify({
+    preparedSignaturePlan,
+    signatureTxs,
+    signatureFlowDone,
+    signatureFlowError,
+    authChallengeExpiresAtMs,
+  }), [authChallengeExpiresAtMs, preparedSignaturePlan, signatureFlowDone, signatureFlowError, signatureTxs])
 
-    if (!preparedSignaturePlan) {
-      window.localStorage.removeItem(CREATE_EVENT_SIGNATURE_STORAGE_KEY)
-      return
-    }
-
-    const payload = {
-      preparedSignaturePlan,
-      signatureTxs,
-      signatureFlowDone,
-      signatureFlowError,
-      authChallengeExpiresAtMs,
-    }
-
-    window.localStorage.setItem(CREATE_EVENT_SIGNATURE_STORAGE_KEY, JSON.stringify(payload))
-  }, [authChallengeExpiresAtMs, preparedSignaturePlan, signatureFlowDone, signatureFlowError, signatureTxs])
-
-  useEffect(() => {
-    if (creationMode !== 'recurring' || isSportsEvent) {
-      return
-    }
-
-    setForm((previous) => {
-      const nextTitle = recurringResolvedTitle
-      const nextSlug = recurringResolvedSlug
-
-      if (previous.title === nextTitle && previous.slug === nextSlug) {
-        return previous
+  if (signatureStorageFingerprintRef.current !== signatureStorageFingerprint) {
+    signatureStorageFingerprintRef.current = signatureStorageFingerprint
+    if (typeof window !== 'undefined') {
+      if (!preparedSignaturePlan) {
+        window.localStorage.removeItem(CREATE_EVENT_SIGNATURE_STORAGE_KEY)
       }
+      else {
+        window.localStorage.setItem(CREATE_EVENT_SIGNATURE_STORAGE_KEY, signatureStorageFingerprint)
+      }
+    }
+  }
 
-      return {
+  if (creationMode === 'recurring' && !isSportsEvent) {
+    const nextTitle = recurringResolvedTitle
+    const nextSlug = recurringResolvedSlug
+    if (form.title !== nextTitle || form.slug !== nextSlug) {
+      setForm(previous => ({
         ...previous,
         title: nextTitle,
         slug: nextSlug,
-      }
-    })
-  }, [creationMode, isSportsEvent, recurringResolvedSlug, recurringResolvedTitle])
-
-  useEffect(() => {
-    if (!isSportsEvent) {
-      return
+      }))
     }
+  }
 
-    setForm(prev => ({
-      ...prev,
-      slug: sportsDerivedContent.eventSlug,
-      marketMode: 'multi_multiple',
-      categories: sportsDerivedContent.categories,
-      options: sportsDerivedContent.options,
-      binaryQuestion: '',
-      binaryOutcomeYes: 'Yes',
-      binaryOutcomeNo: 'No',
-    }))
-
-    setOptionImageFiles(prev => (Object.keys(prev).length > 0 ? {} : prev))
-  }, [isSportsEvent, sportsDerivedContent.categories, sportsDerivedContent.eventSlug, sportsDerivedContent.options])
-
-  useEffect(() => {
-    if (creationMode === 'recurring') {
-      return
-    }
-
-    if (titleTimeoutRef.current !== null) {
-      window.clearTimeout(titleTimeoutRef.current)
-      titleTimeoutRef.current = null
-    }
-
-    titleTimeoutRef.current = window.setTimeout(() => {
-      if (!form.title.trim()) {
-        setForm(prev => ({ ...prev, slug: '' }))
-        return
-      }
-
+  if (isSportsEvent) {
+    const shouldSyncSportsDerivedForm = form.slug !== sportsDerivedContent.eventSlug
+      || form.marketMode !== 'multi_multiple'
+      || !areCategoryItemsEqual(form.categories, sportsDerivedContent.categories)
+      || !areOptionItemsEqual(form.options, sportsDerivedContent.options)
+      || form.binaryQuestion !== ''
+      || form.binaryOutcomeYes !== 'Yes'
+      || form.binaryOutcomeNo !== 'No'
+    if (shouldSyncSportsDerivedForm) {
       setForm(prev => ({
         ...prev,
-        slug: isSportsEvent
-          ? sportsDerivedContent.eventSlug
-          : appendEventCreationSlugSuffix(slugify(prev.title), slugSuffix),
+        slug: sportsDerivedContent.eventSlug,
+        marketMode: 'multi_multiple',
+        categories: sportsDerivedContent.categories,
+        options: sportsDerivedContent.options,
+        binaryQuestion: '',
+        binaryOutcomeYes: 'Yes',
+        binaryOutcomeNo: 'No',
       }))
-    }, 250)
-
-    return () => {
-      if (titleTimeoutRef.current !== null) {
-        window.clearTimeout(titleTimeoutRef.current)
-        titleTimeoutRef.current = null
-      }
     }
-  }, [creationMode, form.title, isSportsEvent, slugSuffix, sportsDerivedContent.eventSlug])
 
-  useEffect(() => {
-    if (!form.slug.trim()) {
+    if (Object.keys(optionImageFiles).length > 0) {
+      setOptionImageFiles({})
+    }
+  }
+
+  const autoSlugFingerprint = `${creationMode}:${isSportsEvent ? 'sports' : 'default'}:${slugSuffix}:${sportsDerivedContent.eventSlug}:${form.title}`
+  if (autoSlugFingerprintRef.current === null) {
+    autoSlugFingerprintRef.current = autoSlugFingerprint
+  }
+  else if (autoSlugFingerprintRef.current !== autoSlugFingerprint) {
+    autoSlugFingerprintRef.current = autoSlugFingerprint
+    if (creationMode !== 'recurring' && !isSportsEvent) {
+      const nextSlug = form.title.trim()
+        ? appendEventCreationSlugSuffix(slugify(form.title), slugSuffix)
+        : ''
+      setForm(prev => (prev.slug === nextSlug
+        ? prev
+        : {
+            ...prev,
+            slug: nextSlug,
+          }))
+    }
+  }
+
+  if (slugResetValueRef.current === null) {
+    slugResetValueRef.current = form.slug
+  }
+  else if (slugResetValueRef.current !== form.slug) {
+    slugResetValueRef.current = form.slug
+    if (slugValidationState !== 'idle') {
       setSlugValidationState('idle')
+    }
+    if (slugCheckError) {
       setSlugCheckError('')
-      return
     }
+  }
 
-    setSlugValidationState('idle')
-    setSlugCheckError('')
-  }, [form.slug])
-
-  useEffect(() => {
-    if (form.marketMode !== 'binary') {
-      return
-    }
-
-    setForm((previous) => {
-      const nextBinaryQuestion = previous.title
-      const nextOutcomeYes = previous.binaryOutcomeYes.trim() ? previous.binaryOutcomeYes : 'Yes'
-      const nextOutcomeNo = previous.binaryOutcomeNo.trim() ? previous.binaryOutcomeNo : 'No'
-
-      if (
-        previous.binaryQuestion === nextBinaryQuestion
-        && previous.binaryOutcomeYes === nextOutcomeYes
-        && previous.binaryOutcomeNo === nextOutcomeNo
-      ) {
-        return previous
-      }
-
-      return {
+  if (form.marketMode === 'binary') {
+    const nextBinaryQuestion = form.title
+    const nextOutcomeYes = form.binaryOutcomeYes.trim() ? form.binaryOutcomeYes : 'Yes'
+    const nextOutcomeNo = form.binaryOutcomeNo.trim() ? form.binaryOutcomeNo : 'No'
+    if (
+      form.binaryQuestion !== nextBinaryQuestion
+      || form.binaryOutcomeYes !== nextOutcomeYes
+      || form.binaryOutcomeNo !== nextOutcomeNo
+    ) {
+      setForm(previous => ({
         ...previous,
         binaryQuestion: nextBinaryQuestion,
         binaryOutcomeYes: nextOutcomeYes,
         binaryOutcomeNo: nextOutcomeNo,
-      }
-    })
-  }, [form.marketMode, form.title])
+      }))
+    }
+  }
 
   const showFirstError = useCallback((errors: string[]) => {
     if (errors.length > 0) {
@@ -5036,6 +5087,9 @@ export default function AdminCreateEventForm({
       const nextStep = currentStep + 1
       setCurrentStep(nextStep)
       setMaxVisitedStep(prev => Math.max(prev, nextStep))
+      if (nextStep === 4) {
+        void runAllPreSignChecks()
+      }
       return
     }
 
@@ -5107,22 +5161,8 @@ export default function AdminCreateEventForm({
     validateStep,
   ])
 
-  const continueFromFinalPreview = useCallback(() => {
-    setFinalPreviewDialogOpen(false)
-    setCurrentStep(5)
-    setMaxVisitedStep(prev => Math.max(prev, 5))
-  }, [])
-
-  useEffect(() => {
-    if (currentStep !== 4) {
-      return
-    }
-
-    void runAllPreSignChecks()
-  }, [currentStep, runAllPreSignChecks])
-
-  useEffect(() => {
-    if (currentStep !== 5 || !eoaAddress || preparedSignaturePlan || isSigningAuth || isPreparingSignaturePlan || isLoadingPendingRequest) {
+  const maybeResumePendingSignaturePlan = useCallback((targetStep: number) => {
+    if (targetStep !== 5 || !eoaAddress || preparedSignaturePlan || isSigningAuth || isPreparingSignaturePlan || isLoadingPendingRequest) {
       return
     }
 
@@ -5148,7 +5188,6 @@ export default function AdminCreateEventForm({
     })
   }, [
     buildPreparePayload,
-    currentStep,
     eoaAddress,
     isLoadingPendingRequest,
     isPreparingSignaturePlan,
@@ -5156,6 +5195,13 @@ export default function AdminCreateEventForm({
     loadPendingSignaturePlan,
     preparedSignaturePlan,
   ])
+
+  const continueFromFinalPreview = useCallback(() => {
+    setFinalPreviewDialogOpen(false)
+    setCurrentStep(5)
+    setMaxVisitedStep(prev => Math.max(prev, 5))
+    maybeResumePendingSignaturePlan(5)
+  }, [maybeResumePendingSignaturePlan])
 
   const goBack = useCallback(() => {
     setCurrentStep(prev => Math.max(1, prev - 1))
@@ -5168,7 +5214,13 @@ export default function AdminCreateEventForm({
 
     setCurrentStep(step)
     setMaxVisitedStep(prev => Math.max(prev, step))
-  }, [clickableStepMap])
+    if (step === 4) {
+      void runAllPreSignChecks()
+    }
+    if (step === 5) {
+      maybeResumePendingSignaturePlan(step)
+    }
+  }, [clickableStepMap, maybeResumePendingSignaturePlan, runAllPreSignChecks])
 
   const bypassIssue = useCallback((issue: AiValidationIssue) => {
     const key = getAiIssueKey(issue)

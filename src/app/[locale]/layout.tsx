@@ -42,15 +42,38 @@ export async function generateMetadata(): Promise<Metadata> {
   const runtimeTheme = await loadRuntimeThemeState()
   const site = runtimeTheme.site
   const siteUrl = resolveSiteUrl(process.env)
+  const defaultTitle = `${site.name} | ${site.description}`
+  const fallbackOgImage = new URL('/api/og', siteUrl).toString()
+  const socialImage = {
+    url: fallbackOgImage,
+    width: 1200,
+    height: 630,
+    alt: `${site.name} social image`,
+    type: 'image/png',
+  } as const
 
   return {
     metadataBase: new URL(siteUrl),
     title: {
       template: `%s | ${site.name}`,
-      default: `${site.name} | ${site.description}`,
+      default: defaultTitle,
     },
     description: site.description,
     applicationName: site.name,
+    openGraph: {
+      type: 'website',
+      title: defaultTitle,
+      description: site.description,
+      siteName: site.name,
+      url: siteUrl,
+      images: [socialImage],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: defaultTitle,
+      description: site.description,
+      images: [socialImage],
+    },
     manifest: '/manifest.webmanifest',
     appleWebApp: {
       capable: true,
@@ -65,18 +88,6 @@ export async function generateMetadata(): Promise<Metadata> {
       ],
       apple: [{ url: site.appleTouchIconUrl, sizes: '180x180', type: 'image/png' }],
       shortcut: [site.pwaIcon192Url],
-    },
-    openGraph: {
-      type: 'website',
-      siteName: site.name,
-      title: `${site.name} | ${site.description}`,
-      description: site.description,
-      url: siteUrl,
-    },
-    twitter: {
-      card: 'summary_large_image',
-      title: `${site.name} | ${site.description}`,
-      description: site.description,
     },
     robots: {
       index: true,

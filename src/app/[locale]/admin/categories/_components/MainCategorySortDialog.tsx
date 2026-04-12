@@ -4,7 +4,7 @@ import type { MainCategoryOrderRow } from '@/lib/db/queries/tag'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDownIcon, ArrowUpIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   getMainCategoriesForOrderingAction,
@@ -56,7 +56,7 @@ export default function MainCategorySortDialog({
   const t = useExtracted()
   const isMobile = useIsMobile()
   const queryClient = useQueryClient()
-  const [orderedCategories, setOrderedCategories] = useState<MainCategoryOrderRow[]>([])
+  const [orderedCategoriesOverride, setOrderedCategoriesOverride] = useState<MainCategoryOrderRow[] | null>(null)
   const [sortError, setSortError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 
@@ -74,20 +74,7 @@ export default function MainCategorySortDialog({
     refetchOnWindowFocus: false,
   })
   const mainCategories = data ?? EMPTY_MAIN_CATEGORIES
-
-  useEffect(() => {
-    if (!open) {
-      setSortError(null)
-      setIsSaving(false)
-      return
-    }
-
-    if (!data) {
-      return
-    }
-
-    setOrderedCategories(data)
-  }, [data, open])
+  const orderedCategories = orderedCategoriesOverride ?? mainCategories
 
   const hasChanges = useMemo(() => {
     if (mainCategories.length !== orderedCategories.length) {
@@ -98,7 +85,8 @@ export default function MainCategorySortDialog({
   }, [mainCategories, orderedCategories])
 
   const handleMoveCategory = useCallback((index: number, direction: 'up' | 'down') => {
-    setOrderedCategories((currentCategories) => {
+    setOrderedCategoriesOverride((currentOverride) => {
+      const currentCategories = currentOverride ?? mainCategories
       const targetIndex = direction === 'up' ? index - 1 : index + 1
       if (targetIndex < 0 || targetIndex >= currentCategories.length) {
         return currentCategories
@@ -110,7 +98,17 @@ export default function MainCategorySortDialog({
       nextCategories[targetIndex] = currentCategory
       return nextCategories
     })
-  }, [])
+  }, [mainCategories])
+
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      setSortError(null)
+      setIsSaving(false)
+      setOrderedCategoriesOverride(null)
+    }
+
+    onOpenChange(nextOpen)
+  }, [onOpenChange])
 
   const handleSave = useCallback(async () => {
     if (orderedCategories.length === 0) {
@@ -134,7 +132,7 @@ export default function MainCategorySortDialog({
       await queryClient.invalidateQueries({ queryKey: ['admin-categories'] })
       await queryClient.invalidateQueries({ queryKey: ['admin-main-categories-order'] })
       onSaved()
-      onOpenChange(false)
+      handleOpenChange(false)
     }
     catch (error) {
       console.error('Failed to update main category order:', error)
@@ -143,7 +141,7 @@ export default function MainCategorySortDialog({
     finally {
       setIsSaving(false)
     }
-  }, [onOpenChange, onSaved, orderedCategories, queryClient, t])
+  }, [handleOpenChange, onSaved, orderedCategories, queryClient, t])
 
   const errorMessage = error instanceof Error
     ? error.message
@@ -245,7 +243,7 @@ export default function MainCategorySortDialog({
 
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
+      <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerContent className="max-h-[90vh] w-full bg-background px-4 pt-4 pb-6">
           <form
             className="space-y-4"
@@ -267,7 +265,7 @@ export default function MainCategorySortDialog({
                 type="button"
                 variant="outline"
                 disabled={isSaving}
-                onClick={() => onOpenChange(false)}
+                onClick={() => handleOpenChange(false)}
               >
                 {t('Cancel')}
               </Button>
@@ -279,7 +277,7 @@ export default function MainCategorySortDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <form
           className="space-y-4"
@@ -297,7 +295,7 @@ export default function MainCategorySortDialog({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={() => handleOpenChange(false)}
               disabled={isSaving}
             >
               {t('Cancel')}

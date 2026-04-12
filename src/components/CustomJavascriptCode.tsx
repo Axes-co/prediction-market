@@ -116,6 +116,70 @@ function markCustomJavascriptCodeExecuted() {
   customJavascriptCodeWindow.__customJavascriptCodeHasExecutedCode = true
 }
 
+function executeCustomJavascriptCodes(codes: CustomJavascriptCodeConfig[]) {
+  if (codes.length === 0) {
+    return
+  }
+
+  const executionRegistry = getCustomJavascriptCodeExecutionRegistry()
+
+  for (const code of codes) {
+    const executionKey = code.snippet.trim()
+    if (executionRegistry.has(executionKey)) {
+      continue
+    }
+
+    const parsedTags = parseCustomJavascriptCodeTags(code.snippet)
+    const appendedScriptElements: HTMLScriptElement[] = []
+
+    try {
+      for (const parsedTag of parsedTags) {
+        const scriptElement = document.createElement('script')
+        scriptElement.setAttribute('data-custom-javascript-code', code.name)
+
+        let hasAsyncAttribute = false
+        let hasDeferAttribute = false
+        let hasSrcAttribute = false
+
+        for (const [attributeName, attributeValue] of Object.entries(parsedTag.attributes)) {
+          if (attributeName === 'async') {
+            hasAsyncAttribute = true
+          }
+          else if (attributeName === 'defer') {
+            hasDeferAttribute = true
+          }
+          else if (attributeName === 'src') {
+            hasSrcAttribute = true
+          }
+
+          applyScriptAttribute(scriptElement, attributeName, attributeValue)
+        }
+
+        if (parsedTag.content) {
+          scriptElement.text = parsedTag.content
+        }
+
+        if (hasSrcAttribute && !hasAsyncAttribute && !hasDeferAttribute) {
+          scriptElement.async = false
+        }
+
+        document.body.appendChild(scriptElement)
+        appendedScriptElements.push(scriptElement)
+      }
+    }
+    catch (error) {
+      for (const scriptElement of appendedScriptElements) {
+        scriptElement.remove()
+      }
+
+      throw error
+    }
+
+    executionRegistry.add(executionKey)
+    markCustomJavascriptCodeExecuted()
+  }
+}
+
 export default function CustomJavascriptCode({ locale, codes }: CustomJavascriptCodeProps) {
   const pathname = usePathname()
   const localizedPathname = useMemo(() => stripLocalePrefix(pathname, locale), [locale, pathname])
@@ -128,12 +192,11 @@ export default function CustomJavascriptCode({ locale, codes }: CustomJavascript
     [activeCodes],
   )
   const previousActiveCodeSignatureRef = useRef<string | null>(null)
-  const [hasInteracted, setHasInteracted] = useState(false)
+  const [interactionSignature, setInteractionSignature] = useState<string | null>(null)
 
   useEffect(() => {
     const previousActiveCodeSignature = previousActiveCodeSignatureRef.current
     previousActiveCodeSignatureRef.current = activeCodeSignature
-    setHasInteracted(false)
 
     if (previousActiveCodeSignature === null) {
       return
@@ -151,12 +214,13 @@ export default function CustomJavascriptCode({ locale, codes }: CustomJavascript
   }, [activeCodeSignature])
 
   useEffect(() => {
-    if (hasInteracted || activeCodes.length === 0) {
+    if (interactionSignature === activeCodeSignature || activeCodes.length === 0) {
       return
     }
 
     function handleInteraction() {
-      setHasInteracted(true)
+      setInteractionSignature(activeCodeSignature)
+      executeCustomJavascriptCodes(activeCodes)
     }
 
     window.addEventListener('pointerdown', handleInteraction, { once: true, passive: true })
@@ -170,71 +234,7 @@ export default function CustomJavascriptCode({ locale, codes }: CustomJavascript
       window.removeEventListener('touchstart', handleInteraction)
       window.removeEventListener('scroll', handleInteraction)
     }
-  }, [activeCodes.length, hasInteracted])
-
-  useEffect(() => {
-    if (!hasInteracted || activeCodes.length === 0) {
-      return
-    }
-
-    const executionRegistry = getCustomJavascriptCodeExecutionRegistry()
-
-    for (const code of activeCodes) {
-      const executionKey = code.snippet.trim()
-      if (executionRegistry.has(executionKey)) {
-        continue
-      }
-
-      const parsedTags = parseCustomJavascriptCodeTags(code.snippet)
-      const appendedScriptElements: HTMLScriptElement[] = []
-
-      try {
-        for (const parsedTag of parsedTags) {
-          const scriptElement = document.createElement('script')
-          scriptElement.setAttribute('data-custom-javascript-code', code.name)
-
-          let hasAsyncAttribute = false
-          let hasDeferAttribute = false
-          let hasSrcAttribute = false
-
-          for (const [attributeName, attributeValue] of Object.entries(parsedTag.attributes)) {
-            if (attributeName === 'async') {
-              hasAsyncAttribute = true
-            }
-            else if (attributeName === 'defer') {
-              hasDeferAttribute = true
-            }
-            else if (attributeName === 'src') {
-              hasSrcAttribute = true
-            }
-
-            applyScriptAttribute(scriptElement, attributeName, attributeValue)
-          }
-
-          if (parsedTag.content) {
-            scriptElement.text = parsedTag.content
-          }
-
-          if (hasSrcAttribute && !hasAsyncAttribute && !hasDeferAttribute) {
-            scriptElement.async = false
-          }
-
-          document.body.appendChild(scriptElement)
-          appendedScriptElements.push(scriptElement)
-        }
-      }
-      catch (error) {
-        for (const scriptElement of appendedScriptElements) {
-          scriptElement.remove()
-        }
-
-        throw error
-      }
-
-      executionRegistry.add(executionKey)
-      markCustomJavascriptCodeExecuted()
-    }
-  }, [activeCodes, hasInteracted])
+  }, [activeCodeSignature, activeCodes, interactionSignature])
 
   return null
 }

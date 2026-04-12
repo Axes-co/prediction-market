@@ -143,12 +143,8 @@ export default function AdminCreateEventCalendar() {
   const latestCopySearchRequestIdRef = useRef(0)
   const [newEventDialogOpen, setNewEventDialogOpen] = useState(false)
   const [recurringWalletSetupDialogOpen, setRecurringWalletSetupDialogOpen] = useState(false)
-  const [selectedStartAt, setSelectedStartAt] = useState('')
+  const [selectedStartAt, setSelectedStartAt] = useState(() => buildDefaultStartAt(readCurrentTimeMs()))
   const [serverSignerAvailability, setServerSignerAvailability] = useState<'loading' | 'available' | 'missing' | 'error'>('loading')
-
-  useEffect(() => {
-    setSelectedStartAt(buildDefaultStartAt(readCurrentTimeMs()))
-  }, [])
 
   useEffect(() => {
     async function loadDrafts() {

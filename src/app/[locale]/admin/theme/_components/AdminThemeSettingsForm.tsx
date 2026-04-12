@@ -10,7 +10,7 @@ import type { ThemeOverrides, ThemeToken } from '@/lib/theme'
 import { ChevronDown, RotateCcw } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import Form from 'next/form'
-import { useActionState, useEffect, useMemo, useRef, useState } from 'react'
+import { useActionState, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { updateThemeSettingsAction } from '@/app/[locale]/admin/theme/_actions/update-theme-settings'
 import SiteLogoIcon from '@/components/SiteLogoIcon'
@@ -544,6 +544,63 @@ function ColorPickerSwatch({
   )
 }
 
+function resolveBaseThemeValues(presetId: string) {
+  const empty = {
+    lightValues: {} as ThemeOverrides,
+    darkValues: {} as ThemeOverrides,
+  }
+
+  if (typeof window === 'undefined' || !document.body) {
+    return empty
+  }
+
+  const lightProbe = document.createElement('div')
+  lightProbe.setAttribute('data-theme-mode', 'light')
+  lightProbe.setAttribute('data-theme-preset', presetId)
+  lightProbe.style.position = 'absolute'
+  lightProbe.style.visibility = 'hidden'
+  lightProbe.style.pointerEvents = 'none'
+  lightProbe.style.contain = 'style'
+
+  const darkProbe = document.createElement('div')
+  darkProbe.setAttribute('data-theme-mode', 'dark')
+  darkProbe.setAttribute('data-theme-preset', presetId)
+  darkProbe.style.position = 'absolute'
+  darkProbe.style.visibility = 'hidden'
+  darkProbe.style.pointerEvents = 'none'
+  darkProbe.style.contain = 'style'
+
+  document.body.appendChild(lightProbe)
+  document.body.appendChild(darkProbe)
+
+  try {
+    const lightStyles = getComputedStyle(lightProbe)
+    const darkStyles = getComputedStyle(darkProbe)
+    const nextLight: ThemeOverrides = {}
+    const nextDark: ThemeOverrides = {}
+
+    THEME_TOKENS.forEach((token) => {
+      const lightValue = lightStyles.getPropertyValue(`--${token}`).trim()
+      const darkValue = darkStyles.getPropertyValue(`--${token}`).trim()
+      if (lightValue) {
+        nextLight[token] = lightValue
+      }
+      if (darkValue) {
+        nextDark[token] = darkValue
+      }
+    })
+
+    return {
+      lightValues: nextLight,
+      darkValues: nextDark,
+    }
+  }
+  finally {
+    lightProbe.remove()
+    darkProbe.remove()
+  }
+}
+
 function ThemeTokenMatrix({
   presetId,
   lightOverrides,
@@ -568,10 +625,18 @@ function ThemeTokenMatrix({
   darkParseError: string | null
 }) {
   const t = useExtracted()
-  const lightProbeRef = useRef<HTMLDivElement>(null)
-  const darkProbeRef = useRef<HTMLDivElement>(null)
-  const [baseLightValues, setBaseLightValues] = useState<ThemeOverrides>({})
-  const [baseDarkValues, setBaseDarkValues] = useState<ThemeOverrides>({})
+  const [baseThemeValues, setBaseThemeValues] = useState<{
+    lightValues: ThemeOverrides
+    darkValues: ThemeOverrides
+  }>({
+    lightValues: {},
+    darkValues: {},
+  })
+  const { lightValues: baseLightValues, darkValues: baseDarkValues } = baseThemeValues
+
+  useLayoutEffect(() => {
+    setBaseThemeValues(resolveBaseThemeValues(presetId))
+  }, [presetId])
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
     const initialState: Record<string, boolean> = {}
     TOKEN_GROUPS.forEach((group) => {
@@ -580,45 +645,8 @@ function ThemeTokenMatrix({
     return initialState
   })
 
-  useEffect(() => {
-    if (!lightProbeRef.current || !darkProbeRef.current) {
-      return
-    }
-    const lightStyles = getComputedStyle(lightProbeRef.current)
-    const darkStyles = getComputedStyle(darkProbeRef.current)
-    const nextLight: ThemeOverrides = {}
-    const nextDark: ThemeOverrides = {}
-
-    THEME_TOKENS.forEach((token) => {
-      const lightValue = lightStyles.getPropertyValue(`--${token}`).trim()
-      const darkValue = darkStyles.getPropertyValue(`--${token}`).trim()
-      if (lightValue) {
-        nextLight[token] = lightValue
-      }
-      if (darkValue) {
-        nextDark[token] = darkValue
-      }
-    })
-
-    setBaseLightValues(nextLight)
-    setBaseDarkValues(nextDark)
-  }, [presetId])
-
   return (
     <div className="flex flex-col gap-3">
-      <div
-        ref={lightProbeRef}
-        data-theme-mode="light"
-        data-theme-preset={presetId}
-        className="sr-only"
-      />
-      <div
-        ref={darkProbeRef}
-        data-theme-mode="dark"
-        data-theme-preset={presetId}
-        className="sr-only"
-      />
-
       <div className="flex flex-col gap-1">
         <h3 className="text-sm font-semibold">{t('Theme tokens')}</h3>
         {(lightParseError || darkParseError) && (
@@ -737,7 +765,7 @@ function ThemeTokenMatrix({
   )
 }
 
-export default function AdminThemeSettingsForm({
+function AdminThemeSettingsFormInner({
   presetOptions,
   initialThemeSettings,
   initialThemeSiteSettings,
@@ -769,22 +797,6 @@ export default function AdminThemeSettingsForm({
 
   const [lightOverrides, setLightOverrides] = useState<ThemeOverrides>(initialLightParse.data ?? {})
   const [darkOverrides, setDarkOverrides] = useState<ThemeOverrides>(initialDarkParse.data ?? {})
-
-  useEffect(() => {
-    setPreset(initialPreset)
-  }, [initialPreset])
-
-  useEffect(() => {
-    setRadius(initialRadius)
-  }, [initialRadius])
-
-  useEffect(() => {
-    setLightOverrides(initialLightParse.data ?? {})
-  }, [initialLightParse.data])
-
-  useEffect(() => {
-    setDarkOverrides(initialDarkParse.data ?? {})
-  }, [initialDarkParse.data])
   const parsedPreset = useMemo(
     () => validateThemePresetId(preset) ?? DEFAULT_THEME_PRESET_ID,
     [preset],
@@ -936,6 +948,7 @@ export default function AdminThemeSettingsForm({
             error={radiusValidation.error}
           />
           <ThemeTokenMatrix
+            key={parsedPreset}
             presetId={parsedPreset}
             lightOverrides={lightOverrides}
             darkOverrides={darkOverrides}
@@ -1005,4 +1018,18 @@ export default function AdminThemeSettingsForm({
       {state.error && <InputError message={state.error} />}
     </Form>
   )
+}
+
+export default function AdminThemeSettingsForm(props: AdminThemeSettingsFormProps) {
+  const formResetKey = useMemo(() => JSON.stringify({
+    presetOptions: props.presetOptions,
+    initialThemeSettings: props.initialThemeSettings,
+    initialThemeSiteSettings: props.initialThemeSiteSettings,
+  }), [
+    props.presetOptions,
+    props.initialThemeSettings,
+    props.initialThemeSiteSettings,
+  ])
+
+  return <AdminThemeSettingsFormInner key={formResetKey} {...props} />
 }

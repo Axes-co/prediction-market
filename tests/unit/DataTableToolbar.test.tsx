@@ -24,6 +24,11 @@ function createTableStub() {
   } as unknown as Table<unknown>
 }
 
+function getSearchInput() {
+  const [input] = screen.getAllByPlaceholderText('Search...')
+  return input
+}
+
 describe('dataTableToolbar', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -36,7 +41,7 @@ describe('dataTableToolbar', () => {
     vi.useRealTimers()
   })
 
-  it('does not emit a stale search value when search prop changes externally', () => {
+  it('does not emit a stale debounced search after an external override', () => {
     const table = createTableStub()
     const onSearchChange = vi.fn()
 
@@ -48,6 +53,8 @@ describe('dataTableToolbar', () => {
         enableColumnVisibility={false}
       />,
     )
+
+    fireEvent.change(getSearchInput(), { target: { value: 'alphamax' } })
 
     act(() => {
       rerender(
@@ -65,6 +72,7 @@ describe('dataTableToolbar', () => {
     act(() => {
       vi.advanceTimersByTime(300)
     })
+
     expect(onSearchChange).not.toHaveBeenCalled()
   })
 
@@ -92,8 +100,7 @@ describe('dataTableToolbar', () => {
       )
     })
 
-    const [input] = screen.getAllByPlaceholderText('Search...')
-    fireEvent.change(input, { target: { value: 'betamax' } })
+    fireEvent.change(getSearchInput(), { target: { value: 'betamax' } })
 
     act(() => {
       vi.advanceTimersByTime(299)

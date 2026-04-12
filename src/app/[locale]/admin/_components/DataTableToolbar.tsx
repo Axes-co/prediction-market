@@ -7,7 +7,6 @@ import { useExtracted } from 'next-intl'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
 import { DataTableViewOptions } from './DataTableViewOptions'
 
@@ -24,7 +23,7 @@ interface DataTableToolbarProps<TData> {
   searchLeadingIcon?: ReactNode
 }
 
-export function DataTableToolbar<TData>({
+function DataTableToolbarInner<TData>({
   table,
   search,
   onSearchChange,
@@ -38,29 +37,52 @@ export function DataTableToolbar<TData>({
 }: DataTableToolbarProps<TData>) {
   const t = useExtracted()
   const [searchInput, setSearchInput] = useState(search)
-  const debouncedSearchInput = useDebounce(searchInput, 300)
-  const skipNextDebouncedSyncRef = useRef(false)
+  const debounceTimeoutRef = useRef<number | null>(null)
+  const lastSubmittedSearchRef = useRef(search)
+  const searchRef = useRef(search)
+  searchRef.current = search
 
   useEffect(() => {
-    skipNextDebouncedSyncRef.current = true
-    setSearchInput(search)
-  }, [search])
+    return () => {
+      if (debounceTimeoutRef.current !== null) {
+        window.clearTimeout(debounceTimeoutRef.current)
+      }
+    }
+  }, [])
 
-  useEffect(() => {
-    if (skipNextDebouncedSyncRef.current) {
-      skipNextDebouncedSyncRef.current = false
+  function handleSearchInputChange(nextSearch: string) {
+    setSearchInput(nextSearch)
+
+    if (debounceTimeoutRef.current !== null) {
+      window.clearTimeout(debounceTimeoutRef.current)
+      debounceTimeoutRef.current = null
+    }
+
+    if (nextSearch === search) {
       return
     }
 
-    if (debouncedSearchInput !== searchInput || debouncedSearchInput === search) {
-      return
-    }
+    lastSubmittedSearchRef.current = searchRef.current
 
-    onSearchChange(debouncedSearchInput)
-  }, [debouncedSearchInput, onSearchChange, search, searchInput])
+    debounceTimeoutRef.current = window.setTimeout(() => {
+      const hasExternalSearchOverride = searchRef.current !== lastSubmittedSearchRef.current
+      if (hasExternalSearchOverride) {
+        debounceTimeoutRef.current = null
+        return
+      }
+
+      lastSubmittedSearchRef.current = nextSearch
+      onSearchChange(nextSearch)
+      debounceTimeoutRef.current = null
+    }, 300)
+  }
 
   const resolvedSearchPlaceholder = searchPlaceholder ?? t('Search...')
-  const isFiltered = searchInput.length > 0
+  const showPendingSearchInput
+    = debounceTimeoutRef.current !== null
+      && search === lastSubmittedSearchRef.current
+  const resolvedSearchInput = showPendingSearchInput ? searchInput : search
+  const isFiltered = resolvedSearchInput.length > 0
   const selectedRowsCount = table.getFilteredSelectedRowModel().rows.length
   const selectionSummary = enableSelection && selectedRowsCount > 0
     ? (
@@ -77,6 +99,11 @@ export function DataTableToolbar<TData>({
         <Button
           variant="ghost"
           onClick={() => {
+            if (debounceTimeoutRef.current !== null) {
+              window.clearTimeout(debounceTimeoutRef.current)
+              debounceTimeoutRef.current = null
+            }
+            lastSubmittedSearchRef.current = ''
             setSearchInput('')
             onSearchChange('')
           }}
@@ -111,8 +138,8 @@ export function DataTableToolbar<TData>({
           )}
           <Input
             placeholder={resolvedSearchPlaceholder}
-            value={searchInput}
-            onChange={event => setSearchInput(event.target.value)}
+            value={resolvedSearchInput}
+            onChange={event => handleSearchInputChange(event.target.value)}
             className={cn(
               'h-8 w-full',
               searchLeadingIcon && 'pl-8',
@@ -140,8 +167,8 @@ export function DataTableToolbar<TData>({
             )}
             <Input
               placeholder={resolvedSearchPlaceholder}
-              value={searchInput}
-              onChange={event => setSearchInput(event.target.value)}
+              value={resolvedSearchInput}
+              onChange={event => handleSearchInputChange(event.target.value)}
               className={cn(
                 'h-8 w-full sm:w-37.5 lg:w-62.5',
                 searchLeadingIcon && 'pl-8',
@@ -159,4 +186,8 @@ export function DataTableToolbar<TData>({
       </div>
     </div>
   )
+}
+
+export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
+  return <DataTableToolbarInner {...props} />
 }

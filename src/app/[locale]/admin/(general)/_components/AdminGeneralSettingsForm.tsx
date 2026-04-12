@@ -150,7 +150,7 @@ function SettingsAccordionSection({
   )
 }
 
-export default function AdminGeneralSettingsForm({
+function AdminGeneralSettingsFormInner({
   initialThemeSiteSettings,
   initialGlobalAnnouncement,
   initialTermsOfServicePdfPath,
@@ -203,8 +203,8 @@ export default function AdminGeneralSettingsForm({
   const [logoMode, setLogoMode] = useState(initialLogoMode)
   const [logoSvg, setLogoSvg] = useState(initialLogoSvg)
   const [logoImagePath, setLogoImagePath] = useState(initialLogoImagePath)
-  const [pwaIcon192Path, setPwaIcon192Path] = useState(initialPwaIcon192Path)
-  const [pwaIcon512Path, setPwaIcon512Path] = useState(initialPwaIcon512Path)
+  const [pwaIcon192Path] = useState(initialPwaIcon192Path)
+  const [pwaIcon512Path] = useState(initialPwaIcon512Path)
   const [googleAnalyticsId, setGoogleAnalyticsId] = useState(initialGoogleAnalyticsId)
   const [discordLink, setDiscordLink] = useState(initialDiscordLink)
   const [twitterLink, setTwitterLink] = useState(initialTwitterLink)
@@ -244,119 +244,6 @@ export default function AdminGeneralSettingsForm({
   const [pwaIcon192PreviewUrl, setPwaIcon192PreviewUrl] = useState<string | null>(null)
   const [pwaIcon512PreviewUrl, setPwaIcon512PreviewUrl] = useState<string | null>(null)
   const [openSections, setOpenSections] = useState<string[]>([])
-
-  useEffect(() => {
-    setSiteName(initialSiteName)
-  }, [initialSiteName])
-
-  useEffect(() => {
-    setSiteDescription(initialSiteDescription)
-  }, [initialSiteDescription])
-
-  useEffect(() => {
-    setLogoMode(initialLogoMode)
-  }, [initialLogoMode])
-
-  useEffect(() => {
-    setLogoSvg(initialLogoSvg)
-  }, [initialLogoSvg])
-
-  useEffect(() => {
-    setLogoImagePath(initialLogoImagePath)
-  }, [initialLogoImagePath])
-
-  useEffect(() => {
-    setPwaIcon192Path(initialPwaIcon192Path)
-  }, [initialPwaIcon192Path])
-
-  useEffect(() => {
-    setPwaIcon512Path(initialPwaIcon512Path)
-  }, [initialPwaIcon512Path])
-
-  useEffect(() => {
-    setGoogleAnalyticsId(initialGoogleAnalyticsId)
-  }, [initialGoogleAnalyticsId])
-
-  useEffect(() => {
-    setDiscordLink(initialDiscordLink)
-  }, [initialDiscordLink])
-
-  useEffect(() => {
-    setTwitterLink(initialTwitterLink)
-  }, [initialTwitterLink])
-
-  useEffect(() => {
-    setFacebookLink(initialFacebookLink)
-  }, [initialFacebookLink])
-
-  useEffect(() => {
-    setInstagramLink(initialInstagramLink)
-  }, [initialInstagramLink])
-
-  useEffect(() => {
-    setTiktokLink(initialTiktokLink)
-  }, [initialTiktokLink])
-
-  useEffect(() => {
-    setLinkedinLink(initialLinkedinLink)
-  }, [initialLinkedinLink])
-
-  useEffect(() => {
-    setYoutubeLink(initialYoutubeLink)
-  }, [initialYoutubeLink])
-
-  useEffect(() => {
-    setSupportUrl(initialSupportUrl)
-  }, [initialSupportUrl])
-
-  useEffect(() => {
-    setGlobalAnnouncementMessage(initialGlobalAnnouncementMessage)
-  }, [initialGlobalAnnouncementMessage])
-
-  useEffect(() => {
-    setGlobalAnnouncementLinkUrl(initialGlobalAnnouncementLinkUrl)
-  }, [initialGlobalAnnouncementLinkUrl])
-
-  useEffect(() => {
-    setGlobalAnnouncementDisabledOn(initialGlobalAnnouncementDisabledOn)
-  }, [initialGlobalAnnouncementDisabledOn])
-
-  useEffect(() => {
-    setTosPdfPath(initialTermsOfServicePdfPath)
-  }, [initialTermsOfServicePdfPath])
-
-  useEffect(() => {
-    setCustomJavascriptCodes(
-      initialCustomJavascriptCodes.map(code => createCustomJavascriptCodeDraft(nextCustomJavascriptCodeIdRef.current++, code)),
-    )
-  }, [initialCustomJavascriptCodes])
-
-  useEffect(() => {
-    setFeeRecipientWallet(initialFeeRecipientWallet)
-  }, [initialFeeRecipientWallet])
-
-  useEffect(() => {
-    setLifiIntegrator(initialLiFiIntegrator)
-  }, [initialLiFiIntegrator])
-
-  useEffect(() => {
-    setLifiApiKey(initialLiFiApiKey)
-  }, [initialLiFiApiKey])
-
-  useEffect(() => {
-    setOpenRouterModel(initialOpenRouterModel)
-    setOpenRouterSelectValue(initialOpenRouterModel || AUTOMATIC_MODEL_VALUE)
-  }, [initialOpenRouterModel])
-
-  useEffect(() => {
-    queueMicrotask(() => setOpenRouterModelOptions(openRouterSettings.modelOptions))
-  }, [openRouterSettings.modelOptions])
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      setOpenRouterModelsError(previous => (previous === openRouterSettings.modelsError ? previous : openRouterSettings.modelsError))
-    })
-  }, [openRouterSettings.modelsError])
 
   useEffect(() => {
     return () => {
@@ -1466,4 +1353,16 @@ export default function AdminGeneralSettingsForm({
       </div>
     </form>
   )
+}
+
+export default function AdminGeneralSettingsForm(props: AdminGeneralSettingsFormProps) {
+  const formResetKey = JSON.stringify({
+    initialThemeSiteSettings: props.initialThemeSiteSettings,
+    initialGlobalAnnouncement: props.initialGlobalAnnouncement,
+    initialTermsOfServicePdfPath: props.initialTermsOfServicePdfPath,
+    initialTermsOfServicePdfUrl: props.initialTermsOfServicePdfUrl,
+    openRouterSettings: props.openRouterSettings,
+  })
+
+  return <AdminGeneralSettingsFormInner key={formResetKey} {...props} />
 }

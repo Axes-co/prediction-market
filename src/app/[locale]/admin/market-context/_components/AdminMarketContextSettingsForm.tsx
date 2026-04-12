@@ -26,7 +26,7 @@ interface AdminMarketContextSettingsFormProps {
   variables: MarketContextVariable[]
 }
 
-export default function AdminMarketContextSettingsForm({
+function AdminMarketContextSettingsFormInner({
   defaultPrompt,
   isEnabled,
   variables,
@@ -41,14 +41,6 @@ export default function AdminMarketContextSettingsForm({
   const [liftedVariableKey, setLiftedVariableKey] = useState<string | null>(null)
   const [state, formAction, isPending] = useActionState(updateMarketContextSettingsAction, initialState)
   const wasPendingRef = useRef(isPending)
-
-  useEffect(() => {
-    setPromptValue(defaultPrompt)
-  }, [defaultPrompt])
-
-  useEffect(() => {
-    setEnabled(isEnabled)
-  }, [isEnabled])
 
   useEffect(() => {
     return () => {
@@ -264,4 +256,14 @@ export default function AdminMarketContextSettingsForm({
       </div>
     </Form>
   )
+}
+
+export default function AdminMarketContextSettingsForm(props: AdminMarketContextSettingsFormProps) {
+  const formResetKey = JSON.stringify({
+    defaultPrompt: props.defaultPrompt,
+    isEnabled: props.isEnabled,
+    variables: props.variables,
+  })
+
+  return <AdminMarketContextSettingsFormInner key={formResetKey} {...props} />
 }
