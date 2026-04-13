@@ -425,15 +425,16 @@ export default function PredictionResultsClient({
   const searchDebounceTimeoutRef = useRef<number | null>(null)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
   const infiniteScrollScopeKey = `${initialQuery}:${selectedSort}:${selectedStatus}:${isBookmarked}:${locale}:${routeMainTag}:${routeTag}`
-  const canRetryLoadMoreStateRef = useRef<{ key: string, value: boolean }>({ key: infiniteScrollScopeKey, value: true })
+  const [canRetryLoadMoreState, setCanRetryLoadMoreState] = useState<{ key: string, value: boolean }>({
+    key: infiniteScrollScopeKey,
+    value: true,
+  })
   const [infiniteScrollErrorState, setInfiniteScrollErrorState] = useState<{ key: string, value: string | null }>({
     key: infiniteScrollScopeKey,
     value: null,
   })
+  const canRetryLoadMore = canRetryLoadMoreState.key === infiniteScrollScopeKey ? canRetryLoadMoreState.value : true
   const infiniteScrollError = infiniteScrollErrorState.key === infiniteScrollScopeKey ? infiniteScrollErrorState.value : null
-  if (canRetryLoadMoreStateRef.current.key !== infiniteScrollScopeKey) {
-    canRetryLoadMoreStateRef.current = { key: infiniteScrollScopeKey, value: true }
-  }
   const canUseInitialData = !isBookmarked && selectedSort === initialSort && selectedStatus === initialStatus
 
   const {
@@ -489,12 +490,12 @@ export default function PredictionResultsClient({
     }
 
     const observer = new IntersectionObserver(([entry]) => {
-      if (!entry?.isIntersecting || !canRetryLoadMoreStateRef.current.value || isFetchingNextPage) {
+      if (!entry?.isIntersecting || !canRetryLoadMore || isFetchingNextPage) {
         return
       }
 
       void fetchNextPage().catch((fetchError: Error) => {
-        canRetryLoadMoreStateRef.current = { key: infiniteScrollScopeKey, value: false }
+        setCanRetryLoadMoreState({ key: infiniteScrollScopeKey, value: false })
         setInfiniteScrollErrorState({ key: infiniteScrollScopeKey, value: fetchError.message || 'Failed to load more results.' })
       })
     }, { rootMargin: '240px 0px' })
@@ -502,7 +503,7 @@ export default function PredictionResultsClient({
     observer.observe(loadMoreRef.current)
 
     return () => observer.disconnect()
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage, infiniteScrollScopeKey])
+  }, [canRetryLoadMore, fetchNextPage, hasNextPage, isFetchingNextPage, infiniteScrollScopeKey])
 
   const visibleEvents = useMemo(() => {
     const pages = data?.pages.flat() ?? initialEvents
@@ -565,10 +566,10 @@ export default function PredictionResultsClient({
   }
 
   function handleRetryLoadMore() {
-    canRetryLoadMoreStateRef.current = { key: infiniteScrollScopeKey, value: true }
+    setCanRetryLoadMoreState({ key: infiniteScrollScopeKey, value: true })
     setInfiniteScrollErrorState({ key: infiniteScrollScopeKey, value: null })
     void fetchNextPage().catch((fetchError: Error) => {
-      canRetryLoadMoreStateRef.current = { key: infiniteScrollScopeKey, value: false }
+      setCanRetryLoadMoreState({ key: infiniteScrollScopeKey, value: false })
       setInfiniteScrollErrorState({ key: infiniteScrollScopeKey, value: fetchError.message || 'Failed to load more results.' })
     })
   }
