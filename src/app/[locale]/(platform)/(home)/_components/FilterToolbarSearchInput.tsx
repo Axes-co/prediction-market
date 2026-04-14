@@ -25,7 +25,7 @@ interface FilterToolbarSearchInputFieldProps {
   onSearchChange: (search: string) => void
 }
 
-function FilterToolbarSearchInputField({
+function useFilterToolbarSearchInputFieldState({
   search,
   onSearchChange,
 }: FilterToolbarSearchInputFieldProps) {
@@ -78,16 +78,31 @@ function FilterToolbarSearchInputField({
     lastSubmittedSearchRef.current = search
   }, [search])
 
-  const iconClasses = 'pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground'
+  return {
+    inputRef,
+    handleInputChange,
+    searchPlaceholder: t('Search'),
+  }
+}
+
+function FilterToolbarSearchInputField({
+  search,
+  onSearchChange,
+}: FilterToolbarSearchInputFieldProps) {
+  const {
+    inputRef,
+    handleInputChange,
+    searchPlaceholder,
+  } = useFilterToolbarSearchInputFieldState({ search, onSearchChange })
 
   return (
     <div className="relative w-full md:w-44 lg:w-52 xl:w-56">
-      <SearchIcon className={iconClasses} />
+      <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         ref={inputRef}
         type="text"
         data-testid="filter-search-input"
-        placeholder={t('Search')}
+        placeholder={searchPlaceholder}
         defaultValue={search}
         onChange={handleInputChange}
         className={`

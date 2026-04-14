@@ -6,7 +6,8 @@ import { ArrowUpIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import dynamic from 'next/dynamic'
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import EventCategoryNote from '@/app/[locale]/(platform)/event/[slug]/_components/EventCategoryNote'
 import EventHeader from '@/app/[locale]/(platform)/event/[slug]/_components/EventHeader'
 import EventMarketChannelProvider from '@/app/[locale]/(platform)/event/[slug]/_components/EventMarketChannelProvider'
 import EventMarkets from '@/app/[locale]/(platform)/event/[slug]/_components/EventMarkets'
@@ -162,6 +163,57 @@ function resolveBootstrapTargetMarket(event: Event, marketSlug?: string) {
   return resolveDefaultMarket(event.markets) ?? null
 }
 
+interface WindowViewportSnapshot {
+  scrollY: number
+  viewportWidth: number
+}
+
+const DEFAULT_WINDOW_VIEWPORT_SNAPSHOT: WindowViewportSnapshot = {
+  scrollY: 0,
+  viewportWidth: 0,
+}
+
+let windowViewportSnapshot: WindowViewportSnapshot = DEFAULT_WINDOW_VIEWPORT_SNAPSHOT
+
+function subscribeWindowViewport(onStoreChange: () => void) {
+  if (typeof window === 'undefined') {
+    return () => {}
+  }
+
+  window.addEventListener('scroll', onStoreChange, { passive: true })
+  window.addEventListener('resize', onStoreChange)
+  return () => {
+    window.removeEventListener('scroll', onStoreChange)
+    window.removeEventListener('resize', onStoreChange)
+  }
+}
+
+function getWindowViewportSnapshot() {
+  if (typeof window === 'undefined') {
+    return DEFAULT_WINDOW_VIEWPORT_SNAPSHOT
+  }
+
+  const scrollY = window.scrollY
+  const viewportWidth = window.innerWidth
+  if (windowViewportSnapshot.scrollY === scrollY && windowViewportSnapshot.viewportWidth === viewportWidth) {
+    return windowViewportSnapshot
+  }
+
+  windowViewportSnapshot = {
+    scrollY,
+    viewportWidth,
+  }
+  return windowViewportSnapshot
+}
+
+function useWindowViewport() {
+  return useSyncExternalStore(
+    subscribeWindowViewport,
+    getWindowViewportSnapshot,
+    () => DEFAULT_WINDOW_VIEWPORT_SNAPSHOT,
+  )
+}
+
 function EventOrderQuerySync({ event, marketSlug, isMobile }: EventOrderQuerySyncProps) {
   const searchParams = useSearchParams()
   const setMarket = useOrder(state => state.setMarket)
@@ -255,6 +307,9 @@ export default function EventContent({
   const eventMarketsRef = useRef<HTMLDivElement | null>(null)
   const appliedMarketSlugRef = useRef<string | null>(null)
   const appliedEventIdRef = useRef<string | null>(null)
+  const windowViewport = useWindowViewport()
+  const scrollY = windowViewport.scrollY
+  const viewportWidth = windowViewport.viewportWidth
   const currentUser = clientUser ?? user
   const isNegRiskEnabled = Boolean(event.enable_neg_risk || event.neg_risk)
   const shouldHideChart = event.total_markets_count > 1 && !isNegRiskEnabled
@@ -275,8 +330,6 @@ export default function EventContent({
     return initialMarket.outcomes[0] ?? null
   }, [initialMarket])
   const [hasResolvedMobileBreakpoint, setHasResolvedMobileBreakpoint] = useState(false)
-  const [showBackToTop, setShowBackToTop] = useState(false)
-  const [backToTopBounds, setBackToTopBounds] = useState<{ left: number, width: number } | null>(null)
   const selectedMarket = useMemo(() => {
     if (!currentMarketId) {
       return initialMarket
@@ -294,6 +347,23 @@ export default function EventContent({
   const usesLiveSeriesChart = Boolean(liveChartConfig && shouldUseLiveSeriesChart(event, liveChartConfig))
   const shouldRenderMobileRelated = hasResolvedMobileBreakpoint && isMobile
   const shouldRenderDesktopRelated = hasResolvedMobileBreakpoint && !isMobile
+  const backToTopBounds = useMemo(() => {
+    if (isMobile || !contentRef.current || !eventMarketsRef.current) {
+      return null
+    }
+
+    const eventMarketsTop = eventMarketsRef.current.getBoundingClientRect().top + scrollY
+    if (scrollY < eventMarketsTop - 80) {
+      return null
+    }
+
+    const rect = contentRef.current.getBoundingClientRect()
+    const boundedWidth = viewportWidth > 0 ? Math.min(rect.width, viewportWidth) : rect.width
+    return {
+      left: rect.left,
+      width: boundedWidth,
+    }
+  }, [isMobile, scrollY, viewportWidth])
 
   useEffect(() => {
     let isActive = true
@@ -362,49 +432,6 @@ export default function EventContent({
     appliedEventIdRef.current = event.id
   }, [currentEventId, currentMarketId, event, marketSlug, orderBootstrapTargetMarket, setMarket, setOutcome])
 
-  useEffect(() => {
-    if (isMobile) {
-      setShowBackToTop(false)
-      setBackToTopBounds(null)
-      return
-    }
-
-    function handleScroll() {
-      if (!eventMarketsRef.current) {
-        setShowBackToTop(false)
-        return
-      }
-
-      const eventMarketsTop = eventMarketsRef.current.getBoundingClientRect().top + window.scrollY
-      setShowBackToTop(window.scrollY >= eventMarketsTop - 80)
-    }
-
-    handleScroll()
-    window.addEventListener('scroll', handleScroll)
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [isMobile])
-
-  useEffect(() => {
-    if (isMobile) {
-      setBackToTopBounds(null)
-      return
-    }
-
-    function handleResize() {
-      if (!contentRef.current) {
-        setBackToTopBounds(null)
-        return
-      }
-
-      const rect = contentRef.current.getBoundingClientRect()
-      setBackToTopBounds({ left: rect.left, width: rect.width })
-    }
-
-    handleResize()
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [isMobile])
-
   function handleBackToTop() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -418,6 +445,7 @@ export default function EventContent({
         </Suspense>
         <div className="grid gap-6 pt-5 pb-20 md:pb-0">
           <div className={cn(shouldHideChart ? 'grid gap-2' : 'grid gap-3')} ref={contentRef}>
+            <EventCategoryNote event={event} />
             <EventHeader event={event} />
 
             <div className={cn(shouldHideChart ? 'w-full' : 'min-h-96 w-full')}>
@@ -519,7 +547,7 @@ export default function EventContent({
           </aside>
         )}
 
-        {!isMobile && showBackToTop && backToTopBounds && (
+        {!isMobile && backToTopBounds && (
           <div
             className="pointer-events-none fixed bottom-6 hidden md:flex"
             style={{ left: `${backToTopBounds.left}px`, width: `${backToTopBounds.width}px` }}

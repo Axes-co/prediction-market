@@ -1318,6 +1318,7 @@ export default function AdminCreateEventForm({
   const lastDraftAutosaveFingerprintRef = useRef<string | null>(null)
   const contentCheckProgressRef = useRef<number | null>(null)
   const contentCheckFinishedTimeoutRef = useRef<number | null>(null)
+  const lastDraftLoadErrorMessageRef = useRef<string | null>(null)
   const lastPreSignChecksFingerprintRef = useRef<string | null>(null)
   const lastPreSignChecksCompletedRef = useRef(false)
   const lastPreSignChecksResultRef = useRef(false)
@@ -2157,7 +2158,6 @@ export default function AdminCreateEventForm({
       return
     }
 
-    setSignatureNowMs(Date.now())
     const timer = window.setInterval(() => {
       setSignatureNowMs(Date.now())
     }, SIGNATURE_COUNTDOWN_INTERVAL_MS)
@@ -2394,6 +2394,8 @@ export default function AdminCreateEventForm({
       || previous.serverDraftPayload !== serverDraftPayload
   })()
 
+  const initialSlugSeed = Math.floor(clientNowMs / 1000).toString()
+
   if (shouldSyncServerDraft) {
     serverDraftSyncDepsRef.current = {
       creationMode,
@@ -2412,7 +2414,7 @@ export default function AdminCreateEventForm({
     const source = serverDraftPayload
 
     if (!source) {
-      setSlugSeed(Math.floor(Date.now() / 1000).toString())
+      setSlugSeed(initialSlugSeed)
       setStoredAssets(normalizeEventCreationAssetPayload(serverAssetPayload))
     }
     else {
@@ -2436,7 +2438,7 @@ export default function AdminCreateEventForm({
         setSlugSeed(
           typeof parsed.slugSeed === 'string' && parsed.slugSeed.trim()
             ? parsed.slugSeed.trim()
-            : Math.floor(Date.now() / 1000).toString(),
+            : initialSlugSeed,
         )
         setTitleTemplate(typeof parsed.titleTemplate === 'string' ? parsed.titleTemplate : initialTitleTemplate)
         setSlugTemplate(typeof parsed.slugTemplate === 'string' ? parsed.slugTemplate : initialSlugTemplate)
@@ -2640,8 +2642,17 @@ export default function AdminCreateEventForm({
         setAreMultiOutcomesEditable(Boolean(parsed.areMultiOutcomesEditable))
       }
       catch (error) {
-        console.error('Error loading create-event draft:', error)
-        setSlugSeed(Math.floor(Date.now() / 1000).toString())
+        const draftLoadErrorMessage = error instanceof Error && error.message.trim()
+          ? error.message.trim()
+          : 'The saved draft could not be parsed.'
+        if (lastDraftLoadErrorMessageRef.current !== draftLoadErrorMessage) {
+          lastDraftLoadErrorMessageRef.current = draftLoadErrorMessage
+          toast.error('Failed to load saved draft.', {
+            id: 'admin-create-event-draft-load-error',
+            description: draftLoadErrorMessage,
+          })
+        }
+        setSlugSeed(initialSlugSeed)
       }
     }
   }
@@ -4322,6 +4333,7 @@ export default function AdminCreateEventForm({
         throw new Error(`Switch wallet to ${getChainLabel()} before signing auth.`)
       }
       setAuthChallengeExpiresAtMs(authPayload.expiresAt)
+      setSignatureNowMs(Date.now())
 
       const authSignature = await runWithSignaturePrompt(() => activeWalletClient.signTypedData({
         account: eoaAddress,
@@ -5246,6 +5258,20 @@ export default function AdminCreateEventForm({
       [key]: !previous[key],
     }))
   }, [])
+
+  const isStepFourPreSignChecksRunning = fundingCheckState === 'checking'
+    || allowedCreatorCheckState === 'checking'
+    || slugValidationState === 'checking'
+    || openRouterCheckState === 'checking'
+    || contentCheckState === 'checking'
+  const stepFourNextButtonContent = isStepValid(4)
+    ? 'Preview'
+    : (
+        <>
+          {isStepFourPreSignChecksRunning && <Loader2Icon className="mr-2 size-4 animate-spin" />}
+          {isStepFourPreSignChecksRunning ? 'Re-checking...' : 'Re-check'}
+        </>
+      )
 
   return (
     <form
@@ -7789,24 +7815,7 @@ export default function AdminCreateEventForm({
                   )
                 : currentStep === 4
                   ? (
-                      (() => {
-                        const allChecksOk = isStepValid(4)
-                        if (!allChecksOk) {
-                          const isChecking = fundingCheckState === 'checking'
-                            || allowedCreatorCheckState === 'checking'
-                            || slugValidationState === 'checking'
-                            || openRouterCheckState === 'checking'
-                            || contentCheckState === 'checking'
-                          return (
-                            <>
-                              {isChecking && <Loader2Icon className="mr-2 size-4 animate-spin" />}
-                              {isChecking ? 'Re-checking...' : 'Re-check'}
-                            </>
-                          )
-                        }
-
-                        return 'Preview'
-                      })()
+                      stepFourNextButtonContent
                     )
                   : (
                       <>

@@ -1,29 +1,29 @@
 import antfu from '@antfu/eslint-config'
 import eslintPluginBetterTailwindcss from 'eslint-plugin-better-tailwindcss'
 import reactYouMightNotNeedAnEffect from 'eslint-plugin-react-you-might-not-need-an-effect'
+import eslintPluginUseEncapsulation from 'eslint-plugin-use-encapsulation'
 
 export default antfu({
   react: true,
   nextjs: true,
-  ignores: ['AGENTS.md'],
+  ignores: ['AGENTS.md', 'tests'],
 }, {
   plugins: {
     'better-tailwindcss': eslintPluginBetterTailwindcss,
     'react-you-might-not-need-an-effect': reactYouMightNotNeedAnEffect,
+    'use-encapsulation': eslintPluginUseEncapsulation,
   },
   rules: {
     ...reactYouMightNotNeedAnEffect.configs.recommended.rules,
     ...eslintPluginBetterTailwindcss.configs['recommended-error'].rules,
+    'use-encapsulation/prefer-custom-hooks': ['off'],
     'node/prefer-global/process': 'off',
     'no-console': 'off',
-    'curly': ['error', 'all'],
-    'e18e/prefer-static-regex': 'off',
-    'react/no-array-index-key': 'off',
     'prefer-arrow-callback': ['error', { allowNamedFunctions: true }],
+    'curly': ['error', 'all'],
+    'react/no-array-index-key': 'off',
     'react-dom/no-dangerously-set-innerhtml': 'off',
     'react-refresh/only-export-components': 'off',
-    'react-hooks/set-state-in-effect': 'off',
-    'react-hooks-extra/no-direct-set-state-in-use-effect': 'off',
     'func-style': ['error', 'declaration', { allowArrowFunctions: false }],
     'better-tailwindcss/enforce-consistent-line-wrapping': ['error', {
       group: 'newLine',
