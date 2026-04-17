@@ -27,15 +27,17 @@ interface SportsEventAboutPanelProps {
   mode?: 'inline' | 'page'
 }
 
-export default function SportsEventAboutPanel({
+function useAboutPanelDerivations({
   event,
   rulesEvent,
   market,
-  marketContextEnabled = false,
-  mode = 'inline',
-}: SportsEventAboutPanelProps) {
-  const t = useExtracted()
-  const siteIdentity = useSiteIdentity()
+  siteIdentityName,
+}: {
+  event: SportsGamesCard['event']
+  rulesEvent?: SportsGamesCard['event'] | null
+  market: Market | null
+  siteIdentityName: string
+}) {
   const aboutRulesEvent = useMemo(() => {
     const sourceEvent = rulesEvent ?? event
     if (!market) {
@@ -60,16 +62,37 @@ export default function SportsEventAboutPanel({
       ],
     }
   }, [event, market, rulesEvent])
+
   const shouldShowResolution = useMemo(
     () => Boolean(market && shouldDisplayResolutionTimeline(market)),
     [market],
   )
+
   const resolutionDetailsUrl = useMemo(
     () => market
-      ? (buildUmaSettledUrl(market.condition, siteIdentity.name) ?? buildUmaProposeUrl(market.condition, siteIdentity.name))
+      ? (buildUmaSettledUrl(market.condition, siteIdentityName) ?? buildUmaProposeUrl(market.condition, siteIdentityName))
       : null,
-    [market, siteIdentity.name],
+    [market, siteIdentityName],
   )
+
+  return { aboutRulesEvent, shouldShowResolution, resolutionDetailsUrl }
+}
+
+export default function SportsEventAboutPanel({
+  event,
+  rulesEvent,
+  market,
+  marketContextEnabled = false,
+  mode = 'inline',
+}: SportsEventAboutPanelProps) {
+  const t = useExtracted()
+  const siteIdentity = useSiteIdentity()
+  const { aboutRulesEvent, shouldShowResolution, resolutionDetailsUrl } = useAboutPanelDerivations({
+    event,
+    rulesEvent,
+    market,
+    siteIdentityName: siteIdentity.name,
+  })
   const isInline = mode === 'inline'
 
   if (!isInline) {

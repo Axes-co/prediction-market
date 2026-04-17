@@ -86,13 +86,125 @@ function useRelatedEvents(params: UseRelatedEventsParams) {
   })
 }
 
+function useTabIndicator({
+  activeIndex,
+  tagItemsLength,
+  buttonsWrapperRef,
+  buttonRef,
+}: {
+  activeIndex: number
+  tagItemsLength: number
+  buttonsWrapperRef: React.RefObject<HTMLDivElement | null>
+  buttonRef: React.RefObject<(HTMLButtonElement | null)[]>
+}) {
+  const [backgroundStyle, setBackgroundStyle] = useState<BackgroundStyle>(INITIAL_BACKGROUND_STYLE)
+
+  const updateBackgroundPosition = useCallback(() => {
+    if (activeIndex === -1) {
+      setBackgroundStyle({ ...INITIAL_BACKGROUND_STYLE })
+      return
+    }
+
+    const activeButton = buttonRef.current[activeIndex]
+    const container = buttonsWrapperRef.current
+
+    if (!activeButton || !container) {
+      return
+    }
+
+    requestAnimationFrame(function applyButtonRect() {
+      const buttonRect = activeButton.getBoundingClientRect()
+      const containerRect = container.getBoundingClientRect()
+
+      setBackgroundStyle({
+        left: buttonRect.left - containerRect.left,
+        width: buttonRect.width,
+        height: buttonRect.height,
+        top: buttonRect.top - containerRect.top,
+        isInitialized: true,
+      })
+    })
+  }, [activeIndex, buttonRef, buttonsWrapperRef])
+
+  useEffect(function syncButtonRefArrayLength() {
+    buttonRef.current = Array.from({ length: tagItemsLength }).map((_, index) => buttonRef.current[index] ?? null)
+  }, [buttonRef, tagItemsLength])
+
+  useLayoutEffect(function repositionTabIndicatorOnChange() {
+    updateBackgroundPosition()
+  }, [updateBackgroundPosition, tagItemsLength, activeIndex])
+
+  return { backgroundStyle, updateBackgroundPosition }
+}
+
+function useHorizontalScrollShadows(scrollContainerRef: React.RefObject<HTMLDivElement | null>) {
+  const [showLeftShadow, setShowLeftShadow] = useState(false)
+  const [showRightShadow, setShowRightShadow] = useState(false)
+
+  const updateScrollShadows = useCallback(() => {
+    const container = scrollContainerRef.current
+    if (!container) {
+      setShowLeftShadow(false)
+      setShowRightShadow(false)
+      return
+    }
+
+    const { scrollLeft, scrollWidth, clientWidth } = container
+    const maxScrollLeft = scrollWidth - clientWidth
+
+    setShowLeftShadow(scrollLeft > 4)
+    setShowRightShadow(scrollLeft < maxScrollLeft - 4)
+  }, [scrollContainerRef])
+
+  return { showLeftShadow, showRightShadow, updateScrollShadows }
+}
+
+function useRelatedTabsScrollListeners({
+  scrollContainerRef,
+  tagItemsLength,
+  updateBackgroundPosition,
+  updateScrollShadows,
+}: {
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>
+  tagItemsLength: number
+  updateBackgroundPosition: () => void
+  updateScrollShadows: () => void
+}) {
+  useEffect(function attachTabScrollAndResizeListeners() {
+    const container = scrollContainerRef.current
+    if (!container) {
+      return
+    }
+
+    let resizeTimeout: ReturnType<typeof setTimeout>
+    function handleResize() {
+      clearTimeout(resizeTimeout)
+      resizeTimeout = setTimeout(function applyResizeUpdate() {
+        updateBackgroundPosition()
+        updateScrollShadows()
+      }, 16)
+    }
+
+    function handleContainerScroll() {
+      updateScrollShadows()
+      updateBackgroundPosition()
+    }
+
+    container.addEventListener('scroll', handleContainerScroll)
+    window.addEventListener('resize', handleResize)
+
+    return function detachTabScrollAndResizeListeners() {
+      container.removeEventListener('scroll', handleContainerScroll)
+      window.removeEventListener('resize', handleResize)
+      clearTimeout(resizeTimeout)
+    }
+  }, [scrollContainerRef, tagItemsLength, updateBackgroundPosition, updateScrollShadows])
+}
+
 export default function EventRelated({ event }: EventRelatedProps) {
   const t = useExtracted()
   const locale = useLocale()
   const [activeTagByEvent, setActiveTagByEvent] = useState<Record<string, string>>({})
-  const [backgroundStyle, setBackgroundStyle] = useState<BackgroundStyle>(INITIAL_BACKGROUND_STYLE)
-  const [showLeftShadow, setShowLeftShadow] = useState(false)
-  const [showRightShadow, setShowRightShadow] = useState(false)
   const activeTag = activeTagByEvent[event.slug] ?? 'all'
 
   const { data: events = [], isLoading: loading, error } = useRelatedEvents({
@@ -101,18 +213,6 @@ export default function EventRelated({ event }: EventRelatedProps) {
     locale,
   })
 
-  function resetBackgroundStyle() {
-    setBackgroundStyle({ ...INITIAL_BACKGROUND_STYLE })
-  }
-
-  function applyBackgroundStyle(style: BackgroundStyle) {
-    setBackgroundStyle(style)
-  }
-
-  function updateScrollShadowState(left: boolean, right: boolean) {
-    setShowLeftShadow(left)
-    setShowRightShadow(right)
-  }
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const buttonsWrapperRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<(HTMLButtonElement | null)[]>([])
@@ -149,87 +249,21 @@ export default function EventRelated({ event }: EventRelatedProps) {
     [activeTag, tagItems],
   )
 
-  useEffect(() => {
-    buttonRef.current = Array.from({ length: tagItems.length }).map((_, index) => buttonRef.current[index] ?? null)
-  }, [tagItems.length])
+  const { backgroundStyle, updateBackgroundPosition } = useTabIndicator({
+    activeIndex,
+    tagItemsLength: tagItems.length,
+    buttonsWrapperRef,
+    buttonRef,
+  })
 
-  const updateBackgroundPosition = useCallback(() => {
-    if (activeIndex === -1) {
-      resetBackgroundStyle()
-      return
-    }
+  const { showLeftShadow, showRightShadow, updateScrollShadows } = useHorizontalScrollShadows(scrollContainerRef)
 
-    const activeButton = buttonRef.current[activeIndex]
-    const container = buttonsWrapperRef.current
-
-    if (!activeButton || !container) {
-      return
-    }
-
-    requestAnimationFrame(() => {
-      const buttonRect = activeButton.getBoundingClientRect()
-      const containerRect = container.getBoundingClientRect()
-
-      const left = buttonRect.left - containerRect.left
-      const top = buttonRect.top - containerRect.top
-
-      applyBackgroundStyle({
-        left,
-        width: buttonRect.width,
-        height: buttonRect.height,
-        top,
-        isInitialized: true,
-      })
-    })
-  }, [activeIndex])
-
-  const updateScrollShadows = useCallback(() => {
-    const container = scrollContainerRef.current
-    if (!container) {
-      updateScrollShadowState(false, false)
-      return
-    }
-
-    const { scrollLeft, scrollWidth, clientWidth } = container
-    const maxScrollLeft = scrollWidth - clientWidth
-
-    updateScrollShadowState(scrollLeft > 4, scrollLeft < maxScrollLeft - 4)
-  }, [])
-
-  useLayoutEffect(() => {
-    updateBackgroundPosition()
-  }, [updateBackgroundPosition, tagItems.length, activeIndex])
-
-  useEffect(() => {
-    const container = scrollContainerRef.current
-
-    if (!container) {
-      return
-    }
-
-    let resizeTimeout: NodeJS.Timeout
-    function handleResize() {
-      clearTimeout(resizeTimeout)
-      resizeTimeout = setTimeout(() => {
-        updateBackgroundPosition()
-        updateScrollShadows()
-      }, 16)
-    }
-
-    function handleScroll() {
-      updateScrollShadows()
-      updateBackgroundPosition()
-    }
-
-    container.addEventListener('scroll', handleScroll)
-    window.addEventListener('resize', handleResize)
-
-    return () => {
-      container.removeEventListener('scroll', handleScroll)
-      window.removeEventListener('resize', handleResize)
-      clearTimeout(resizeTimeout)
-    }
-  }, [updateBackgroundPosition, updateScrollShadows, tagItems.length])
+  useRelatedTabsScrollListeners({
+    scrollContainerRef,
+    tagItemsLength: tagItems.length,
+    updateBackgroundPosition,
+    updateScrollShadows,
+  })
 
   function handleTagClick(slug: string, index: number) {
     setActiveTagByEvent((current) => {

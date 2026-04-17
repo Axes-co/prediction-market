@@ -1,8 +1,9 @@
 'use client'
 
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import PublicActivityList from '@/app/[locale]/(platform)/profile/_components/PublicActivityList'
 import PublicPositionsList from '@/app/[locale]/(platform)/profile/_components/PublicPositionsList'
+import { useTabIndicatorPosition } from '@/hooks/useTabIndicatorPosition'
 import { cn } from '@/lib/utils'
 
 type TabType = 'positions' | 'activity'
@@ -16,31 +17,16 @@ interface PublicProfileTabsProps {
   userAddress: string
 }
 
-export default function PublicProfileTabs({ userAddress }: PublicProfileTabsProps) {
+function usePublicProfileTabs() {
   const [activeTab, setActiveTab] = useState<TabType>('positions')
-  const tabRef = useRef<(HTMLButtonElement | null)[]>([])
-  const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0 })
-  const [isInitialized, setIsInitialized] = useState(false)
   const tabs = useMemo(() => baseTabs, [])
+  const { tabRef, indicatorStyle, isInitialized } = useTabIndicatorPosition({ tabs, activeTab })
 
-  useLayoutEffect(() => {
-    const activeTabIndex = tabs.findIndex(tab => tab.id === activeTab)
-    const activeTabElement = tabRef.current[activeTabIndex]
+  return { tabs, activeTab, setActiveTab, tabRef, indicatorStyle, isInitialized }
+}
 
-    if (activeTabElement) {
-      const { offsetLeft, offsetWidth } = activeTabElement
-
-      queueMicrotask(() => {
-        setIndicatorStyle(prev => ({
-          ...prev,
-          left: offsetLeft,
-          width: offsetWidth,
-        }))
-
-        setIsInitialized(prev => prev || true)
-      })
-    }
-  }, [activeTab, tabs])
+export default function PublicProfileTabs({ userAddress }: PublicProfileTabsProps) {
+  const { tabs, activeTab, setActiveTab, tabRef, indicatorStyle, isInitialized } = usePublicProfileTabs()
 
   return (
     <div className="overflow-hidden rounded-2xl border">

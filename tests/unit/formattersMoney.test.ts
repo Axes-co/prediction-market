@@ -71,6 +71,11 @@ describe('money/price formatters', () => {
     expect(formatTimeAgo(new Date(Date.now()).toISOString())).toMatch(/s ago$/)
   })
 
+  it('formatTimeAgo clamps near-future timestamps to 0s ago', () => {
+    const futureDate = new Date(Date.now() + 500).toISOString()
+    expect(formatTimeAgo(futureDate)).toBe('0s ago')
+  })
+
   it('truncateAddress shortens and handles empty', () => {
     expect(truncateAddress('')).toBe('')
     expect(truncateAddress('0x1234567890abcdef')).toBe('0x12…abcdef')

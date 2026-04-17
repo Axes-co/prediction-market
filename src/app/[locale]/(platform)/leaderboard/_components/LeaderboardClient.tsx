@@ -2,6 +2,7 @@
 
 import type { Route } from 'next'
 import type { LeaderboardFilters } from '@/app/[locale]/(platform)/leaderboard/_utils/leaderboardFilters'
+import type { User } from '@/types'
 import { ChevronLeftIcon, ChevronRightIcon, MoveRightIcon, SearchIcon } from 'lucide-react'
 import Image from 'next/image'
 import { useEffect, useMemo, useState } from 'react'
@@ -302,37 +303,67 @@ function sortEntriesForDisplay(
   }))
 }
 
-export default function LeaderboardClient({ initialFilters }: { initialFilters: LeaderboardFilters }) {
+function useLeaderboardFilters(initialFilters: LeaderboardFilters) {
   const router = useRouter()
-  const user = useUser()
   const initialFiltersKey = buildFiltersKey(initialFilters)
   const [filtersState, setFiltersState] = useState<{ key: string, value: LeaderboardFilters }>(() => ({
     key: initialFiltersKey,
     value: initialFilters,
   }))
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([])
-  const [loadedLeaderboardKey, setLoadedLeaderboardKey] = useState<string | null>(null)
+  const filters = filtersState.key === initialFiltersKey ? filtersState.value : initialFilters
+
+  function updateFilters(next: LeaderboardFilters) {
+    setFiltersState({
+      key: initialFiltersKey,
+      value: next,
+    })
+    const nextPath = buildLeaderboardPath(next) as Route
+    router.push(nextPath)
+  }
+
+  return { filters, updateFilters }
+}
+
+function useDebouncedLeaderboardSearch() {
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
-  const filters = filtersState.key === initialFiltersKey ? filtersState.value : initialFilters
-  const leaderboardScopeKey = buildLeaderboardScopeKey(filters, searchQuery)
+
+  useEffect(function syncDebouncedSearchQuery() {
+    const timeoutId = window.setTimeout(() => {
+      setSearchQuery(searchInput.trim())
+    }, 300)
+
+    return function cancelDebouncedSearchTimeout() {
+      window.clearTimeout(timeoutId)
+    }
+  }, [searchInput])
+
+  return { searchInput, setSearchInput, searchQuery }
+}
+
+function useLeaderboardPagination(scopeKey: string) {
   const [pageState, setPageState] = useState<{ key: string, value: number }>({
-    key: leaderboardScopeKey,
+    key: scopeKey,
     value: 1,
   })
-  const page = pageState.key === leaderboardScopeKey ? pageState.value : 1
-  const leaderboardRequestKey = `${leaderboardScopeKey}:${page}`
-  const isLoading = loadedLeaderboardKey !== leaderboardRequestKey
-  const [userEntry, setUserEntry] = useState<LeaderboardEntry | null>(null)
-  const initialBiggestWinsKey = `${resolveCategoryApiValue(initialFilters.category)}:${resolvePeriodApiValue(initialFilters.period)}`
-  const initialBiggestWins = BIGGEST_WINS_CACHE.get(initialBiggestWinsKey) ?? []
-  const [biggestWins, setBiggestWins] = useState<BiggestWinEntry[]>(initialBiggestWins)
-  const [isBiggestWinsLoading, setIsBiggestWinsLoading] = useState(!BIGGEST_WINS_CACHE.has(initialBiggestWinsKey))
-  const userAddress = useMemo(
-    () => (user?.proxy_wallet_address ?? user?.address ?? '').trim(),
-    [user?.address, user?.proxy_wallet_address],
-  )
-  const currentFilters = useMemo<LeaderboardFilters>(
+  const page = pageState.key === scopeKey ? pageState.value : 1
+
+  function setPageValue(nextPage: number | ((currentPage: number) => number)) {
+    setPageState((currentState) => {
+      const currentPage = currentState.key === scopeKey ? currentState.value : 1
+      const resolvedPage = typeof nextPage === 'function' ? nextPage(currentPage) : nextPage
+      return {
+        key: scopeKey,
+        value: Math.max(1, resolvedPage),
+      }
+    })
+  }
+
+  return { page, setPageValue }
+}
+
+function useCurrentLeaderboardFilters(filters: LeaderboardFilters) {
+  return useMemo<LeaderboardFilters>(
     () => ({
       category: filters.category,
       period: filters.period,
@@ -340,16 +371,35 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
     }),
     [filters.category, filters.period, filters.order],
   )
+}
 
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      setSearchQuery(searchInput.trim())
-    }, 300)
+function useLeaderboardUserAddress() {
+  const user = useUser()
+  const userAddress = useMemo(
+    () => (user?.proxy_wallet_address ?? user?.address ?? '').trim(),
+    [user?.address, user?.proxy_wallet_address],
+  )
+  return { user, userAddress }
+}
 
-    return () => window.clearTimeout(timeoutId)
-  }, [searchInput])
+function useLeaderboardEntries({
+  filters,
+  currentFilters,
+  searchQuery,
+  page,
+  leaderboardRequestKey,
+}: {
+  filters: LeaderboardFilters
+  currentFilters: LeaderboardFilters
+  searchQuery: string
+  page: number
+  leaderboardRequestKey: string
+}) {
+  const [entries, setEntries] = useState<LeaderboardEntry[]>([])
+  const [loadedLeaderboardKey, setLoadedLeaderboardKey] = useState<string | null>(null)
+  const isLoading = loadedLeaderboardKey !== leaderboardRequestKey
 
-  useEffect(() => {
+  useEffect(function loadLeaderboardEntries() {
     const controller = new AbortController()
 
     const params = new URLSearchParams({
@@ -391,10 +441,26 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
         }
       })
 
-    return () => controller.abort()
+    return function abortLeaderboardEntriesRequest() {
+      controller.abort()
+    }
   }, [filters.category, filters.period, filters.order, searchQuery, page, leaderboardRequestKey, currentFilters])
 
-  useEffect(() => {
+  return { entries, isLoading }
+}
+
+function useLeaderboardUserEntry({
+  filters,
+  currentFilters,
+  userAddress,
+}: {
+  filters: LeaderboardFilters
+  currentFilters: LeaderboardFilters
+  userAddress: string
+}) {
+  const [userEntry, setUserEntry] = useState<LeaderboardEntry | null>(null)
+
+  useEffect(function loadLeaderboardUserEntry() {
     if (!userAddress) {
       return
     }
@@ -438,10 +504,21 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
         setUserEntry(null)
       })
 
-    return () => controller.abort()
+    return function abortLeaderboardUserEntryRequest() {
+      controller.abort()
+    }
   }, [filters.category, filters.period, filters.order, userAddress, currentFilters])
 
-  useEffect(() => {
+  return userEntry
+}
+
+function useBiggestWins(initialFilters: LeaderboardFilters, filters: LeaderboardFilters) {
+  const initialBiggestWinsKey = `${resolveCategoryApiValue(initialFilters.category)}:${resolvePeriodApiValue(initialFilters.period)}`
+  const initialBiggestWins = BIGGEST_WINS_CACHE.get(initialBiggestWinsKey) ?? []
+  const [biggestWins, setBiggestWins] = useState<BiggestWinEntry[]>(initialBiggestWins)
+  const [isBiggestWinsLoading, setIsBiggestWinsLoading] = useState(!BIGGEST_WINS_CACHE.has(initialBiggestWinsKey))
+
+  useEffect(function loadBiggestWins() {
     const category = resolveCategoryApiValue(filters.category)
     const period = resolvePeriodApiValue(filters.period)
     const cacheKey = `${category}:${period}`
@@ -481,35 +558,107 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
         }
       })
 
-    return () => {
+    return function cancelBiggestWinsRequest() {
       isActive = false
     }
   }, [filters.category, filters.period])
 
-  const categoryLabel = useMemo(
-    () => CATEGORY_OPTIONS.find(option => option.value === filters.category)?.label ?? 'All Categories',
-    [filters.category],
+  return { biggestWins, isBiggestWinsLoading }
+}
+
+function useLeaderboardCategoryLabel(category: LeaderboardFilters['category']) {
+  return useMemo(
+    () => CATEGORY_OPTIONS.find(option => option.value === category)?.label ?? 'All Categories',
+    [category],
   )
+}
 
-  function updateFilters(next: LeaderboardFilters) {
-    setFiltersState({
-      key: initialFiltersKey,
-      value: next,
-    })
-    const nextPath = buildLeaderboardPath(next) as Route
-    router.push(nextPath)
-  }
+function useBiggestWinsPeriodLabel(period: LeaderboardFilters['period']) {
+  return useMemo(() => {
+    switch (period) {
+      case 'today':
+        return 'today'
+      case 'weekly':
+        return 'this week'
+      case 'monthly':
+        return 'this month'
+      case 'all':
+        return 'all time'
+      default:
+        return 'this month'
+    }
+  }, [period])
+}
 
-  function setPageValue(nextPage: number | ((currentPage: number) => number)) {
-    setPageState((currentState) => {
-      const currentPage = currentState.key === leaderboardScopeKey ? currentState.value : 1
-      const resolvedPage = typeof nextPage === 'function' ? nextPage(currentPage) : nextPage
-      return {
-        key: leaderboardScopeKey,
-        value: Math.max(1, resolvedPage),
-      }
-    })
-  }
+function usePinnedLeaderboardEntry({
+  entries,
+  userAddress,
+  userEntry,
+  user,
+}: {
+  entries: LeaderboardEntry[]
+  userAddress: string
+  userEntry: LeaderboardEntry | null
+  user: User | null
+}) {
+  return useMemo(() => {
+    if (!userAddress) {
+      return null
+    }
+
+    const normalizedUserAddress = normalizeWalletAddress(userAddress)
+    const visibleEntry = entries.find(entry => normalizeWalletAddress(entry.proxyWallet) === normalizedUserAddress)
+    const sourceEntry = visibleEntry ?? userEntry
+    const address = sourceEntry?.proxyWallet || userAddress
+    const rawUsername = sourceEntry?.userName || sourceEntry?.xUsername || user?.username || ''
+    const username = rawUsername || address
+    const rankNumber = Number(sourceEntry?.rank ?? Number.NaN)
+    const medalSrc = rankNumber === 1
+      ? '/images/medals/gold.svg'
+      : rankNumber === 2
+        ? '/images/medals/silver.svg'
+        : rankNumber === 3
+          ? '/images/medals/bronze.svg'
+          : null
+    const medalAlt = rankNumber === 1
+      ? 'Gold medal'
+      : rankNumber === 2
+        ? 'Silver medal'
+        : rankNumber === 3
+          ? 'Bronze medal'
+          : ''
+
+    return {
+      rank: sourceEntry?.rank ?? '—',
+      address,
+      username,
+      profileImage: sourceEntry?.profileImage || user?.image || '',
+      pnl: sourceEntry?.pnl,
+      vol: sourceEntry?.vol,
+      medalSrc,
+      medalAlt,
+    }
+  }, [entries, userAddress, userEntry, user?.image, user?.username])
+}
+
+export default function LeaderboardClient({ initialFilters }: { initialFilters: LeaderboardFilters }) {
+  const { filters, updateFilters } = useLeaderboardFilters(initialFilters)
+  const { user, userAddress } = useLeaderboardUserAddress()
+  const { searchInput, setSearchInput, searchQuery } = useDebouncedLeaderboardSearch()
+  const leaderboardScopeKey = buildLeaderboardScopeKey(filters, searchQuery)
+  const { page, setPageValue } = useLeaderboardPagination(leaderboardScopeKey)
+  const leaderboardRequestKey = `${leaderboardScopeKey}:${page}`
+  const currentFilters = useCurrentLeaderboardFilters(filters)
+  const { entries, isLoading } = useLeaderboardEntries({
+    filters,
+    currentFilters,
+    searchQuery,
+    page,
+    leaderboardRequestKey,
+  })
+  const userEntry = useLeaderboardUserEntry({ filters, currentFilters, userAddress })
+  const { biggestWins, isBiggestWinsLoading } = useBiggestWins(initialFilters, filters)
+  const categoryLabel = useLeaderboardCategoryLabel(filters.category)
 
   const rowClassName = cn(
     `
@@ -551,58 +700,8 @@ export default function LeaderboardClient({ initialFilters }: { initialFilters: 
   )
 
   const selectedPeriod = filters.period
-  const biggestWinsPeriodLabel = useMemo(() => {
-    switch (filters.period) {
-      case 'today':
-        return 'today'
-      case 'weekly':
-        return 'this week'
-      case 'monthly':
-        return 'this month'
-      case 'all':
-        return 'all time'
-      default:
-        return 'this month'
-    }
-  }, [filters.period])
-  const pinnedEntry = useMemo(() => {
-    if (!userAddress) {
-      return null
-    }
-
-    const normalizedUserAddress = normalizeWalletAddress(userAddress)
-    const visibleEntry = entries.find(entry => normalizeWalletAddress(entry.proxyWallet) === normalizedUserAddress)
-    const sourceEntry = visibleEntry ?? userEntry
-    const address = sourceEntry?.proxyWallet || userAddress
-    const rawUsername = sourceEntry?.userName || sourceEntry?.xUsername || user?.username || ''
-    const username = rawUsername || address
-    const rankNumber = Number(sourceEntry?.rank ?? Number.NaN)
-    const medalSrc = rankNumber === 1
-      ? '/images/medals/gold.svg'
-      : rankNumber === 2
-        ? '/images/medals/silver.svg'
-        : rankNumber === 3
-          ? '/images/medals/bronze.svg'
-          : null
-    const medalAlt = rankNumber === 1
-      ? 'Gold medal'
-      : rankNumber === 2
-        ? 'Silver medal'
-        : rankNumber === 3
-          ? 'Bronze medal'
-          : ''
-
-    return {
-      rank: sourceEntry?.rank ?? '—',
-      address,
-      username,
-      profileImage: sourceEntry?.profileImage || user?.image || '',
-      pnl: sourceEntry?.pnl,
-      vol: sourceEntry?.vol,
-      medalSrc,
-      medalAlt,
-    }
-  }, [entries, userAddress, userEntry, user?.image, user?.username])
+  const biggestWinsPeriodLabel = useBiggestWinsPeriodLabel(filters.period)
+  const pinnedEntry = usePinnedLeaderboardEntry({ entries, userAddress, userEntry, user })
   const pinnedProfitValue = pinnedEntry?.pnl
   const pinnedVolumeValue = pinnedEntry?.vol
   const pinnedProfitLabel = Number.isFinite(pinnedProfitValue)

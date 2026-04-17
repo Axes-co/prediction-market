@@ -33,6 +33,19 @@ interface ProfileOverviewCardProps {
   enableLiveValue?: boolean
 }
 
+function useJoinedDateLabel(joinedAt: string | undefined) {
+  return useMemo(() => {
+    if (!joinedAt) {
+      return null
+    }
+    const date = new Date(joinedAt)
+    if (Number.isNaN(date.getTime())) {
+      return null
+    }
+    return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  }, [joinedAt])
+}
+
 export default function ProfileOverviewCard({
   profile,
   snapshot,
@@ -68,16 +81,7 @@ export default function ProfileOverviewCard({
   const avatarFallbackStyle = showPlaceholder
     ? getAvatarPlaceholderStyle(avatarSeed)
     : undefined
-  const joinedText = useMemo(() => {
-    if (!profile.joinedAt) {
-      return null
-    }
-    const date = new Date(profile.joinedAt)
-    if (Number.isNaN(date.getTime())) {
-      return null
-    }
-    return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-  }, [profile.joinedAt])
+  const joinedText = useJoinedDateLabel(profile.joinedAt)
 
   const positionsValueLabel = Math.abs(positionsValue) >= 100_000
     ? formatCompactCurrency(positionsValue)

@@ -1,10 +1,11 @@
 'use client'
 
+import type { InfiniteData } from '@tanstack/react-query'
 import type { FilterState } from '@/app/[locale]/(platform)/_providers/FilterProvider'
 import type { Event } from '@/types'
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query'
 import { useLocale } from 'next-intl'
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import EventCardSkeleton from '@/app/[locale]/(platform)/(home)/_components/EventCardSkeleton'
 import EventsGridSkeleton from '@/app/[locale]/(platform)/(home)/_components/EventsGridSkeleton'
 import EventsStaticGrid from '@/app/[locale]/(platform)/(home)/_components/EventsStaticGrid'
@@ -15,6 +16,7 @@ import { buildMarketTargets } from '@/app/[locale]/(platform)/event/[slug]/_hook
 import { useColumns } from '@/hooks/useColumns'
 import { useCurrentTimestamp } from '@/hooks/useCurrentTimestamp'
 import { useDebounce } from '@/hooks/useDebounce'
+import { useHasHydrated } from '@/hooks/useHasHydrated'
 import { fetchEventsApi } from '@/lib/events-api'
 import { HOME_EVENTS_PAGE_SIZE, isHomeEventResolvedLike } from '@/lib/home-events'
 import { resolveDisplayPrice } from '@/lib/market-chance'
@@ -89,18 +91,6 @@ function setHydratedEventsSnapshot(key: string, events: Event[]) {
   }
 }
 
-function subscribeToHydrationStore() {
-  return function unsubscribeFromHydrationStore() {}
-}
-
-function getHydratedClientSnapshot() {
-  return true
-}
-
-function getHydratedServerSnapshot() {
-  return false
-}
-
 async function fetchEvents({
   pageParam = 0,
   currentTimestamp,
@@ -129,89 +119,25 @@ async function fetchEvents({
   })
 }
 
-export default function HydratedEventsGrid({
-  filters,
-  initialEvents = EMPTY_EVENTS,
-  initialCurrentTimestamp,
-  maxColumns,
-  onClearFilters,
-  routeMainTag,
-  routeTag,
-}: HydratedEventsGridProps) {
-  const locale = useLocale()
-  const parentRef = useRef<HTMLDivElement | null>(null)
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
-  const canRetryLoadMoreAfterErrorRef = useRef(true)
-  const user = useUser()
-  const queryUserScope = user?.id ?? 'guest'
-  const currentTimestamp = useCurrentTimestamp({
-    initialTimestamp: initialCurrentTimestamp,
-    intervalMs: HOME_FEED_REFRESH_INTERVAL_MS,
-  })
-  const hasHydrated = useSyncExternalStore(
-    subscribeToHydrationStore,
-    getHydratedClientSnapshot,
-    getHydratedServerSnapshot,
-  )
-  const snapshotKey = [
-    locale,
-    routeMainTag,
-    routeTag,
-    filters.tag,
-    filters.mainTag,
-    filters.search,
-    filters.bookmarked ? 'bookmarked' : 'all-events',
-    queryUserScope,
-    filters.frequency,
-    filters.status,
-    filters.hideSports ? 'hide-sports' : 'show-sports',
-    filters.hideCrypto ? 'hide-crypto' : 'show-crypto',
-    filters.hideEarnings ? 'hide-earnings' : 'show-earnings',
-  ].join(':')
-  const isRouteInitialState = filters.tag === routeTag
-    && filters.mainTag === routeMainTag
-    && filters.search === ''
-    && !filters.bookmarked
-    && filters.frequency === 'all'
-    && filters.status === 'active'
-    && !filters.hideSports
-    && !filters.hideCrypto
-    && !filters.hideEarnings
-  const initialSnapshotEvents = isRouteInitialState ? initialEvents : EMPTY_EVENTS
-  const PAGE_SIZE = HOME_EVENTS_PAGE_SIZE
-  const shouldUseInitialData = isRouteInitialState
-    && initialEvents.length > 0
-    && queryUserScope === 'guest'
-  const shouldAutoRefreshEvents = filters.status === 'active'
-  const resolvedCurrentTimestamp = currentTimestamp ?? initialCurrentTimestamp
-  const queryRunKey = [
-    locale,
-    routeMainTag,
-    routeTag,
-    filters.tag,
-    filters.mainTag,
-    filters.search,
-    filters.bookmarked ? 'bookmarked' : 'all-events',
-    queryUserScope,
-    filters.frequency,
-    filters.status,
-    filters.hideSports ? 'hide-sports' : 'show-sports',
-    filters.hideCrypto ? 'hide-crypto' : 'show-crypto',
-    filters.hideEarnings ? 'hide-earnings' : 'show-earnings',
-  ].join(':')
-  const loadMoreStateKey = [
-    filters.tag,
-    filters.mainTag,
-    filters.search,
-    filters.bookmarked ? 'bookmarked' : 'all-events',
-    filters.frequency,
-    filters.status,
-    filters.hideSports ? 'hide-sports' : 'show-sports',
-    filters.hideCrypto ? 'hide-crypto' : 'show-crypto',
-    filters.hideEarnings ? 'hide-earnings' : 'show-earnings',
-    locale,
-    queryUserScope,
-  ].join(':')
+interface UseEventsRefetchOnTimestampParams {
+  queryRunKey: string
+  resolvedCurrentTimestamp: number | null
+  status: string
+  isFetching: boolean
+  isFetchingNextPage: boolean
+  refetch: () => Promise<unknown>
+  shouldAutoRefreshEvents: boolean
+}
+
+function useEventsRefetchOnTimestamp({
+  queryRunKey,
+  resolvedCurrentTimestamp,
+  status,
+  isFetching,
+  isFetchingNextPage,
+  refetch,
+  shouldAutoRefreshEvents,
+}: UseEventsRefetchOnTimestampParams) {
   const queryTimestampRef = useRef<{
     key: string
     timestamp: number | null
@@ -219,62 +145,6 @@ export default function HydratedEventsGrid({
     key: queryRunKey,
     timestamp: resolvedCurrentTimestamp,
   })
-  const previousLoadMoreStateKeyRef = useRef(loadMoreStateKey)
-  const [infiniteScrollErrorState, setInfiniteScrollErrorState] = useState<{
-    key: string
-    value: string | null
-  }>({
-    key: loadMoreStateKey,
-    value: null,
-  })
-  const infiniteScrollError = infiniteScrollErrorState.key === loadMoreStateKey
-    ? infiniteScrollErrorState.value
-    : null
-
-  const eventsQueryKey = [
-    'events',
-    filters.tag,
-    filters.mainTag,
-    filters.search,
-    filters.bookmarked,
-    filters.frequency,
-    filters.status,
-    filters.hideSports,
-    filters.hideCrypto,
-    filters.hideEarnings,
-    locale,
-    queryUserScope,
-  ]
-
-  const {
-    status,
-    data,
-    dataUpdatedAt,
-    isFetching,
-    isFetchingNextPage,
-    fetchNextPage,
-    hasNextPage,
-    isPending,
-    refetch,
-  } = useInfiniteQuery({
-    queryKey: eventsQueryKey,
-    queryFn: ({ pageParam }) => fetchEvents({
-      pageParam,
-      currentTimestamp: resolvedCurrentTimestamp,
-      filters,
-      locale,
-    }),
-    getNextPageParam: (lastPage, allPages) => lastPage.length === PAGE_SIZE ? allPages.length * PAGE_SIZE : undefined,
-    initialPageParam: 0,
-    initialData: shouldUseInitialData ? { pages: [initialEvents], pageParams: [0] } : undefined,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    staleTime: 'static',
-    initialDataUpdatedAt: 0,
-    placeholderData: keepPreviousData,
-  })
-
-  const [livePriceEventIds, setLivePriceEventIds] = useState<string[]>([])
 
   useEffect(function syncQueryTimestampForCurrentQueryKey() {
     if (queryTimestampRef.current.key === queryRunKey) {
@@ -287,16 +157,7 @@ export default function HydratedEventsGrid({
     }
   }, [queryRunKey, resolvedCurrentTimestamp])
 
-  useEffect(function resetLoadMoreRetryStateOnQueryScopeChange() {
-    if (previousLoadMoreStateKeyRef.current === loadMoreStateKey) {
-      return
-    }
-
-    previousLoadMoreStateKeyRef.current = loadMoreStateKey
-    canRetryLoadMoreAfterErrorRef.current = true
-  }, [loadMoreStateKey])
-
-  useEffect(() => {
+  useEffect(function refetchEventsWhenTimestampWindowElapses() {
     if (!shouldAutoRefreshEvents || status !== 'success') {
       return
     }
@@ -345,10 +206,22 @@ export default function HydratedEventsGrid({
     shouldAutoRefreshEvents,
     status,
   ])
+}
 
+interface UseHydratedEventsListParams {
+  data: InfiniteData<Event[], unknown> | undefined
+  snapshotKey: string
+  status: string
+  initialSnapshotEvents: Event[]
+}
+
+function useHydratedEventsList({
+  data,
+  snapshotKey,
+  status,
+  initialSnapshotEvents,
+}: UseHydratedEventsListParams) {
   const allEvents = useMemo(() => (data ? data.pages.flat() : []), [data])
-  const hasFreshQueryData = !shouldUseInitialData || dataUpdatedAt > 0
-
   const visibleEvents = useMemo(
     () => (allEvents.length === 0 ? EMPTY_EVENTS : allEvents),
     [allEvents],
@@ -358,7 +231,7 @@ export default function HydratedEventsGrid({
     [initialSnapshotEvents, snapshotKey],
   )
 
-  useEffect(() => {
+  useEffect(function persistVisibleEventsSnapshot() {
     if (visibleEvents.length === 0) {
       return
     }
@@ -366,7 +239,7 @@ export default function HydratedEventsGrid({
     setHydratedEventsSnapshot(snapshotKey, visibleEvents)
   }, [snapshotKey, visibleEvents])
 
-  useEffect(() => {
+  useEffect(function clearStaleEventsSnapshotOnEmptySuccess() {
     if (status !== 'success' || visibleEvents.length > 0) {
       return
     }
@@ -374,15 +247,71 @@ export default function HydratedEventsGrid({
     hydratedEventsSnapshotCache.delete(snapshotKey)
   }, [snapshotKey, status, visibleEvents.length])
 
-  const columns = useColumns(maxColumns)
-  const loadingMoreColumns = Math.max(1, columns)
-  const shouldShowSnapshotFallback = visibleEvents.length === 0
-    && cachedSnapshotEvents.length > 0
-    && status !== 'success'
-  const eventsToRender = shouldShowSnapshotFallback ? cachedSnapshotEvents : visibleEvents
-  const hydrationSafeEventsToRender = !hasHydrated && isRouteInitialState
-    ? initialEvents
-    : eventsToRender
+  return { allEvents, visibleEvents, cachedSnapshotEvents }
+}
+
+function useHomeLivePriceVisibility(hydrationSafeEventsToRender: Event[]) {
+  const parentRef = useRef<HTMLDivElement | null>(null)
+  const [livePriceEventIds, setLivePriceEventIds] = useState<string[]>([])
+
+  useEffect(function observeVisibleHomeEventCards() {
+    if (!parentRef.current || hydrationSafeEventsToRender.length === 0) {
+      return
+    }
+
+    const observedIds = new Set<string>()
+    const cardElements = Array.from(parentRef.current.querySelectorAll<HTMLElement>('[data-home-event-id]'))
+
+    if (cardElements.length === 0) {
+      return
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      let hasChanges = false
+
+      entries.forEach((entry) => {
+        const eventId = entry.target.getAttribute('data-home-event-id')
+        if (!eventId) {
+          return
+        }
+
+        if (entry.isIntersecting) {
+          if (!observedIds.has(eventId)) {
+            observedIds.add(eventId)
+            hasChanges = true
+          }
+          return
+        }
+
+        if (observedIds.delete(eventId)) {
+          hasChanges = true
+        }
+      })
+
+      if (hasChanges) {
+        setLivePriceEventIds(Array.from(observedIds))
+      }
+    }, { rootMargin: HOME_LIVE_PRICE_OBSERVER_ROOT_MARGIN })
+
+    cardElements.forEach(element => observer.observe(element))
+
+    return function disconnectHomeEventCardObserver() {
+      observer.disconnect()
+    }
+  }, [hydrationSafeEventsToRender])
+
+  return { parentRef, livePriceEventIds }
+}
+
+interface UseHomeLivePriceOverridesParams {
+  hydrationSafeEventsToRender: Event[]
+  livePriceEventIds: string[]
+}
+
+function useHomeLivePriceOverrides({
+  hydrationSafeEventsToRender,
+  livePriceEventIds,
+}: UseHomeLivePriceOverridesParams) {
   const livePriceEvents = useMemo(
     () => hydrationSafeEventsToRender.filter(event => livePriceEventIds.includes(String(event.id))),
     [hydrationSafeEventsToRender, livePriceEventIds],
@@ -443,54 +372,49 @@ export default function HydratedEventsGrid({
   const stablePriceOverridesByMarket = priceOverrideSignature
     ? debouncedPriceOverridesByMarket
     : EMPTY_PRICE_OVERRIDES
-  const isLoadingNewData = eventsToRender.length === 0
-    && (isPending || (isFetching && !isFetchingNextPage && (!data || data.pages.length === 0)))
 
-  useEffect(() => {
-    if (!parentRef.current || hydrationSafeEventsToRender.length === 0) {
+  return { stablePriceOverridesByMarket }
+}
+
+interface UseInfiniteScrollLoadMoreParams {
+  hasNextPage: boolean
+  fetchNextPage: () => Promise<unknown>
+  isFetching: boolean
+  isFetchingNextPage: boolean
+  loadMoreStateKey: string
+}
+
+function useInfiniteScrollLoadMore({
+  hasNextPage,
+  fetchNextPage,
+  isFetching,
+  isFetchingNextPage,
+  loadMoreStateKey,
+}: UseInfiniteScrollLoadMoreParams) {
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const canRetryLoadMoreAfterErrorRef = useRef(true)
+  const previousLoadMoreStateKeyRef = useRef(loadMoreStateKey)
+  const [infiniteScrollErrorState, setInfiniteScrollErrorState] = useState<{
+    key: string
+    value: string | null
+  }>({
+    key: loadMoreStateKey,
+    value: null,
+  })
+  const infiniteScrollError = infiniteScrollErrorState.key === loadMoreStateKey
+    ? infiniteScrollErrorState.value
+    : null
+
+  useEffect(function resetLoadMoreRetryStateOnQueryScopeChange() {
+    if (previousLoadMoreStateKeyRef.current === loadMoreStateKey) {
       return
     }
 
-    const observedIds = new Set<string>()
-    const cardElements = Array.from(parentRef.current.querySelectorAll<HTMLElement>('[data-home-event-id]'))
+    previousLoadMoreStateKeyRef.current = loadMoreStateKey
+    canRetryLoadMoreAfterErrorRef.current = true
+  }, [loadMoreStateKey])
 
-    if (cardElements.length === 0) {
-      return
-    }
-
-    const observer = new IntersectionObserver((entries) => {
-      let hasChanges = false
-
-      entries.forEach((entry) => {
-        const eventId = entry.target.getAttribute('data-home-event-id')
-        if (!eventId) {
-          return
-        }
-
-        if (entry.isIntersecting) {
-          if (!observedIds.has(eventId)) {
-            observedIds.add(eventId)
-            hasChanges = true
-          }
-          return
-        }
-
-        if (observedIds.delete(eventId)) {
-          hasChanges = true
-        }
-      })
-
-      if (hasChanges) {
-        setLivePriceEventIds(Array.from(observedIds))
-      }
-    }, { rootMargin: HOME_LIVE_PRICE_OBSERVER_ROOT_MARGIN })
-
-    cardElements.forEach(element => observer.observe(element))
-
-    return () => observer.disconnect()
-  }, [hydrationSafeEventsToRender])
-
-  useEffect(() => {
+  useEffect(function observeLoadMoreSentinelForFetch() {
     if (!loadMoreRef.current || !hasNextPage) {
       return
     }
@@ -531,8 +455,178 @@ export default function HydratedEventsGrid({
     }, { rootMargin: '200px 0px' })
 
     observer.observe(loadMoreRef.current)
-    return () => observer.disconnect()
+    return function disconnectLoadMoreObserver() {
+      observer.disconnect()
+    }
   }, [fetchNextPage, hasNextPage, infiniteScrollError, isFetching, isFetchingNextPage, loadMoreStateKey])
+
+  return { loadMoreRef, infiniteScrollError }
+}
+
+export default function HydratedEventsGrid({
+  filters,
+  initialEvents = EMPTY_EVENTS,
+  initialCurrentTimestamp,
+  maxColumns,
+  onClearFilters,
+  routeMainTag,
+  routeTag,
+}: HydratedEventsGridProps) {
+  const locale = useLocale()
+  const user = useUser()
+  const queryUserScope = user?.id ?? 'guest'
+  const currentTimestamp = useCurrentTimestamp({
+    initialTimestamp: initialCurrentTimestamp,
+    intervalMs: HOME_FEED_REFRESH_INTERVAL_MS,
+  })
+  const hasHydrated = useHasHydrated()
+  const snapshotKey = [
+    locale,
+    routeMainTag,
+    routeTag,
+    filters.tag,
+    filters.mainTag,
+    filters.search,
+    filters.bookmarked ? 'bookmarked' : 'all-events',
+    queryUserScope,
+    filters.frequency,
+    filters.status,
+    filters.hideSports ? 'hide-sports' : 'show-sports',
+    filters.hideCrypto ? 'hide-crypto' : 'show-crypto',
+    filters.hideEarnings ? 'hide-earnings' : 'show-earnings',
+  ].join(':')
+  const isRouteInitialState = filters.tag === routeTag
+    && filters.mainTag === routeMainTag
+    && filters.search === ''
+    && !filters.bookmarked
+    && filters.frequency === 'all'
+    && filters.status === 'active'
+    && !filters.hideSports
+    && !filters.hideCrypto
+    && !filters.hideEarnings
+  const initialSnapshotEvents = isRouteInitialState ? initialEvents : EMPTY_EVENTS
+  const PAGE_SIZE = HOME_EVENTS_PAGE_SIZE
+  const shouldUseInitialData = isRouteInitialState
+    && initialEvents.length > 0
+    && queryUserScope === 'guest'
+  const shouldAutoRefreshEvents = filters.status === 'active'
+  const resolvedCurrentTimestamp = currentTimestamp ?? initialCurrentTimestamp
+  const queryRunKey = [
+    locale,
+    routeMainTag,
+    routeTag,
+    filters.tag,
+    filters.mainTag,
+    filters.search,
+    filters.bookmarked ? 'bookmarked' : 'all-events',
+    queryUserScope,
+    filters.frequency,
+    filters.status,
+    filters.hideSports ? 'hide-sports' : 'show-sports',
+    filters.hideCrypto ? 'hide-crypto' : 'show-crypto',
+    filters.hideEarnings ? 'hide-earnings' : 'show-earnings',
+  ].join(':')
+  const loadMoreStateKey = [
+    filters.tag,
+    filters.mainTag,
+    filters.search,
+    filters.bookmarked ? 'bookmarked' : 'all-events',
+    filters.frequency,
+    filters.status,
+    filters.hideSports ? 'hide-sports' : 'show-sports',
+    filters.hideCrypto ? 'hide-crypto' : 'show-crypto',
+    filters.hideEarnings ? 'hide-earnings' : 'show-earnings',
+    locale,
+    queryUserScope,
+  ].join(':')
+
+  const eventsQueryKey = [
+    'events',
+    filters.tag,
+    filters.mainTag,
+    filters.search,
+    filters.bookmarked,
+    filters.frequency,
+    filters.status,
+    filters.hideSports,
+    filters.hideCrypto,
+    filters.hideEarnings,
+    locale,
+    queryUserScope,
+  ]
+
+  const {
+    status,
+    data,
+    dataUpdatedAt,
+    isFetching,
+    isFetchingNextPage,
+    fetchNextPage,
+    hasNextPage,
+    isPending,
+    refetch,
+  } = useInfiniteQuery({
+    queryKey: eventsQueryKey,
+    queryFn: ({ pageParam }) => fetchEvents({
+      pageParam,
+      currentTimestamp: resolvedCurrentTimestamp,
+      filters,
+      locale,
+    }),
+    getNextPageParam: (lastPage, allPages) => lastPage.length === PAGE_SIZE ? allPages.length * PAGE_SIZE : undefined,
+    initialPageParam: 0,
+    initialData: shouldUseInitialData ? { pages: [initialEvents], pageParams: [0] } : undefined,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    staleTime: 'static',
+    initialDataUpdatedAt: 0,
+    placeholderData: keepPreviousData,
+  })
+
+  useEventsRefetchOnTimestamp({
+    queryRunKey,
+    resolvedCurrentTimestamp,
+    status,
+    isFetching,
+    isFetchingNextPage,
+    refetch,
+    shouldAutoRefreshEvents,
+  })
+
+  const { allEvents, visibleEvents, cachedSnapshotEvents } = useHydratedEventsList({
+    data,
+    snapshotKey,
+    status,
+    initialSnapshotEvents,
+  })
+
+  const columns = useColumns(maxColumns)
+  const loadingMoreColumns = Math.max(1, columns)
+  const hasFreshQueryData = !shouldUseInitialData || dataUpdatedAt > 0
+  const shouldShowSnapshotFallback = visibleEvents.length === 0
+    && cachedSnapshotEvents.length > 0
+    && status !== 'success'
+  const eventsToRender = shouldShowSnapshotFallback ? cachedSnapshotEvents : visibleEvents
+  const hydrationSafeEventsToRender = !hasHydrated && isRouteInitialState
+    ? initialEvents
+    : eventsToRender
+
+  const { parentRef, livePriceEventIds } = useHomeLivePriceVisibility(hydrationSafeEventsToRender)
+  const { stablePriceOverridesByMarket } = useHomeLivePriceOverrides({
+    hydrationSafeEventsToRender,
+    livePriceEventIds,
+  })
+
+  const isLoadingNewData = eventsToRender.length === 0
+    && (isPending || (isFetching && !isFetchingNextPage && (!data || data.pages.length === 0)))
+
+  const { loadMoreRef, infiniteScrollError } = useInfiniteScrollLoadMore({
+    hasNextPage,
+    fetchNextPage,
+    isFetching,
+    isFetchingNextPage,
+    loadMoreStateKey,
+  })
 
   if (isLoadingNewData) {
     return (

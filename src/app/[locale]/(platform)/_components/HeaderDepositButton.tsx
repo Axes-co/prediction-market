@@ -10,13 +10,19 @@ const HeaderDepositFlow = dynamic(
   { ssr: false },
 )
 
-export default function HeaderDepositButton() {
-  const t = useExtracted()
+function useDepositRequestTrigger() {
   const [requestId, setRequestId] = useState(0)
 
   function handleClick() {
     setRequestId(prev => prev + 1)
   }
+
+  return { requestId, handleClick }
+}
+
+export default function HeaderDepositButton() {
+  const t = useExtracted()
+  const { requestId, handleClick } = useDepositRequestTrigger()
 
   return (
     <>

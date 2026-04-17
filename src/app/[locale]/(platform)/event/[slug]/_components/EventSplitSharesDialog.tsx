@@ -60,6 +60,33 @@ interface EventSplitSharesDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+function useSplitFormState() {
+  const [amount, setAmount] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  return { amount, setAmount, error, setError, isSubmitting, setIsSubmitting }
+}
+
+function useFormattedUsdcBalance(availableUsdc: number) {
+  return useMemo(() => {
+    if (!Number.isFinite(availableUsdc)) {
+      return '$0.00'
+    }
+    const formatted = formatBalanceLabel(availableUsdc)
+    return `$${formatted}`
+  }, [availableUsdc])
+}
+
+function formatBalanceLabel(value: number) {
+  if (!Number.isFinite(value)) {
+    return '0.00'
+  }
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
+
 export default function EventSplitSharesDialog({
   open,
   availableUsdc,
@@ -81,19 +108,7 @@ export default function EventSplitSharesDialog({
   const isMobile = useIsMobile()
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
-  const [amount, setAmount] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-
-  function formatBalanceLabel(value: number) {
-    if (!Number.isFinite(value)) {
-      return '0.00'
-    }
-    return value.toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  }
+  const { amount, setAmount, error, setError, isSubmitting, setIsSubmitting } = useSplitFormState()
 
   function resetFormState() {
     setAmount('')
@@ -112,13 +127,7 @@ export default function EventSplitSharesDialog({
     handleDialogOpenChange(false)
   }
 
-  const formattedUsdcBalance = useMemo(() => {
-    if (!Number.isFinite(availableUsdc)) {
-      return '$0.00'
-    }
-    const formatted = formatBalanceLabel(availableUsdc)
-    return `$${formatted}`
-  }, [availableUsdc])
+  const formattedUsdcBalance = useFormattedUsdcBalance(availableUsdc)
 
   const numericAvailableBalance = Number.isFinite(availableUsdc) ? availableUsdc : 0
 

@@ -108,11 +108,12 @@ Kalshi can do that one deal at a time. Kuest makes the same capability available
 - [x] Multi-language UI + theme customization
 - [x] Crypto, Nasdaq, sports, and community markets
 - [x] Operator-created markets with opt-in network sharing
+- [x] Gamma metadata API (site-isolated)
+- [x] Country Access Restrictions
 
 **In progress**
 - [ ] 🏆 MVP — stress tests, security, and financial consistency checks
 - [ ] MOOV2 integration (whitelist)
-- [ ] Gamma metadata API (site-isolated)
 - [ ] Move matching engine to mainnet
 - [ ] Kalshi market mirroring + arbitrage connector
 

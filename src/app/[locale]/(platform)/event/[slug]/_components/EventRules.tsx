@@ -55,11 +55,16 @@ function normalizeRulesLabelWhitespace(value: string) {
   return value.replace(RULES_LABEL_WHITESPACE_REGEX, ' ').trim()
 }
 
+function useExpandedState() {
+  const [isExpanded, setIsExpanded] = useState(false)
+  return { isExpanded, setIsExpanded }
+}
+
 export default function EventRules({ event, mode = 'accordion', showEndDate = false }: EventRulesProps) {
   const t = useExtracted()
   const locale = useLocale()
   const siteIdentity = useSiteIdentity()
-  const [isExpanded, setIsExpanded] = useState(false)
+  const { isExpanded, setIsExpanded } = useExpandedState()
   const isInline = mode === 'inline'
 
   function formatRules(rules: string): string {

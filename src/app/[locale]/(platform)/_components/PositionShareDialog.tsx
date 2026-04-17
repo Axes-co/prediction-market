@@ -21,16 +21,19 @@ interface PositionShareDialogProps {
   payload: ShareCardPayload | null
 }
 
-export function PositionShareDialog({ open, onOpenChange, payload }: PositionShareDialogProps) {
-  const t = useExtracted()
-  const isMobile = useIsMobile()
-
-  const shareCardUrl = useMemo(() => {
+function useShareCardUrl(payload: ShareCardPayload | null) {
+  return useMemo(() => {
     if (!payload) {
       return ''
     }
     return buildShareCardUrl(payload)
   }, [payload])
+}
+
+export function PositionShareDialog({ open, onOpenChange, payload }: PositionShareDialogProps) {
+  const t = useExtracted()
+  const isMobile = useIsMobile()
+  const shareCardUrl = useShareCardUrl(payload)
 
   const dialogContent = open
     ? (
@@ -72,38 +75,15 @@ interface PositionShareDialogContentProps {
   shareCardUrl: string
 }
 
-function PositionShareDialogContent({
-  payload,
-  shareCardUrl,
-}: PositionShareDialogContentProps) {
-  const t = useExtracted()
-  const site = useSiteIdentity()
-  const [shareCardStatus, setShareCardStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
+type ShareCardStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+function useShareCardState(shareCardUrl: string) {
+  const [shareCardStatus, setShareCardStatus] = useState<ShareCardStatus>(
     shareCardUrl ? 'loading' : 'idle',
   )
   const [shareCardBlob, setShareCardBlob] = useState<Blob | null>(null)
-  const [isCopyingShareImage, setIsCopyingShareImage] = useState(false)
 
-  const shareUrl = useMemo(() => {
-    if (!payload) {
-      return ''
-    }
-    const profileSlug = payload.userName?.trim() || ''
-    if (!profileSlug) {
-      return typeof window !== 'undefined' ? window.location.origin : ''
-    }
-    const profilePath = buildPublicProfilePath(profileSlug) ?? '/'
-    return typeof window !== 'undefined'
-      ? new URL(profilePath, window.location.origin).toString()
-      : profilePath
-  }, [payload])
-
-  const buildShareText = useCallback(
-    (siteTag: string) => t('Check out this trade on {site}.', { site: siteTag }),
-    [t],
-  )
-
-  useEffect(() => {
+  useEffect(function preloadShareCardBlob() {
     if (!shareCardUrl || shareCardStatus !== 'ready') {
       return
     }
@@ -129,19 +109,23 @@ function PositionShareDialogContent({
         }
       })
 
-    return () => {
+    return function cancelShareCardBlobPreload() {
       isCancelled = true
     }
   }, [shareCardStatus, shareCardUrl])
 
-  const handleShareCardLoaded = useCallback(() => {
-    setShareCardStatus('ready')
-  }, [])
+  return { shareCardStatus, setShareCardStatus, shareCardBlob }
+}
 
-  const handleShareCardError = useCallback(() => {
-    setShareCardStatus('error')
-    toast.error(t('Unable to generate a share card right now.'))
-  }, [t])
+function useCopyShareImage({
+  shareCardBlob,
+  shareCardUrl,
+}: {
+  shareCardBlob: Blob | null
+  shareCardUrl: string
+}) {
+  const t = useExtracted()
+  const [isCopyingShareImage, setIsCopyingShareImage] = useState(false)
 
   const handleCopyShareImage = useCallback(async () => {
     if (!shareCardUrl) {
@@ -188,6 +172,55 @@ function PositionShareDialogContent({
       setIsCopyingShareImage(false)
     }
   }, [shareCardBlob, shareCardUrl, t])
+
+  return { isCopyingShareImage, handleCopyShareImage }
+}
+
+function useShareCardStatusHandlers(setShareCardStatus: (status: ShareCardStatus) => void) {
+  const t = useExtracted()
+  const handleShareCardLoaded = useCallback(() => {
+    setShareCardStatus('ready')
+  }, [setShareCardStatus])
+
+  const handleShareCardError = useCallback(() => {
+    setShareCardStatus('error')
+    toast.error(t('Unable to generate a share card right now.'))
+  }, [setShareCardStatus, t])
+
+  return { handleShareCardLoaded, handleShareCardError }
+}
+
+function useShareUrl(payload: ShareCardPayload | null) {
+  return useMemo(() => {
+    if (!payload) {
+      return ''
+    }
+    const profileSlug = payload.userName?.trim() || ''
+    if (!profileSlug) {
+      return typeof window !== 'undefined' ? window.location.origin : ''
+    }
+    const profilePath = buildPublicProfilePath(profileSlug) ?? '/'
+    return typeof window !== 'undefined'
+      ? new URL(profilePath, window.location.origin).toString()
+      : profilePath
+  }, [payload])
+}
+
+function PositionShareDialogContent({
+  payload,
+  shareCardUrl,
+}: PositionShareDialogContentProps) {
+  const t = useExtracted()
+  const site = useSiteIdentity()
+  const { shareCardStatus, setShareCardStatus, shareCardBlob } = useShareCardState(shareCardUrl)
+  const { isCopyingShareImage, handleCopyShareImage } = useCopyShareImage({ shareCardBlob, shareCardUrl })
+  const { handleShareCardLoaded, handleShareCardError } = useShareCardStatusHandlers(setShareCardStatus)
+  const shareUrl = useShareUrl(payload)
+
+  const buildShareText = useCallback(
+    (siteTag: string) => t('Check out this trade on {site}.', { site: siteTag }),
+    [t],
+  )
 
   const isShareReady = shareCardStatus === 'ready'
 

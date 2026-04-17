@@ -38,7 +38,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { LOCALE_LABELS, NON_DEFAULT_LOCALES } from '@/i18n/locales'
 
-export default function AdminCategoriesTable() {
+function useAdminCategoriesTableState() {
   const t = useExtracted()
   const isMobile = useIsMobile()
   const queryClient = useQueryClient()
@@ -274,6 +274,84 @@ export default function AdminCategoriesTable() {
     isUpdatingHidden: id => pendingHiddenId === id,
     isUpdatingHideEvents: id => pendingHideEventsId === id,
   })
+
+  return {
+    isMobile,
+    categories,
+    totalCount,
+    isLoading,
+    error,
+    retry,
+    search,
+    handleSearchChange,
+    sortBy,
+    sortOrder,
+    mainOnly,
+    handleSortChange,
+    handleMainOnlyChange,
+    pageIndex,
+    pageSize,
+    handlePageChange,
+    handlePageSizeChange,
+    translationCategory,
+    translationValues,
+    translationError,
+    isSavingTranslations,
+    eventNoteCategory,
+    eventNoteValue,
+    setEventNoteValue,
+    eventNoteError,
+    isSavingEventNote,
+    isMainCategorySortOpen,
+    setIsMainCategorySortOpen,
+    closeTranslationsDialog,
+    handleOpenTranslations,
+    handleTranslationChange,
+    handleSaveTranslations,
+    closeEventNoteEditor,
+    handleSaveEventNote,
+    columns,
+  }
+}
+
+export default function AdminCategoriesTable() {
+  const t = useExtracted()
+  const {
+    isMobile,
+    categories,
+    totalCount,
+    isLoading,
+    error,
+    retry,
+    search,
+    handleSearchChange,
+    sortBy,
+    sortOrder,
+    mainOnly,
+    handleSortChange,
+    handleMainOnlyChange,
+    pageIndex,
+    pageSize,
+    handlePageChange,
+    handlePageSizeChange,
+    translationCategory,
+    translationValues,
+    translationError,
+    isSavingTranslations,
+    eventNoteCategory,
+    eventNoteValue,
+    setEventNoteValue,
+    eventNoteError,
+    isSavingEventNote,
+    isMainCategorySortOpen,
+    setIsMainCategorySortOpen,
+    closeTranslationsDialog,
+    handleTranslationChange,
+    handleSaveTranslations,
+    closeEventNoteEditor,
+    handleSaveEventNote,
+    columns,
+  } = useAdminCategoriesTableState()
 
   function handleSortChangeWithTranslation(column: string | null, order: 'asc' | 'desc' | null) {
     if (column === null || order === null) {

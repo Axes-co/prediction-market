@@ -7,10 +7,10 @@ import { mergeSessionUserState, useUser } from '@/stores/useUser'
 
 const { useSession } = authClient
 
-export default function PlatformViewerState() {
+function useSyncViewerUserState() {
   const { data: session, isPending } = useSession()
 
-  useEffect(() => {
+  useEffect(function syncViewerUserStateFromSession() {
     if (isPending) {
       return
     }
@@ -24,6 +24,10 @@ export default function PlatformViewerState() {
       return mergeSessionUserState(previous, session.user as unknown as User)
     })
   }, [isPending, session?.user])
+}
+
+export default function PlatformViewerState() {
+  useSyncViewerUserState()
 
   return null
 }

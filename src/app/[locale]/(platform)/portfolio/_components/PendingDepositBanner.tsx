@@ -2,7 +2,7 @@
 
 import type { SafeOperationType } from '@/lib/safe/transactions'
 import { ArrowDownToLineIcon, CheckIcon, Loader2Icon } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import { hashTypedData } from 'viem'
 import { useSignMessage } from 'wagmi'
@@ -27,23 +27,10 @@ const CONFIRMATION_DELAY_MS = 900
 
 type PendingDepositStep = 'prompt' | 'signing' | 'success'
 
-export default function PendingDepositBanner() {
-  const { pendingBalance, hasPendingDeposit, refetchPendingDeposit } = usePendingUsdcDeposit()
-  const { signMessageAsync } = useSignMessage()
-  const { runWithSignaturePrompt } = useSignaturePromptRunner()
-  const router = useRouter()
-  const user = useUser()
-  const userAddress = user?.address ?? null
-  const userProxyWalletAddress = user?.proxy_wallet_address ?? null
-  const { openTradeRequirements } = useTradingOnboarding()
+function usePendingDepositDialogState() {
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<PendingDepositStep>('prompt')
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
-
-  const formattedAmount = useMemo(() => formatCurrency(pendingBalance.raw, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }), [pendingBalance.raw])
 
   const resetDialogState = useCallback(() => {
     setStep('prompt')
@@ -69,6 +56,43 @@ export default function PendingDepositBanner() {
     closeDialog()
   }, [openDialog, closeDialog])
 
+  return {
+    open,
+    step,
+    setStep,
+    statusMessage,
+    setStatusMessage,
+    openDialog,
+    closeDialog,
+    handleOpenChange,
+  }
+}
+
+function usePendingDepositSwap({
+  step,
+  setStep,
+  setStatusMessage,
+  closeDialog,
+  userAddress,
+  userProxyWalletAddress,
+  pendingBalanceRawBase,
+  refetchPendingDeposit,
+  openTradeRequirements,
+  runWithSignaturePrompt,
+  signMessageAsync,
+}: {
+  step: PendingDepositStep
+  setStep: (step: PendingDepositStep) => void
+  setStatusMessage: (message: string | null) => void
+  closeDialog: () => void
+  userAddress: string | null
+  userProxyWalletAddress: string | null
+  pendingBalanceRawBase: string | null
+  refetchPendingDeposit: () => void
+  openTradeRequirements: ReturnType<typeof useTradingOnboarding>['openTradeRequirements']
+  runWithSignaturePrompt: ReturnType<typeof useSignaturePromptRunner>['runWithSignaturePrompt']
+  signMessageAsync: ReturnType<typeof useSignMessage>['signMessageAsync']
+}) {
   const handleConfirm = useCallback(async () => {
     if (step === 'signing') {
       return
@@ -84,7 +108,7 @@ export default function PendingDepositBanner() {
       return
     }
 
-    if (!pendingBalance.rawBase || pendingBalance.rawBase === '0') {
+    if (!pendingBalanceRawBase || pendingBalanceRawBase === '0') {
       toast.error('No pending deposit found.')
       return
     }
@@ -94,7 +118,7 @@ export default function PendingDepositBanner() {
 
     try {
       const buildResult = await buildPendingUsdcSwapAction({
-        amount: pendingBalance.rawBase,
+        amount: pendingBalanceRawBase,
       })
 
       if (buildResult.error || !buildResult.payload) {
@@ -169,21 +193,59 @@ export default function PendingDepositBanner() {
       setStep('prompt')
     }
   }, [
-    openTradeRequirements,
     closeDialog,
-    pendingBalance.rawBase,
+    openTradeRequirements,
+    pendingBalanceRawBase,
     refetchPendingDeposit,
     runWithSignaturePrompt,
+    setStatusMessage,
+    setStep,
     signMessageAsync,
     step,
     userAddress,
     userProxyWalletAddress,
   ])
 
-  const handleStartTrading = useCallback(() => {
-    closeDialog()
-    router.push('/')
-  }, [closeDialog, router])
+  return { handleConfirm }
+}
+
+export default function PendingDepositBanner() {
+  const { pendingBalance, hasPendingDeposit, refetchPendingDeposit } = usePendingUsdcDeposit()
+  const { signMessageAsync } = useSignMessage()
+  const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const router = useRouter()
+  const user = useUser()
+  const userAddress = user?.address ?? null
+  const userProxyWalletAddress = user?.proxy_wallet_address ?? null
+  const { openTradeRequirements } = useTradingOnboarding()
+  const {
+    open,
+    step,
+    setStep,
+    statusMessage,
+    setStatusMessage,
+    openDialog,
+    closeDialog,
+    handleOpenChange,
+  } = usePendingDepositDialogState()
+  const { handleConfirm } = usePendingDepositSwap({
+    step,
+    setStep,
+    setStatusMessage,
+    closeDialog,
+    userAddress,
+    userProxyWalletAddress,
+    pendingBalanceRawBase: pendingBalance.rawBase,
+    refetchPendingDeposit,
+    openTradeRequirements,
+    runWithSignaturePrompt,
+    signMessageAsync,
+  })
+
+  const formattedAmount = formatCurrency(pendingBalance.raw, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
 
   if (!hasPendingDeposit) {
     return null
@@ -242,7 +304,13 @@ export default function PendingDepositBanner() {
           )}
 
           {step === 'success' && (
-            <Button className="mt-6 h-11 w-full text-base" onClick={handleStartTrading}>
+            <Button
+              className="mt-6 h-11 w-full text-base"
+              onClick={() => {
+                closeDialog()
+                router.push('/')
+              }}
+            >
               Start Trading
             </Button>
           )}

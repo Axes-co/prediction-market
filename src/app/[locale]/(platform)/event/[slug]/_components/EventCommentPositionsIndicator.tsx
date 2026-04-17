@@ -198,6 +198,11 @@ export function CommentPositionBadge({
   )
 }
 
+function usePositionsDropdown() {
+  const [open, setOpen] = useState(false)
+  return { open, setOpen }
+}
+
 export function CommentPositionsIndicator({
   positions,
   isSingleMarket = false,
@@ -211,7 +216,7 @@ export function CommentPositionsIndicator({
 }) {
   const normalizeOutcomeLabel = useOutcomeLabel()
   const entries = getCommentPositionEntries(positions, marketsByConditionId, isSingleMarket)
-  const [open, setOpen] = useState(false)
+  const { open, setOpen } = usePositionsDropdown()
 
   const primaryPosition = entries[0]
   const primaryInlineLabel = primaryPosition

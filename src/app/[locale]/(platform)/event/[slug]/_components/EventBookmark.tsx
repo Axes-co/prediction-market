@@ -10,8 +10,6 @@ import { useAppKit } from '@/hooks/useAppKit'
 import { cn } from '@/lib/utils'
 import { useUser } from '@/stores/useUser'
 
-const headerIconButtonClass = 'size-10 rounded-sm border border-transparent bg-transparent text-foreground transition-colors hover:bg-muted/80 focus-visible:ring-1 focus-visible:ring-ring md:size-9'
-
 interface EventBookmarkProps {
   event: Event
   refreshStatusOnMount?: boolean
@@ -81,7 +79,7 @@ function updateEventsQueryData(
 
   let hasChanges = false
   const nextPages = currentData.pages.map((page) => {
-    const nextPage = page.flatMap((entry) => {
+    return page.flatMap((entry) => {
       if (entry.id !== event.id) {
         return [entry]
       }
@@ -94,8 +92,6 @@ function updateEventsQueryData(
 
       return [{ ...entry, is_bookmarked: nextBookmarkedState }]
     })
-
-    return nextPage
   })
 
   if (!hasChanges) {
@@ -120,10 +116,13 @@ function createBookmarkOverrideState(
   }
 }
 
-export default function EventBookmark({
+function useBookmarkState({
   event,
-  refreshStatusOnMount = true,
-}: EventBookmarkProps) {
+  refreshStatusOnMount,
+}: {
+  event: Event
+  refreshStatusOnMount: boolean
+}) {
   const { open } = useAppKit()
   const user = useUser()
   const queryClient = useQueryClient()
@@ -208,14 +207,14 @@ export default function EventBookmark({
     }
   }
 
-  useEffect(() => {
+  useEffect(function refreshInitialBookmarkStatus() {
     if (!refreshStatusOnMount || !user?.id) {
       return
     }
 
     let isActive = true
 
-    void (async () => {
+    void (async function fetchInitialBookmarkStatus() {
       const response = await getBookmarkStatusAction(event.id)
       if (!isActive || response.error || typeof response.data !== 'boolean') {
         return
@@ -223,10 +222,22 @@ export default function EventBookmark({
       setBookmarkOverride(createBookmarkOverrideState(event.id, event.is_bookmarked, response.data))
     })()
 
-    return () => {
+    return function cancelInitialBookmarkFetch() {
       isActive = false
     }
   }, [event.id, event.is_bookmarked, refreshStatusOnMount, user?.id])
+
+  return { isBookmarked, isSubmitting, handleBookmark }
+}
+
+export default function EventBookmark({
+  event,
+  refreshStatusOnMount = true,
+}: EventBookmarkProps) {
+  const { isBookmarked, isSubmitting, handleBookmark } = useBookmarkState({
+    event,
+    refreshStatusOnMount,
+  })
 
   return (
     <Button
@@ -245,8 +256,12 @@ export default function EventBookmark({
       aria-pressed={isBookmarked}
       title={isBookmarked ? 'Remove Bookmark' : 'Bookmark'}
       className={cn(
-        headerIconButtonClass,
-        'size-auto p-0',
+        `
+          size-auto rounded-sm border border-transparent bg-transparent p-0 text-foreground transition-colors
+          hover:bg-muted/80
+          focus-visible:ring-1 focus-visible:ring-ring
+          md:size-9
+        `,
         { 'opacity-50': isSubmitting },
       )}
     >

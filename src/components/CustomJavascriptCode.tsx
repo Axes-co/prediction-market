@@ -180,7 +180,7 @@ function executeCustomJavascriptCodes(codes: CustomJavascriptCodeConfig[]) {
   }
 }
 
-export default function CustomJavascriptCode({ locale, codes }: CustomJavascriptCodeProps) {
+function useCustomJavascriptCodeExecution(locale: string, codes: CustomJavascriptCodeConfig[]) {
   const pathname = usePathname()
   const localizedPathname = useMemo(() => stripLocalePrefix(pathname, locale), [locale, pathname])
   const activeCodes = useMemo(
@@ -194,7 +194,7 @@ export default function CustomJavascriptCode({ locale, codes }: CustomJavascript
   const previousActiveCodeSignatureRef = useRef<string | null>(null)
   const [interactionSignature, setInteractionSignature] = useState<string | null>(null)
 
-  useEffect(() => {
+  useEffect(function reloadOnCodeChange() {
     const previousActiveCodeSignature = previousActiveCodeSignatureRef.current
     previousActiveCodeSignatureRef.current = activeCodeSignature
 
@@ -213,7 +213,7 @@ export default function CustomJavascriptCode({ locale, codes }: CustomJavascript
     window.location.reload()
   }, [activeCodeSignature])
 
-  useEffect(() => {
+  useEffect(function executeCodesOnFirstInteraction() {
     if (interactionSignature === activeCodeSignature || activeCodes.length === 0) {
       return
     }
@@ -228,13 +228,17 @@ export default function CustomJavascriptCode({ locale, codes }: CustomJavascript
     window.addEventListener('touchstart', handleInteraction, { once: true, passive: true })
     window.addEventListener('scroll', handleInteraction, { once: true, passive: true })
 
-    return () => {
+    return function cleanupInteractionListeners() {
       window.removeEventListener('pointerdown', handleInteraction)
       window.removeEventListener('keydown', handleInteraction)
       window.removeEventListener('touchstart', handleInteraction)
       window.removeEventListener('scroll', handleInteraction)
     }
   }, [activeCodeSignature, activeCodes, interactionSignature])
+}
+
+export default function CustomJavascriptCode({ locale, codes }: CustomJavascriptCodeProps) {
+  useCustomJavascriptCodeExecution(locale, codes)
 
   return null
 }

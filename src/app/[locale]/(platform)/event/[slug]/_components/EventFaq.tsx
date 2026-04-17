@@ -21,17 +21,22 @@ interface EventFaqProps {
 
 const DEFAULT_VISIBLE_ITEMS = 6
 
+function useEventFaqState(event: Event, siteName: string, commentsCount?: number | null) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [openItemId, setOpenItemId] = useState('')
+  const items = useMemo(() => buildEventFaqItems({
+    event,
+    siteName,
+    commentsCount,
+  }), [commentsCount, event, siteName])
+
+  return { isExpanded, setIsExpanded, openItemId, setOpenItemId, items }
+}
+
 export default function EventFaq({ event, commentsCount }: EventFaqProps) {
   const t = useExtracted()
   const site = useSiteIdentity()
-  const [isExpanded, setIsExpanded] = useState(false)
-  const [openItemId, setOpenItemId] = useState('')
-
-  const items = useMemo(() => buildEventFaqItems({
-    event,
-    siteName: site.name,
-    commentsCount,
-  }), [commentsCount, event, site.name])
+  const { isExpanded, setIsExpanded, openItemId, setOpenItemId, items } = useEventFaqState(event, site.name, commentsCount)
 
   const visibleItems = isExpanded
     ? items

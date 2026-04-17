@@ -30,24 +30,172 @@ interface InfiniteScrollErrorState {
   message: string
 }
 
-export default function EventComments({ event, user }: EventCommentsProps) {
-  const [replyingTo, setReplyingTo] = useState<string | null>(null)
-  const [replyText, setReplyText] = useState('')
-  const [infiniteScrollError, setInfiniteScrollError] = useState<InfiniteScrollErrorState | null>(null)
-  const [sortBy, setSortBy] = useState<'newest' | 'most_liked'>('newest')
-  const [holdersOnly, setHoldersOnly] = useState(false)
-  const holdersCheckboxId = useId()
-  const isSportsEvent = Boolean(event.sports_sport_slug?.trim())
-  const marketsByConditionId = useMemo(() => {
+function useMarketsByConditionId(markets: Event['markets']) {
+  return useMemo(() => {
     const map = new Map<string, Event['markets'][number]>()
-    event.markets.forEach((market) => {
+    markets.forEach((market) => {
       if (market?.condition_id) {
         map.set(market.condition_id, market)
       }
     })
     return map
-  }, [event.markets])
+  }, [markets])
+}
 
+function useExpandedCommentIds(comments: Array<{ id: string, recent_replies?: Array<unknown> | null }>) {
+  return useMemo(() => {
+    return new Set(
+      comments
+        .filter(comment => (comment.recent_replies?.length ?? 0) > 3)
+        .map(comment => comment.id),
+    )
+  }, [comments])
+}
+
+function useCommentActionHandlers({
+  loadMoreReplies,
+  toggleCommentLike,
+  deleteReply,
+  toggleReplyLike,
+  deleteComment,
+  refetch,
+  setInfiniteScrollError,
+  setSortBy,
+  setHoldersOnly,
+}: {
+  loadMoreReplies: (commentId: string) => void
+  toggleCommentLike: (commentId: string) => void
+  deleteReply: (commentId: string, replyId: string) => void
+  toggleReplyLike: (replyId: string) => void
+  deleteComment: (commentId: string) => void
+  refetch: () => Promise<unknown>
+  setInfiniteScrollError: (value: InfiniteScrollErrorState | null) => void
+  setSortBy: (value: 'newest' | 'most_liked') => void
+  setHoldersOnly: (value: boolean) => void
+}) {
+  const handleRepliesLoaded = useCallback((commentId: string) => {
+    loadMoreReplies(commentId)
+  }, [loadMoreReplies])
+
+  const handleLikeToggled = useCallback((commentId: string) => {
+    toggleCommentLike(commentId)
+  }, [toggleCommentLike])
+
+  const handleDeleteReply = useCallback((commentId: string, replyId: string) => {
+    deleteReply(commentId, replyId)
+  }, [deleteReply])
+
+  const handleUpdateReply = useCallback((_: string, replyId: string) => {
+    toggleReplyLike(replyId)
+  }, [toggleReplyLike])
+
+  const handleDeleteComment = useCallback((commentId: string) => {
+    deleteComment(commentId)
+  }, [deleteComment])
+
+  const handleRefetch = useCallback(() => {
+    setInfiniteScrollError(null)
+    void refetch()
+  }, [refetch, setInfiniteScrollError])
+
+  const handleCommentAdded = useCallback(() => {
+    setInfiniteScrollError(null)
+    void refetch()
+  }, [refetch, setInfiniteScrollError])
+
+  const handleSortChange = useCallback((value: string) => {
+    setInfiniteScrollError(null)
+    setSortBy(value as 'newest' | 'most_liked')
+  }, [setInfiniteScrollError, setSortBy])
+
+  const handleHoldersOnlyChange = useCallback((checked: boolean | 'indeterminate') => {
+    setInfiniteScrollError(null)
+    setHoldersOnly(Boolean(checked))
+  }, [setInfiniteScrollError, setHoldersOnly])
+
+  return {
+    handleRepliesLoaded,
+    handleLikeToggled,
+    handleDeleteReply,
+    handleUpdateReply,
+    handleDeleteComment,
+    handleRefetch,
+    handleCommentAdded,
+    handleSortChange,
+    handleHoldersOnlyChange,
+  }
+}
+
+function useInfiniteCommentsScroll({
+  fetchNextPage,
+  hasNextPage,
+  isFetchingNextPage,
+  isInitialized,
+  contextKey,
+}: {
+  fetchNextPage: () => Promise<unknown>
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  isInitialized: boolean
+  contextKey: string
+}) {
+  const [infiniteScrollError, setInfiniteScrollError] = useState<InfiniteScrollErrorState | null>(null)
+  const visibleInfiniteScrollError = infiniteScrollError?.contextKey === contextKey
+    ? infiniteScrollError.message
+    : null
+
+  const handleFetchNextPage = useCallback(async function fetchNextCommentsPage() {
+    setInfiniteScrollError(null)
+
+    try {
+      await fetchNextPage()
+    }
+    catch (error) {
+      setInfiniteScrollError({
+        contextKey,
+        message: error instanceof Error ? error.message : 'Failed to load more comments',
+      })
+    }
+  }, [fetchNextPage, contextKey])
+
+  useEffect(function loadMoreCommentsOnScrollNearBottom() {
+    function handleWindowScroll() {
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop
+      const windowHeight = window.innerHeight
+      const documentHeight = document.documentElement.scrollHeight
+
+      if (scrollTop + windowHeight >= documentHeight - 1000) {
+        if (hasNextPage && !isFetchingNextPage && isInitialized && !visibleInfiniteScrollError) {
+          void handleFetchNextPage()
+        }
+      }
+    }
+
+    window.addEventListener('scroll', handleWindowScroll)
+    return function detachInfiniteCommentsScrollListener() {
+      window.removeEventListener('scroll', handleWindowScroll)
+    }
+  }, [handleFetchNextPage, hasNextPage, isFetchingNextPage, isInitialized, visibleInfiniteScrollError])
+
+  const retryInfiniteScroll = useCallback(() => {
+    void handleFetchNextPage()
+  }, [handleFetchNextPage])
+
+  return {
+    setInfiniteScrollError,
+    visibleInfiniteScrollError,
+    retryInfiniteScroll,
+  }
+}
+
+export default function EventComments({ event, user }: EventCommentsProps) {
+  const [replyingTo, setReplyingTo] = useState<string | null>(null)
+  const [replyText, setReplyText] = useState('')
+  const [sortBy, setSortBy] = useState<'newest' | 'most_liked'>('newest')
+  const [holdersOnly, setHoldersOnly] = useState(false)
+  const holdersCheckboxId = useId()
+  const isSportsEvent = Boolean(event.sports_sport_slug?.trim())
+  const marketsByConditionId = useMarketsByConditionId(event.markets)
   const t = useExtracted()
 
   const {
@@ -73,91 +221,41 @@ export default function EventComments({ event, user }: EventCommentsProps) {
   } = useInfiniteComments(event.slug, sortBy, user, holdersOnly)
   const isInitialized = status === 'success'
   const infiniteScrollContextKey = `${sortBy}:${holdersOnly}:${comments.length}`
-  const visibleInfiniteScrollError = infiniteScrollError?.contextKey === infiniteScrollContextKey
-    ? infiniteScrollError.message
-    : null
-  const expandedComments = useMemo(() => {
-    return new Set(
-      comments
-        .filter(comment => (comment.recent_replies?.length ?? 0) > 3)
-        .map(comment => comment.id),
-    )
-  }, [comments])
 
-  const handleFetchNextPage = useCallback(async () => {
-    setInfiniteScrollError(null)
+  const {
+    setInfiniteScrollError,
+    visibleInfiniteScrollError,
+    retryInfiniteScroll,
+  } = useInfiniteCommentsScroll({
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isInitialized,
+    contextKey: infiniteScrollContextKey,
+  })
+  const expandedComments = useExpandedCommentIds(comments)
 
-    try {
-      await fetchNextPage()
-    }
-    catch (error) {
-      setInfiniteScrollError({
-        contextKey: infiniteScrollContextKey,
-        message: error instanceof Error ? error.message : 'Failed to load more comments',
-      })
-    }
-  }, [fetchNextPage, infiniteScrollContextKey])
-
-  useEffect(() => {
-    function handleScroll() {
-      const scrollTop = window.pageYOffset || document.documentElement.scrollTop
-      const windowHeight = window.innerHeight
-      const documentHeight = document.documentElement.scrollHeight
-
-      if (scrollTop + windowHeight >= documentHeight - 1000) {
-        if (hasNextPage && !isFetchingNextPage && isInitialized && !visibleInfiniteScrollError) {
-          void handleFetchNextPage()
-        }
-      }
-    }
-
-    window.addEventListener('scroll', handleScroll)
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [handleFetchNextPage, hasNextPage, isFetchingNextPage, isInitialized, visibleInfiniteScrollError])
-
-  const handleRepliesLoaded = useCallback((commentId: string) => {
-    loadMoreReplies(commentId)
-  }, [loadMoreReplies])
-
-  const handleLikeToggled = useCallback((commentId: string) => {
-    toggleCommentLike(commentId)
-  }, [toggleCommentLike])
-
-  const handleDeleteReply = useCallback((commentId: string, replyId: string) => {
-    deleteReply(commentId, replyId)
-  }, [deleteReply])
-
-  const handleUpdateReply = useCallback((_: string, replyId: string) => {
-    toggleReplyLike(replyId)
-  }, [toggleReplyLike])
-
-  const handleDeleteComment = useCallback((commentId: string) => {
-    deleteComment(commentId)
-  }, [deleteComment])
-
-  const retryInfiniteScroll = useCallback(() => {
-    void handleFetchNextPage()
-  }, [handleFetchNextPage])
-
-  const handleRefetch = useCallback(() => {
-    setInfiniteScrollError(null)
-    void refetch()
-  }, [refetch])
-
-  const handleCommentAdded = useCallback(() => {
-    setInfiniteScrollError(null)
-    void refetch()
-  }, [refetch])
-
-  const handleSortChange = useCallback((value: string) => {
-    setInfiniteScrollError(null)
-    setSortBy(value as 'newest' | 'most_liked')
-  }, [])
-
-  const handleHoldersOnlyChange = useCallback((checked: boolean | 'indeterminate') => {
-    setInfiniteScrollError(null)
-    setHoldersOnly(Boolean(checked))
-  }, [])
+  const {
+    handleRepliesLoaded,
+    handleLikeToggled,
+    handleDeleteReply,
+    handleUpdateReply,
+    handleDeleteComment,
+    handleRefetch,
+    handleCommentAdded,
+    handleSortChange,
+    handleHoldersOnlyChange,
+  } = useCommentActionHandlers({
+    loadMoreReplies,
+    toggleCommentLike,
+    deleteReply,
+    toggleReplyLike,
+    deleteComment,
+    refetch,
+    setInfiniteScrollError,
+    setSortBy,
+    setHoldersOnly,
+  })
 
   if (error) {
     return (

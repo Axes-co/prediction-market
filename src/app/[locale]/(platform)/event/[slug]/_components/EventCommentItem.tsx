@@ -38,32 +38,24 @@ interface CommentItemProps {
   retryLoadReplies: (commentId: string) => void
 }
 
-export default function EventCommentItem({
+function useCommentItemHandlers({
   comment,
   user,
-  usePrimaryPositionTone = false,
-  isSingleMarket,
-  marketsByConditionId,
-  onLikeToggle,
-  onDelete,
   replyingTo,
   onSetReplyingTo,
-  replyText,
   onSetReplyText,
-  expandedComments,
-  onRepliesLoaded,
-  onDeleteReply,
-  onUpdateReply,
-  createReply,
-  isCreatingComment,
-  isTogglingLikeForComment,
-  isLoadingRepliesForComment,
-  loadRepliesError,
-  retryLoadReplies,
-}: CommentItemProps) {
+  onLikeToggle,
+  onDelete,
+}: {
+  comment: Comment
+  user: any
+  replyingTo: string | null
+  onSetReplyingTo: (id: string | null) => void
+  onSetReplyText: (text: string) => void
+  onLikeToggle: (commentId: string) => void
+  onDelete: (commentId: string) => void
+}) {
   const { open } = useAppKit()
-  const { displayName, profileSlug } = resolveCommentUserIdentity(comment)
-  const t = useExtracted()
 
   const handleReplyClick = useCallback(() => {
     if (!user) {
@@ -94,6 +86,56 @@ export default function EventCommentItem({
     onSetReplyingTo(null)
     onSetReplyText('')
   }, [onSetReplyingTo, onSetReplyText])
+
+  return {
+    handleReplyClick,
+    handleLikeToggle,
+    handleDelete,
+    handleReplyAdded,
+    handleReplyCancel,
+  }
+}
+
+export default function EventCommentItem({
+  comment,
+  user,
+  usePrimaryPositionTone = false,
+  isSingleMarket,
+  marketsByConditionId,
+  onLikeToggle,
+  onDelete,
+  replyingTo,
+  onSetReplyingTo,
+  replyText,
+  onSetReplyText,
+  expandedComments,
+  onRepliesLoaded,
+  onDeleteReply,
+  onUpdateReply,
+  createReply,
+  isCreatingComment,
+  isTogglingLikeForComment,
+  isLoadingRepliesForComment,
+  loadRepliesError,
+  retryLoadReplies,
+}: CommentItemProps) {
+  const { displayName, profileSlug } = resolveCommentUserIdentity(comment)
+  const t = useExtracted()
+  const {
+    handleReplyClick,
+    handleLikeToggle,
+    handleDelete,
+    handleReplyAdded,
+    handleReplyCancel,
+  } = useCommentItemHandlers({
+    comment,
+    user,
+    replyingTo,
+    onSetReplyingTo,
+    onSetReplyText,
+    onLikeToggle,
+    onDelete,
+  })
 
   return (
     <div className="comment-item">

@@ -10,13 +10,16 @@ const HowItWorks = dynamic(
   { ssr: false },
 )
 
-export default function HowItWorksDeferred() {
-  const user = useUser()
-  const isMobile = useIsMobile()
+function useDeferredHowItWorksTrigger({
+  user,
+  shouldRenderInHeader,
+}: {
+  user: ReturnType<typeof useUser>
+  shouldRenderInHeader: boolean
+}) {
   const [shouldRender, setShouldRender] = useState(false)
-  const shouldRenderInHeader = !isMobile
 
-  useEffect(() => {
+  useEffect(function deferRenderUntilUserInteraction() {
     if (user || !shouldRenderInHeader) {
       return
     }
@@ -31,12 +34,21 @@ export default function HowItWorksDeferred() {
     window.addEventListener('pointerdown', renderHowItWorks, passiveOnceOptions)
     window.addEventListener('keydown', renderHowItWorks, { once: true })
 
-    return () => {
+    return function removeDeferredRenderListeners() {
       window.removeEventListener('scroll', renderHowItWorks)
       window.removeEventListener('pointerdown', renderHowItWorks)
       window.removeEventListener('keydown', renderHowItWorks)
     }
   }, [shouldRenderInHeader, user])
+
+  return shouldRender
+}
+
+export default function HowItWorksDeferred() {
+  const user = useUser()
+  const isMobile = useIsMobile()
+  const shouldRenderInHeader = !isMobile
+  const shouldRender = useDeferredHowItWorksTrigger({ user, shouldRenderInHeader })
 
   if (user || !shouldRender || !shouldRenderInHeader) {
     return null

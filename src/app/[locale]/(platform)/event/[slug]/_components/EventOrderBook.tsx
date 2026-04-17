@@ -37,56 +37,94 @@ import EventOrderBookRow from './EventOrderBookRow'
 
 export { useOrderBookSummaries }
 
-export default function EventOrderBook({
-  market,
-  outcome,
-  summaries,
-  isLoadingSummaries,
-  eventSlug,
-  surfaceVariant = 'default',
-  oddsFormat = 'price',
-  tradeLabel,
-  onToggleOutcome,
-  toggleOutcomeTooltip,
-  openMobileOrderPanelOnLevelSelect = false,
-}: EventOrderBookProps) {
-  const t = useExtracted()
-  const normalizeOutcomeLabel = useOutcomeLabel()
-  const user = useUser()
-  const { openTradeRequirements } = useTradingOnboarding()
-  const queryClient = useQueryClient()
-  const refreshTimeoutRef = useRef<number | null>(null)
+function useOrderBookRecenter(summary: unknown) {
   const orderBookScrollRef = useRef<HTMLDivElement | null>(null)
   const centerRowRef = useRef<HTMLDivElement | null>(null)
   const hasCenteredRef = useRef(false)
-  const [pendingCancelIds, setPendingCancelIds] = useState<Set<string>>(() => new Set())
-  const tokenId = outcome?.token_id || market.outcomes[0]?.token_id
-  const isSportsCardSurface = surfaceVariant === 'sportsCard'
-  const surfaceClass = isSportsCardSurface ? 'bg-card' : 'bg-background'
 
-  const summary = tokenId ? summaries?.[tokenId] ?? null : null
-  const setType = useOrder(state => state.setType)
-  const setLimitPrice = useOrder(state => state.setLimitPrice)
-  const setLimitShares = useOrder(state => state.setLimitShares)
-  const setAmount = useOrder(state => state.setAmount)
-  const inputRef = useOrder(state => state.inputRef)
-  const currentOrderType = useOrder(state => state.type)
-  const currentOrderSide = useOrder(state => state.side)
-  const setIsMobileOrderPanelOpen = useOrder(state => state.setIsMobileOrderPanelOpen)
-  const isMobile = useIsMobile()
+  const recenterOrderBook = useCallback(function recenterOrderBook(behavior: ScrollBehavior = 'smooth') {
+    const container = orderBookScrollRef.current
+    const centerRow = centerRowRef.current
+    if (!container || !centerRow) {
+      return
+    }
+
+    const target = centerRow.offsetTop - container.clientHeight / 2 + centerRow.clientHeight / 2
+    const maxScrollTop = container.scrollHeight - container.clientHeight
+    const clampedTarget = Math.max(0, Math.min(target, maxScrollTop))
+
+    container.scrollTo({ top: clampedTarget, behavior })
+  }, [])
+
+  useLayoutEffect(function centerOrderBookOnSummaryReady() {
+    if (!summary || hasCenteredRef.current) {
+      return
+    }
+
+    recenterOrderBook('auto')
+    hasCenteredRef.current = true
+  }, [recenterOrderBook, summary])
+
+  return { orderBookScrollRef, centerRowRef, hasCenteredRef, recenterOrderBook }
+}
+
+function useResetCenteringOnTokenChange(tokenId: string | undefined, hasCenteredRef: React.RefObject<boolean>) {
+  useEffect(function resetCenteringFlagOnTokenChange() {
+    hasCenteredRef.current = false
+  }, [tokenId, hasCenteredRef])
+}
+
+function useRecenterKeyboardShortcut(recenterOrderBook: (behavior?: ScrollBehavior) => void) {
+  useEffect(function attachRecenterKeyboardShortcut() {
+    function handleRecenterKeyDown(event: KeyboardEvent) {
+      if (!event.shiftKey || event.key.toLowerCase() !== 'c') {
+        return
+      }
+
+      const target = event.target as HTMLElement | null
+      const tagName = target?.tagName?.toLowerCase()
+      const isEditable = tagName === 'input'
+        || tagName === 'textarea'
+        || tagName === 'select'
+        || target?.isContentEditable
+
+      if (event.metaKey || event.ctrlKey || event.altKey || isEditable) {
+        return
+      }
+
+      event.preventDefault()
+      recenterOrderBook()
+    }
+
+    window.addEventListener('keydown', handleRecenterKeyDown)
+    return function detachRecenterKeyboardShortcut() {
+      window.removeEventListener('keydown', handleRecenterKeyDown)
+    }
+  }, [recenterOrderBook])
+}
+
+function useUserOrderBookOrders({
+  userId,
+  eventSlug,
+  conditionId,
+}: {
+  userId?: string | null
+  eventSlug: string
+  conditionId?: string
+}) {
   const openOrdersQueryKey = useMemo(
-    () => buildUserOpenOrdersQueryKey(user?.id, eventSlug, market.condition_id),
-    [eventSlug, market.condition_id, user?.id],
+    () => buildUserOpenOrdersQueryKey(userId, eventSlug, conditionId),
+    [eventSlug, conditionId, userId],
   )
   const eventOpenOrdersQueryKey = useMemo(
-    () => buildUserOpenOrdersQueryKey(user?.id, eventSlug),
-    [eventSlug, user?.id],
+    () => buildUserOpenOrdersQueryKey(userId, eventSlug),
+    [eventSlug, userId],
   )
   const { data: userOpenOrdersData } = useUserOpenOrdersQuery({
-    userId: user?.id,
+    userId,
     eventSlug,
-    conditionId: market.condition_id,
-    enabled: Boolean(user?.id),
+    conditionId,
+    enabled: Boolean(userId),
   })
   const userOpenOrders = useMemo(
     () => userOpenOrdersData?.pages.flatMap(page => page.data) ?? [],
@@ -122,21 +160,33 @@ export default function EventOrderBook({
     return map
   }, [userOpenOrders])
 
-  const recenterOrderBook = useCallback((behavior: ScrollBehavior = 'smooth') => {
-    const container = orderBookScrollRef.current
-    const centerRow = centerRowRef.current
-    if (!container || !centerRow) {
-      return
+  return { openOrdersQueryKey, eventOpenOrdersQueryKey, userOrdersByLevel }
+}
+
+function useOrderBookUserOrderCancellation({
+  queryClient,
+  openOrdersQueryKey,
+  eventOpenOrdersQueryKey,
+  openTradeRequirements,
+}: {
+  queryClient: ReturnType<typeof useQueryClient>
+  openOrdersQueryKey: readonly unknown[]
+  eventOpenOrdersQueryKey: readonly unknown[]
+  openTradeRequirements: (options: { forceTradingAuth: boolean }) => void
+}) {
+  const t = useExtracted()
+  const refreshTimeoutRef = useRef<number | null>(null)
+  const [pendingCancelIds, setPendingCancelIds] = useState<Set<string>>(() => new Set())
+
+  useEffect(function clearRefreshTimeoutOnUnmount() {
+    return function clearRefreshTimeout() {
+      if (refreshTimeoutRef.current) {
+        window.clearTimeout(refreshTimeoutRef.current)
+      }
     }
-
-    const target = centerRow.offsetTop - container.clientHeight / 2 + centerRow.clientHeight / 2
-    const maxScrollTop = container.scrollHeight - container.clientHeight
-    const clampedTarget = Math.max(0, Math.min(target, maxScrollTop))
-
-    container.scrollTo({ top: clampedTarget, behavior })
   }, [])
 
-  const removeOrderFromCache = useCallback((orderIds: string[]) => {
+  const removeOrderFromCache = useCallback(function removeOrderFromCache(orderIds: string[]) {
     if (!orderIds.length) {
       return
     }
@@ -159,7 +209,7 @@ export default function EventOrderBook({
     updateCache(eventOpenOrdersQueryKey)
   }, [eventOpenOrdersQueryKey, openOrdersQueryKey, queryClient])
 
-  const scheduleOpenOrdersRefresh = useCallback(() => {
+  const scheduleOpenOrdersRefresh = useCallback(function scheduleOpenOrdersRefresh() {
     if (typeof window === 'undefined') {
       return
     }
@@ -172,7 +222,7 @@ export default function EventOrderBook({
     }, 10_000)
   }, [eventOpenOrdersQueryKey, openOrdersQueryKey, queryClient])
 
-  const handleCancelUserOrder = useCallback(async (orderId: string) => {
+  const handleCancelUserOrder = useCallback(async function handleCancelUserOrder(orderId: string) {
     if (!orderId || pendingCancelIds.has(orderId)) {
       return
     }
@@ -220,49 +270,58 @@ export default function EventOrderBook({
     }
   }, [pendingCancelIds, t, removeOrderFromCache, queryClient, openOrdersQueryKey, eventOpenOrdersQueryKey, scheduleOpenOrdersRefresh, openTradeRequirements])
 
-  useEffect(() => () => {
-    if (refreshTimeoutRef.current) {
-      window.clearTimeout(refreshTimeoutRef.current)
-    }
-  }, [])
+  return { pendingCancelIds, handleCancelUserOrder }
+}
 
-  useEffect(() => {
-    hasCenteredRef.current = false
-  }, [tokenId])
+export default function EventOrderBook({
+  market,
+  outcome,
+  summaries,
+  isLoadingSummaries,
+  eventSlug,
+  surfaceVariant = 'default',
+  oddsFormat = 'price',
+  tradeLabel,
+  onToggleOutcome,
+  toggleOutcomeTooltip,
+  openMobileOrderPanelOnLevelSelect = false,
+}: EventOrderBookProps) {
+  const t = useExtracted()
+  const normalizeOutcomeLabel = useOutcomeLabel()
+  const user = useUser()
+  const { openTradeRequirements } = useTradingOnboarding()
+  const queryClient = useQueryClient()
+  const tokenId = outcome?.token_id || market.outcomes[0]?.token_id
+  const isSportsCardSurface = surfaceVariant === 'sportsCard'
+  const surfaceClass = isSportsCardSurface ? 'bg-card' : 'bg-background'
 
-  useLayoutEffect(() => {
-    if (!summary || hasCenteredRef.current) {
-      return
-    }
+  const summary = tokenId ? summaries?.[tokenId] ?? null : null
+  const setType = useOrder(state => state.setType)
+  const setLimitPrice = useOrder(state => state.setLimitPrice)
+  const setLimitShares = useOrder(state => state.setLimitShares)
+  const setAmount = useOrder(state => state.setAmount)
+  const inputRef = useOrder(state => state.inputRef)
+  const currentOrderType = useOrder(state => state.type)
+  const currentOrderSide = useOrder(state => state.side)
+  const setIsMobileOrderPanelOpen = useOrder(state => state.setIsMobileOrderPanelOpen)
+  const isMobile = useIsMobile()
 
-    recenterOrderBook('auto')
-    hasCenteredRef.current = true
-  }, [recenterOrderBook, summary])
+  const { orderBookScrollRef, centerRowRef, hasCenteredRef, recenterOrderBook } = useOrderBookRecenter(summary)
+  useResetCenteringOnTokenChange(tokenId, hasCenteredRef)
+  useRecenterKeyboardShortcut(recenterOrderBook)
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (!event.shiftKey || event.key.toLowerCase() !== 'c') {
-        return
-      }
+  const { openOrdersQueryKey, eventOpenOrdersQueryKey, userOrdersByLevel } = useUserOrderBookOrders({
+    userId: user?.id,
+    eventSlug,
+    conditionId: market.condition_id,
+  })
 
-      const target = event.target as HTMLElement | null
-      const tagName = target?.tagName?.toLowerCase()
-      const isEditable = tagName === 'input'
-        || tagName === 'textarea'
-        || tagName === 'select'
-        || target?.isContentEditable
-
-      if (event.metaKey || event.ctrlKey || event.altKey || isEditable) {
-        return
-      }
-
-      event.preventDefault()
-      recenterOrderBook()
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [recenterOrderBook])
+  const { pendingCancelIds, handleCancelUserOrder } = useOrderBookUserOrderCancellation({
+    queryClient,
+    openOrdersQueryKey,
+    eventOpenOrdersQueryKey,
+    openTradeRequirements,
+  })
 
   const {
     asks,

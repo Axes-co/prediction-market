@@ -62,7 +62,7 @@ interface EventMarketContextContentProps {
   resolvedMarketConditionId?: string
 }
 
-function EventMarketContextContent({ event, resolvedMarketConditionId }: EventMarketContextContentProps) {
+function useMarketContextState(event: Event, resolvedMarketConditionId: string | undefined) {
   const t = useExtracted()
   const [isExpanded, setIsExpanded] = useState(false)
   const [context, setContext] = useState<string | null>(null)
@@ -75,7 +75,156 @@ function EventMarketContextContent({ event, resolvedMarketConditionId }: EventMa
   const [isTyping, setIsTyping] = useState(false)
   const hasAnimatedRef = useRef(false)
   const contextRef = useRef<string | null>(null)
-  const isContentExpanded = isExpanded || Boolean(error)
+
+  useEffect(function preloadCachedContextEffect() {
+    if (!resolvedMarketConditionId) {
+      return
+    }
+
+    let isActive = true
+
+    async function preloadCachedContext() {
+      try {
+        const response = await generateMarketContextAction({
+          slug: event.slug,
+          marketConditionId: resolvedMarketConditionId,
+          readOnly: true,
+        })
+
+        if (!isActive || response?.error || !response?.context) {
+          return
+        }
+
+        setContext(response.context)
+        setHasGenerated(true)
+        setCacheExpiresAtMs(parseTimestamp(response.expiresAt))
+        setContextUpdatedAtMs(parseTimestamp(response.updatedAt) ?? Date.now())
+      }
+      catch (caughtError) {
+        console.error('Failed to fetch cached market context.', caughtError)
+      }
+    }
+
+    void preloadCachedContext()
+
+    return function cleanupPreload() {
+      isActive = false
+    }
+  }, [event.slug, resolvedMarketConditionId])
+
+  useEffect(function cacheExpirationEffect() {
+    if (!cacheExpiresAtMs) {
+      return
+    }
+
+    const remainingMs = Math.max(0, cacheExpiresAtMs - Date.now())
+    const timeout = window.setTimeout(() => {
+      setHasGenerated(false)
+      setContext(null)
+      setIsExpanded(false)
+      setCacheExpiresAtMs(null)
+      setContextUpdatedAtMs(null)
+    }, remainingMs)
+
+    return function cleanupCacheExpiration() {
+      window.clearTimeout(timeout)
+    }
+  }, [cacheExpiresAtMs])
+
+  useEffect(function typewriterAnimationEffect() {
+    let isActive = true
+    let animationFrame = 0
+
+    function scheduleContextDisplay(nextContext: string, nextIsTyping: boolean) {
+      queueMicrotask(() => {
+        if (!isActive) {
+          return
+        }
+
+        setDisplayedContext(nextContext)
+        setIsTyping(nextIsTyping)
+      })
+    }
+
+    if (contextRef.current !== context) {
+      contextRef.current = context
+      hasAnimatedRef.current = false
+    }
+
+    if (!context) {
+      scheduleContextDisplay('', false)
+      return function cleanupNoContext() {
+        isActive = false
+      }
+    }
+
+    if (!isExpanded) {
+      scheduleContextDisplay(context, false)
+      return function cleanupNotExpanded() {
+        isActive = false
+      }
+    }
+
+    if (hasAnimatedRef.current) {
+      return function cleanupAlreadyAnimated() {
+        isActive = false
+      }
+    }
+
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      scheduleContextDisplay(context, false)
+      hasAnimatedRef.current = true
+      return function cleanupReducedMotion() {
+        isActive = false
+      }
+    }
+
+    const fullContext = context
+    const totalDurationMs = Math.min(2400, Math.max(900, fullContext.length * 12))
+    const start = performance.now()
+
+    scheduleContextDisplay('', true)
+
+    function tick(now: number) {
+      if (!isActive) {
+        return
+      }
+
+      const progress = Math.min(1, (now - start) / totalDurationMs)
+      const nextLength = Math.max(1, Math.floor(progress * fullContext.length))
+      setDisplayedContext(fullContext.slice(0, nextLength))
+
+      if (progress < 1) {
+        animationFrame = window.requestAnimationFrame(tick)
+      }
+      else {
+        setIsTyping(false)
+        hasAnimatedRef.current = true
+      }
+    }
+
+    animationFrame = window.requestAnimationFrame(tick)
+
+    return function cleanupAnimation() {
+      isActive = false
+      if (animationFrame) {
+        window.cancelAnimationFrame(animationFrame)
+      }
+    }
+  }, [context, isExpanded])
+
+  const paragraphs = useMemo(() => {
+    if (!displayedContext) {
+      return []
+    }
+
+    return displayedContext
+      .split(/\n{2,}|\r\n{2,}/)
+      .map(block => block.trim())
+      .filter(Boolean)
+  }, [displayedContext])
+
+  const updatedLabel = useMemo(() => formatContextUpdatedLabel(contextUpdatedAtMs), [contextUpdatedAtMs])
 
   async function generateMarketContext() {
     if (!resolvedMarketConditionId) {
@@ -124,159 +273,42 @@ function EventMarketContextContent({ event, resolvedMarketConditionId }: EventMa
     })
   }
 
-  useEffect(() => {
-    if (!resolvedMarketConditionId) {
-      return
-    }
-
-    let isActive = true
-
-    async function preloadCachedContext() {
-      try {
-        const response = await generateMarketContextAction({
-          slug: event.slug,
-          marketConditionId: resolvedMarketConditionId,
-          readOnly: true,
-        })
-
-        if (!isActive || response?.error || !response?.context) {
-          return
-        }
-
-        setContext(response.context)
-        setHasGenerated(true)
-        setCacheExpiresAtMs(parseTimestamp(response.expiresAt))
-        setContextUpdatedAtMs(parseTimestamp(response.updatedAt) ?? Date.now())
-      }
-      catch (caughtError) {
-        console.error('Failed to fetch cached market context.', caughtError)
-      }
-    }
-
-    void preloadCachedContext()
-
-    return () => {
-      isActive = false
-    }
-  }, [event.slug, resolvedMarketConditionId])
-
-  useEffect(() => {
-    if (!cacheExpiresAtMs) {
-      return
-    }
-
-    const remainingMs = Math.max(0, cacheExpiresAtMs - Date.now())
-    const timeout = window.setTimeout(() => {
-      setHasGenerated(false)
-      setContext(null)
-      setIsExpanded(false)
-      setCacheExpiresAtMs(null)
-      setContextUpdatedAtMs(null)
-    }, remainingMs)
-
-    return () => {
-      window.clearTimeout(timeout)
-    }
-  }, [cacheExpiresAtMs])
-
-  useEffect(() => {
-    let isActive = true
-    let animationFrame = 0
-
-    function scheduleContextDisplay(nextContext: string, nextIsTyping: boolean) {
-      queueMicrotask(() => {
-        if (!isActive) {
-          return
-        }
-
-        setDisplayedContext(nextContext)
-        setIsTyping(nextIsTyping)
-      })
-    }
-
-    if (contextRef.current !== context) {
-      contextRef.current = context
-      hasAnimatedRef.current = false
-    }
-
-    if (!context) {
-      scheduleContextDisplay('', false)
-      return () => {
-        isActive = false
-      }
-    }
-
-    if (!isExpanded) {
-      scheduleContextDisplay(context, false)
-      return () => {
-        isActive = false
-      }
-    }
-
-    if (hasAnimatedRef.current) {
-      return () => {
-        isActive = false
-      }
-    }
-
-    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      scheduleContextDisplay(context, false)
-      hasAnimatedRef.current = true
-      return () => {
-        isActive = false
-      }
-    }
-
-    const fullContext = context
-    const totalDurationMs = Math.min(2400, Math.max(900, fullContext.length * 12))
-    const start = performance.now()
-
-    scheduleContextDisplay('', true)
-
-    function tick(now: number) {
-      if (!isActive) {
-        return
-      }
-
-      const progress = Math.min(1, (now - start) / totalDurationMs)
-      const nextLength = Math.max(1, Math.floor(progress * fullContext.length))
-      setDisplayedContext(fullContext.slice(0, nextLength))
-
-      if (progress < 1) {
-        animationFrame = window.requestAnimationFrame(tick)
-      }
-      else {
-        setIsTyping(false)
-        hasAnimatedRef.current = true
-      }
-    }
-
-    animationFrame = window.requestAnimationFrame(tick)
-
-    return () => {
-      isActive = false
-      if (animationFrame) {
-        window.cancelAnimationFrame(animationFrame)
-      }
-    }
-  }, [context, isExpanded])
-
-  const paragraphs = useMemo(() => {
-    if (!displayedContext) {
-      return []
-    }
-
-    return displayedContext
-      .split(/\n{2,}|\r\n{2,}/)
-      .map(block => block.trim())
-      .filter(Boolean)
-  }, [displayedContext])
-
-  const updatedLabel = useMemo(() => formatContextUpdatedLabel(contextUpdatedAtMs), [contextUpdatedAtMs])
-
   function toggleCollapse() {
     setIsExpanded(current => !current)
   }
+
+  return {
+    isExpanded,
+    context,
+    displayedContext,
+    error,
+    isPending,
+    hasGenerated,
+    isTyping,
+    paragraphs,
+    updatedLabel,
+    generateMarketContext,
+    toggleCollapse,
+    resolvedMarketConditionId,
+  }
+}
+
+function EventMarketContextContent({ event, resolvedMarketConditionId }: EventMarketContextContentProps) {
+  const t = useExtracted()
+  const {
+    isExpanded,
+    context,
+    displayedContext,
+    error,
+    isPending,
+    hasGenerated,
+    isTyping,
+    paragraphs,
+    updatedLabel,
+    generateMarketContext,
+    toggleCollapse,
+  } = useMarketContextState(event, resolvedMarketConditionId)
+  const isContentExpanded = isExpanded || Boolean(error)
 
   return (
     <section className="overflow-hidden rounded-xl border transition-all duration-500 ease-in-out">

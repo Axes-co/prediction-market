@@ -65,9 +65,7 @@ function formatConditionLabel(conditionId: string, market?: Market) {
   return `${prefix}...${suffix}`
 }
 
-export default function EventChangeLog({ entries, markets }: EventChangeLogProps) {
-  const t = useExtracted()
-  const locale = useLocale()
+function useChangeLogData(entries: ConditionChangeLogEntry[], markets: Market[]) {
   const marketLookup = useMemo(() => {
     return new Map(markets.map(market => [market.condition_id, market]))
   }, [markets])
@@ -85,6 +83,14 @@ export default function EventChangeLog({ entries, markets }: EventChangeLogProps
       }))
     })
   }, [entries])
+
+  return { marketLookup, rows }
+}
+
+export default function EventChangeLog({ entries, markets }: EventChangeLogProps) {
+  const t = useExtracted()
+  const locale = useLocale()
+  const { marketLookup, rows } = useChangeLogData(entries, markets)
 
   if (entries.length === 0) {
     return null

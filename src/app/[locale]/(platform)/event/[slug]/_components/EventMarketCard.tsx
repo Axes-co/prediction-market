@@ -35,29 +35,7 @@ interface EventMarketCardProps {
   onCashOut?: (market: EventMarketRow['market'], tag: MarketPositionTag) => void
 }
 
-function EventMarketCardComponent({
-  row,
-  showMarketIcon,
-  isExpanded,
-  isActiveMarket,
-  showInReviewTag = false,
-  activeOutcomeIndex,
-  onToggle,
-  onBuy,
-  chanceHighlightKey,
-  positionTags = [],
-  openOrdersCount = 0,
-  onCashOut,
-}: EventMarketCardProps) {
-  const t = useExtracted()
-  const normalizeOutcomeLabel = useOutcomeLabel()
-  const { market, yesOutcome, noOutcome, yesPriceValue, noPriceValue, chanceMeta } = row
-  const yesOutcomeText = normalizeOutcomeLabel(yesOutcome?.outcome_text) ?? t('Yes')
-  const noOutcomeText = normalizeOutcomeLabel(noOutcome?.outcome_text) ?? t('No')
-  const resolvedPositionTags = positionTags.filter(tag => tag.shares > 0)
-  const hasOpenOrders = openOrdersCount > 0
-  const shouldShowTags = resolvedPositionTags.length > 0 || hasOpenOrders
-  const shouldShowIcon = showMarketIcon && Boolean(market.icon_url)
+function useMarketCardVolume(market: EventMarketRow['market'], yesOutcome: EventMarketRow['yesOutcome'], noOutcome: EventMarketRow['noOutcome']) {
   const volumeRequestPayload = useMemo(() => {
     const tokenIds = [yesOutcome?.token_id, noOutcome?.token_id].filter(Boolean) as string[]
     if (!market.condition_id || tokenIds.length < 2) {
@@ -109,6 +87,34 @@ function EventMarketCardComponent({
     }
     return market.volume
   }, [market.volume, volumeFromApi])
+
+  return resolvedVolume
+}
+
+function EventMarketCardComponent({
+  row,
+  showMarketIcon,
+  isExpanded,
+  isActiveMarket,
+  showInReviewTag = false,
+  activeOutcomeIndex,
+  onToggle,
+  onBuy,
+  chanceHighlightKey,
+  positionTags = [],
+  openOrdersCount = 0,
+  onCashOut,
+}: EventMarketCardProps) {
+  const t = useExtracted()
+  const normalizeOutcomeLabel = useOutcomeLabel()
+  const { market, yesOutcome, noOutcome, yesPriceValue, noPriceValue, chanceMeta } = row
+  const yesOutcomeText = normalizeOutcomeLabel(yesOutcome?.outcome_text) ?? t('Yes')
+  const noOutcomeText = normalizeOutcomeLabel(noOutcome?.outcome_text) ?? t('No')
+  const resolvedPositionTags = positionTags.filter(tag => tag.shares > 0)
+  const hasOpenOrders = openOrdersCount > 0
+  const shouldShowTags = resolvedPositionTags.length > 0 || hasOpenOrders
+  const shouldShowIcon = showMarketIcon && Boolean(market.icon_url)
+  const resolvedVolume = useMarketCardVolume(market, yesOutcome, noOutcome)
 
   return (
     <div

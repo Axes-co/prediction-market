@@ -6,7 +6,7 @@ import eslintPluginUseEncapsulation from 'eslint-plugin-use-encapsulation'
 export default antfu({
   react: true,
   nextjs: true,
-  ignores: ['AGENTS.md', 'tests'],
+  ignores: ['tests'],
 }, {
   plugins: {
     'better-tailwindcss': eslintPluginBetterTailwindcss,
@@ -16,7 +16,7 @@ export default antfu({
   rules: {
     ...reactYouMightNotNeedAnEffect.configs.recommended.rules,
     ...eslintPluginBetterTailwindcss.configs['recommended-error'].rules,
-    'use-encapsulation/prefer-custom-hooks': ['off'],
+    'use-encapsulation/prefer-custom-hooks': ['warn'],
     'node/prefer-global/process': 'off',
     'no-console': 'off',
     'prefer-arrow-callback': ['error', { allowNamedFunctions: true }],

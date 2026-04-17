@@ -25,6 +25,17 @@ interface EventActivityProps {
   event: Event
 }
 
+function resolveActivityRowKey(activity: ActivityOrder) {
+  return [
+    activity.id,
+    activity.created_at,
+    activity.tx_hash ?? 'no-tx',
+    activity.user.id,
+    activity.market.condition_id ?? 'no-market',
+    activity.side,
+  ].join(':')
+}
+
 function getEventTokenIds(event: Event) {
   const tokenIds = new Set<string>()
 
@@ -39,102 +50,93 @@ function getEventTokenIds(event: Event) {
   return Array.from(tokenIds)
 }
 
-export default function EventActivity({ event }: EventActivityProps) {
-  const t = useExtracted()
-  const [minAmountFilter, setMinAmountFilter] = useState('none')
-  const [infiniteScrollError, setInfiniteScrollError] = useState<string | null>(null)
-  const queryClient = useQueryClient()
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
-  const isPollingRef = useRef(false)
-  const lastWsRefreshAtRef = useRef(0)
-  const wsRefreshThrottleMs = 2000
-  const normalizeOutcomeLabel = useOutcomeLabel()
-  const isSportsEvent = Boolean(event.sports_sport_slug?.trim())
+const WS_REFRESH_THROTTLE_MS = 2000
+const ACTIVITY_POLL_INTERVAL_MS = 60_000
 
-  useEffect(() => {
-    queueMicrotask(() => setInfiniteScrollError(null))
-  }, [minAmountFilter])
+function useClearInfiniteScrollErrorOnFilterChange({
+  minAmountFilter,
+  setInfiniteScrollError,
+}: {
+  minAmountFilter: string
+  setInfiniteScrollError: (value: string | null) => void
+}) {
+  useEffect(function clearInfiniteScrollErrorOnFilterChange() {
+    queueMicrotask(function clearErrorNow() {
+      setInfiniteScrollError(null)
+    })
+  }, [minAmountFilter, setInfiniteScrollError])
+}
 
-  const marketIds = useMemo(
-    () => event.markets.map(market => market.condition_id).filter(Boolean),
-    [event.markets],
-  )
-  const marketKey = useMemo(() => marketIds.join(','), [marketIds])
-  const hasMarkets = marketIds.length > 0
-  const tokenIds = useMemo(
-    () => {
-      return getEventTokenIds(event)
-    },
-    [event],
-  )
-
-  const queryKey = useMemo(
-    () => ['event-activity', event.slug, marketKey, minAmountFilter],
-    [event.slug, marketKey, minAmountFilter],
-  )
-
-  const {
-    status,
-    data,
-    isFetchingNextPage,
-    fetchNextPage,
-    hasNextPage,
-    refetch,
-  } = useInfiniteQuery({
-    queryKey,
-    queryFn: ({ pageParam = 0, signal }) =>
-      fetchEventTrades({
-        marketIds,
-        pageParam,
-        minAmountFilter,
-        signal,
-      }),
-    getNextPageParam: (lastPage, allPages) => {
-      if (lastPage.length === EVENT_ACTIVITY_PAGE_SIZE) {
-        return allPages.reduce((total, page) => total + page.length, 0)
-      }
-
-      return undefined
-    },
-    initialPageParam: 0,
-    staleTime: 1000 * 60 * 5,
-    gcTime: 1000 * 60 * 10,
-    enabled: hasMarkets,
-  })
-
-  const activities: ActivityOrder[] = data?.pages.flat() ?? []
-  const loading = hasMarkets && status === 'pending'
-  const hasInitialError = hasMarkets && status === 'error'
-
-  useEffect(() => {
-    const node = loadMoreRef.current
+function useInfiniteScrollSentinel({
+  sentinelRef,
+  hasMarkets,
+  hasNextPage,
+  isFetchingNextPage,
+  loading,
+  hasError,
+  fetchNextPage,
+  setInfiniteScrollError,
+  errorMessage,
+}: {
+  sentinelRef: React.RefObject<HTMLDivElement | null>
+  hasMarkets: boolean
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  loading: boolean
+  hasError: boolean
+  fetchNextPage: () => Promise<unknown>
+  setInfiniteScrollError: (value: string | null) => void
+  errorMessage: string
+}) {
+  useEffect(function observeInfiniteScrollSentinel() {
+    const node = sentinelRef.current
     if (!node || !hasMarkets) {
       return
     }
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0]
-        if (
-          entry?.isIntersecting
-          && hasNextPage
-          && !isFetchingNextPage
-          && !loading
-          && !infiniteScrollError
-        ) {
-          fetchNextPage().catch((error) => {
-            setInfiniteScrollError(error.message || t('Failed to load more activity'))
-          })
-        }
-      },
-      { rootMargin: '200px 0px' },
-    )
+    const observer = new IntersectionObserver(function handleSentinelIntersection(entries) {
+      const entry = entries[0]
+      if (
+        entry?.isIntersecting
+        && hasNextPage
+        && !isFetchingNextPage
+        && !loading
+        && !hasError
+      ) {
+        fetchNextPage().catch((error) => {
+          setInfiniteScrollError(error.message || errorMessage)
+        })
+      }
+    }, { rootMargin: '200px 0px' })
 
     observer.observe(node)
-    return () => observer.disconnect()
-  }, [activities.length, fetchNextPage, hasMarkets, hasNextPage, infiniteScrollError, isFetchingNextPage, loading, t])
+    return function unobserveInfiniteScrollSentinel() {
+      observer.disconnect()
+    }
+  }, [errorMessage, fetchNextPage, hasError, hasMarkets, hasNextPage, isFetchingNextPage, loading, sentinelRef, setInfiniteScrollError])
+}
 
-  const refreshLatestActivity = useCallback(async () => {
+function useRealtimeActivityRefresh({
+  hasMarkets,
+  loading,
+  marketIds,
+  tokenIds,
+  minAmountFilter,
+  queryClient,
+  queryKey,
+}: {
+  hasMarkets: boolean
+  loading: boolean
+  marketIds: string[]
+  tokenIds: string[]
+  minAmountFilter: string
+  queryClient: ReturnType<typeof useQueryClient>
+  queryKey: readonly unknown[]
+}) {
+  const isPollingRef = useRef(false)
+  const lastWsRefreshAtRef = useRef(0)
+
+  const refreshLatestActivity = useCallback(async function refreshLatestActivity() {
     if (!hasMarkets || loading || isPollingRef.current) {
       return
     }
@@ -188,19 +190,21 @@ export default function EventActivity({ event }: EventActivityProps) {
     }
   }, [hasMarkets, loading, marketIds, minAmountFilter, queryClient, queryKey])
 
-  useEffect(() => {
+  useEffect(function pollActivityWhilePageVisible() {
     if (!hasMarkets) {
       return
     }
 
-    const interval = window.setInterval(() => {
+    const interval = window.setInterval(function refreshIfVisible() {
       if (document.hidden) {
         return
       }
       void refreshLatestActivity()
-    }, 60_000)
+    }, ACTIVITY_POLL_INTERVAL_MS)
 
-    return () => window.clearInterval(interval)
+    return function stopActivityPolling() {
+      window.clearInterval(interval)
+    }
   }, [hasMarkets, refreshLatestActivity])
 
   const handleMarketChannelMessage = useCallback((payload: any) => {
@@ -218,7 +222,7 @@ export default function EventActivity({ event }: EventActivityProps) {
       return
     }
     const now = Date.now()
-    if (now - lastWsRefreshAtRef.current < wsRefreshThrottleMs) {
+    if (now - lastWsRefreshAtRef.current < WS_REFRESH_THROTTLE_MS) {
       return
     }
     lastWsRefreshAtRef.current = now
@@ -226,6 +230,94 @@ export default function EventActivity({ event }: EventActivityProps) {
   }, [hasMarkets, refreshLatestActivity, tokenIds])
 
   useMarketChannelSubscription(handleMarketChannelMessage)
+}
+
+export default function EventActivity({ event }: EventActivityProps) {
+  const t = useExtracted()
+  const [minAmountFilter, setMinAmountFilter] = useState('none')
+  const [infiniteScrollError, setInfiniteScrollError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const normalizeOutcomeLabel = useOutcomeLabel()
+  const isSportsEvent = Boolean(event.sports_sport_slug?.trim())
+
+  useClearInfiniteScrollErrorOnFilterChange({
+    minAmountFilter,
+    setInfiniteScrollError,
+  })
+
+  const marketIds = useMemo(
+    () => event.markets.map(market => market.condition_id).filter(Boolean),
+    [event.markets],
+  )
+  const marketKey = useMemo(() => marketIds.join(','), [marketIds])
+  const hasMarkets = marketIds.length > 0
+  const tokenIds = useMemo(
+    () => {
+      return getEventTokenIds(event)
+    },
+    [event],
+  )
+
+  const queryKey = useMemo(
+    () => ['event-activity', event.slug, marketKey, minAmountFilter],
+    [event.slug, marketKey, minAmountFilter],
+  )
+
+  const {
+    status,
+    data,
+    isFetchingNextPage,
+    fetchNextPage,
+    hasNextPage,
+    refetch,
+  } = useInfiniteQuery({
+    queryKey,
+    queryFn: ({ pageParam = 0, signal }) =>
+      fetchEventTrades({
+        marketIds,
+        pageParam,
+        minAmountFilter,
+        signal,
+      }),
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.length === EVENT_ACTIVITY_PAGE_SIZE) {
+        return allPages.reduce((total, page) => total + page.length, 0)
+      }
+
+      return undefined
+    },
+    initialPageParam: 0,
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 10,
+    enabled: hasMarkets,
+  })
+
+  const activities: ActivityOrder[] = data?.pages.flat() ?? []
+  const loading = hasMarkets && status === 'pending'
+  const hasInitialError = hasMarkets && status === 'error'
+
+  useInfiniteScrollSentinel({
+    sentinelRef: loadMoreRef,
+    hasMarkets,
+    hasNextPage,
+    isFetchingNextPage,
+    loading,
+    hasError: Boolean(infiniteScrollError),
+    fetchNextPage,
+    setInfiniteScrollError,
+    errorMessage: t('Failed to load more activity'),
+  })
+
+  useRealtimeActivityRefresh({
+    hasMarkets,
+    loading,
+    marketIds,
+    tokenIds,
+    minAmountFilter,
+    queryClient,
+    queryKey,
+  })
 
   function formatTotalValue(totalValueMicro: number) {
     const totalValue = totalValueMicro / MICRO_UNIT
@@ -347,7 +439,7 @@ export default function EventActivity({ event }: EventActivityProps) {
 
               return (
                 <div
-                  key={activity.id}
+                  key={resolveActivityRowKey(activity)}
                 >
                   <ProfileLink
                     user={{

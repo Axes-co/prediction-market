@@ -48,7 +48,7 @@ async function fetchMainCategoriesForOrdering() {
   return result.data ?? []
 }
 
-export default function MainCategorySortDialog({
+function useMainCategorySortState({
   open,
   onOpenChange,
   onSaved,
@@ -142,6 +142,41 @@ export default function MainCategorySortDialog({
       setIsSaving(false)
     }
   }, [handleOpenChange, onSaved, orderedCategories, queryClient, t])
+
+  return {
+    isMobile,
+    orderedCategories,
+    error,
+    isLoading,
+    refetch,
+    hasChanges,
+    handleMoveCategory,
+    handleOpenChange,
+    handleSave,
+    sortError,
+    isSaving,
+  }
+}
+
+export default function MainCategorySortDialog({
+  open,
+  onOpenChange,
+  onSaved,
+}: MainCategorySortDialogProps) {
+  const t = useExtracted()
+  const {
+    isMobile,
+    orderedCategories,
+    error,
+    isLoading,
+    refetch,
+    hasChanges,
+    handleMoveCategory,
+    handleOpenChange,
+    handleSave,
+    sortError,
+    isSaving,
+  } = useMainCategorySortState({ open, onOpenChange, onSaved })
 
   const errorMessage = error instanceof Error
     ? error.message

@@ -19,6 +19,28 @@ interface SportsClientProps {
   sportsSection?: SportsSection | null
 }
 
+function useInitialTagFilterSync({
+  initialTag,
+  effectiveMainTag,
+  updateFilters,
+}: {
+  initialTag: string | undefined
+  effectiveMainTag: string
+  updateFilters: ReturnType<typeof useFilters>['updateFilters']
+}) {
+  const lastAppliedInitialTagRef = useRef<string | null>(null)
+
+  useEffect(function syncInitialTagToFilters() {
+    const targetTag = initialTag ?? 'sports'
+    if (lastAppliedInitialTagRef.current === targetTag) {
+      return
+    }
+
+    lastAppliedInitialTagRef.current = targetTag
+    updateFilters({ tag: targetTag, mainTag: effectiveMainTag })
+  }, [effectiveMainTag, initialTag, updateFilters])
+}
+
 export default function SportsClient({
   initialEvents,
   initialTag,
@@ -29,18 +51,9 @@ export default function SportsClient({
   sportsSection = null,
 }: SportsClientProps) {
   const { filters, updateFilters } = useFilters()
-  const lastAppliedInitialTagRef = useRef<string | null>(null)
   const effectiveMainTag = mainTag?.trim() || initialTag?.trim() || 'sports'
 
-  useEffect(() => {
-    const targetTag = initialTag ?? 'sports'
-    if (lastAppliedInitialTagRef.current === targetTag) {
-      return
-    }
-
-    lastAppliedInitialTagRef.current = targetTag
-    updateFilters({ tag: targetTag, mainTag: effectiveMainTag })
-  }, [effectiveMainTag, initialTag, updateFilters])
+  useInitialTagFilterSync({ initialTag, effectiveMainTag, updateFilters })
 
   return (
     <SportsEventsGrid

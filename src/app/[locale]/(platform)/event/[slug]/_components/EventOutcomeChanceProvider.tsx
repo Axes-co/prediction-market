@@ -20,7 +20,7 @@ interface EventOutcomeChanceProviderProps {
   children: React.ReactNode
 }
 
-export function EventOutcomeChanceProvider({ children }: EventOutcomeChanceProviderProps) {
+function useEventOutcomeChanceState() {
   const [chanceByMarket, setChanceByMarket] = useState<Record<string, number>>({})
   const [yesPriceByMarket, setYesPriceByMarket] = useState<Record<string, number>>({})
   const [chanceChangeByMarket, setChanceChangeByMarket] = useState<Record<string, number>>({})
@@ -36,6 +36,12 @@ export function EventOutcomeChanceProvider({ children }: EventOutcomeChanceProvi
     setChanceChangeByMarket,
     setMarketQuotesByMarket,
   }), [chanceByMarket, yesPriceByMarket, chanceChangeByMarket, marketQuotesByMarket])
+
+  return value
+}
+
+export function EventOutcomeChanceProvider({ children }: EventOutcomeChanceProviderProps) {
+  const value = useEventOutcomeChanceState()
 
   return (
     <EventOutcomeChanceContext value={value}>

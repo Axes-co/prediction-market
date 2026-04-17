@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react'
 import type { AdminThemeSiteSettingsInitialState } from '@/app/[locale]/admin/theme/_types/theme-form-state'
 import type { CustomJavascriptCodeConfig, CustomJavascriptCodeDisablePage } from '@/lib/custom-javascript-code'
-import { ChevronDownIcon, ImageUp, RefreshCwIcon } from 'lucide-react'
+import { ChevronDownIcon, ImageUp, RefreshCwIcon, SearchIcon, XIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
@@ -14,8 +14,10 @@ import {
   updateGeneralSettingsAction,
 } from '@/app/[locale]/admin/(general)/_actions/update-general-settings'
 import AllowedMarketCreatorsManager from '@/app/[locale]/admin/(general)/_components/AllowedMarketCreatorsManager'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { InputError } from '@/components/ui/input-error'
 import { Label } from '@/components/ui/label'
@@ -27,6 +29,7 @@ import {
   MAX_CUSTOM_JAVASCRIPT_CODES,
   serializeCustomJavascriptCodes,
 } from '@/lib/custom-javascript-code'
+import { GEOBLOCK_COUNTRY_OPTIONS } from '@/lib/geoblock-country-options'
 import { cn, sanitizeSvg } from '@/lib/utils'
 
 const initialState = {
@@ -36,6 +39,10 @@ const initialState = {
 const AUTOMATIC_MODEL_VALUE = '__AUTOMATIC__'
 const MAX_GLOBAL_ANNOUNCEMENT_MESSAGE_LENGTH = 220
 const MAX_GLOBAL_ANNOUNCEMENT_LINK_URL_LENGTH = 2048
+
+function formatBlockedCountriesValue(countries: string[]) {
+  return countries.join(', ')
+}
 
 interface ModelOption {
   id: string
@@ -60,6 +67,7 @@ interface InitialGlobalAnnouncementSettings {
 interface AdminGeneralSettingsFormProps {
   initialThemeSiteSettings: AdminThemeSiteSettingsInitialState
   initialGlobalAnnouncement: InitialGlobalAnnouncementSettings
+  initialBlockedCountries: string[]
   initialTermsOfServicePdfPath: string
   initialTermsOfServicePdfUrl: string | null
   openRouterSettings: OpenRouterGeneralSettings
@@ -89,6 +97,11 @@ function toCustomJavascriptCodeConfig({ id: _id, ...code }: CustomJavascriptCode
   return code
 }
 
+function useSettingsAccordionSectionId() {
+  const contentId = useId()
+  return contentId
+}
+
 function SettingsAccordionSection({
   value,
   header,
@@ -97,7 +110,7 @@ function SettingsAccordionSection({
   isOpen,
   onToggle,
 }: SettingsAccordionSectionProps) {
-  const contentId = useId()
+  const contentId = useSettingsAccordionSectionId()
 
   return (
     <section
@@ -150,47 +163,26 @@ function SettingsAccordionSection({
   )
 }
 
-function AdminGeneralSettingsFormInner({
+function useGeneralSettingsFormState({
   initialThemeSiteSettings,
   initialGlobalAnnouncement,
+  initialBlockedCountries,
   initialTermsOfServicePdfPath,
-  initialTermsOfServicePdfUrl,
   openRouterSettings,
-}: AdminGeneralSettingsFormProps) {
+}: {
+  initialThemeSiteSettings: AdminThemeSiteSettingsInitialState
+  initialGlobalAnnouncement: InitialGlobalAnnouncementSettings
+  initialBlockedCountries: string[]
+  initialTermsOfServicePdfPath: string
+  openRouterSettings: OpenRouterGeneralSettings
+}) {
   const t = useExtracted()
-  const initialSiteName = initialThemeSiteSettings.siteName
-  const initialSiteDescription = initialThemeSiteSettings.siteDescription
   const initialLogoMode = initialThemeSiteSettings.logoMode
-  const initialLogoSvg = initialThemeSiteSettings.logoSvg
-  const initialLogoImagePath = initialThemeSiteSettings.logoImagePath
   const initialLogoImageUrl = initialThemeSiteSettings.logoImageUrl
-  const initialPwaIcon192Path = initialThemeSiteSettings.pwaIcon192Path
-  const initialPwaIcon512Path = initialThemeSiteSettings.pwaIcon512Path
   const initialPwaIcon192Url = initialThemeSiteSettings.pwaIcon192Url
   const initialPwaIcon512Url = initialThemeSiteSettings.pwaIcon512Url
-  const initialGoogleAnalyticsId = initialThemeSiteSettings.googleAnalyticsId
-  const initialDiscordLink = initialThemeSiteSettings.discordLink
-  const initialTwitterLink = initialThemeSiteSettings.twitterLink
-  const initialFacebookLink = initialThemeSiteSettings.facebookLink
-  const initialInstagramLink = initialThemeSiteSettings.instagramLink
-  const initialTiktokLink = initialThemeSiteSettings.tiktokLink
-  const initialLinkedinLink = initialThemeSiteSettings.linkedinLink
-  const initialYoutubeLink = initialThemeSiteSettings.youtubeLink
-  const initialWhatsappLink = initialThemeSiteSettings.whatsappLink
-  const initialTelegramLink = initialThemeSiteSettings.telegramLink
-  const initialRedditLink = initialThemeSiteSettings.redditLink
-  const initialSupportUrl = initialThemeSiteSettings.supportUrl
-  const initialFooterDisclaimer = initialThemeSiteSettings.footerDisclaimer
-  const initialGlobalAnnouncementMessage = initialGlobalAnnouncement.message
-  const initialGlobalAnnouncementLinkUrl = initialGlobalAnnouncement.linkUrl
-  const initialGlobalAnnouncementDisabledOn = initialGlobalAnnouncement.disabledOn
   const initialCustomJavascriptCodes = initialThemeSiteSettings.customJavascriptCodes
-  const initialFeeRecipientWallet = initialThemeSiteSettings.feeRecipientWallet
-  const initialLiFiIntegrator = initialThemeSiteSettings.lifiIntegrator
-  const initialLiFiApiKey = initialThemeSiteSettings.lifiApiKey
-  const initialLiFiApiKeyConfigured = initialThemeSiteSettings.lifiApiKeyConfigured
   const initialOpenRouterModel = openRouterSettings.defaultModel ?? ''
-  const initialOpenRouterApiKeyConfigured = openRouterSettings.isApiKeyConfigured
 
   const router = useRouter()
   const [state, formAction, isPending] = useActionState(updateGeneralSettingsAction, initialState)
@@ -198,38 +190,39 @@ function AdminGeneralSettingsFormInner({
   const wasPendingRef = useRef(isPending)
   const nextCustomJavascriptCodeIdRef = useRef(0)
 
-  const [siteName, setSiteName] = useState(initialSiteName)
-  const [siteDescription, setSiteDescription] = useState(initialSiteDescription)
+  const [siteName, setSiteName] = useState(initialThemeSiteSettings.siteName)
+  const [siteDescription, setSiteDescription] = useState(initialThemeSiteSettings.siteDescription)
   const [logoMode, setLogoMode] = useState(initialLogoMode)
-  const [logoSvg, setLogoSvg] = useState(initialLogoSvg)
-  const [logoImagePath, setLogoImagePath] = useState(initialLogoImagePath)
-  const [pwaIcon192Path] = useState(initialPwaIcon192Path)
-  const [pwaIcon512Path] = useState(initialPwaIcon512Path)
-  const [googleAnalyticsId, setGoogleAnalyticsId] = useState(initialGoogleAnalyticsId)
-  const [discordLink, setDiscordLink] = useState(initialDiscordLink)
-  const [twitterLink, setTwitterLink] = useState(initialTwitterLink)
-  const [facebookLink, setFacebookLink] = useState(initialFacebookLink)
-  const [instagramLink, setInstagramLink] = useState(initialInstagramLink)
-  const [tiktokLink, setTiktokLink] = useState(initialTiktokLink)
-  const [linkedinLink, setLinkedinLink] = useState(initialLinkedinLink)
-  const [youtubeLink, setYoutubeLink] = useState(initialYoutubeLink)
-  const [whatsappLink, setWhatsappLink] = useState(initialWhatsappLink)
-  const [telegramLink, setTelegramLink] = useState(initialTelegramLink)
-  const [redditLink, setRedditLink] = useState(initialRedditLink)
-  const [supportUrl, setSupportUrl] = useState(initialSupportUrl)
-  const [footerDisclaimer, setFooterDisclaimer] = useState(initialFooterDisclaimer)
-  const [globalAnnouncementMessage, setGlobalAnnouncementMessage] = useState(initialGlobalAnnouncementMessage)
-  const [globalAnnouncementLinkUrl, setGlobalAnnouncementLinkUrl] = useState(initialGlobalAnnouncementLinkUrl)
+  const [logoSvg, setLogoSvg] = useState(initialThemeSiteSettings.logoSvg)
+  const [logoImagePath, setLogoImagePath] = useState(initialThemeSiteSettings.logoImagePath)
+  const [pwaIcon192Path] = useState(initialThemeSiteSettings.pwaIcon192Path)
+  const [pwaIcon512Path] = useState(initialThemeSiteSettings.pwaIcon512Path)
+  const [googleAnalyticsId, setGoogleAnalyticsId] = useState(initialThemeSiteSettings.googleAnalyticsId)
+  const [discordLink, setDiscordLink] = useState(initialThemeSiteSettings.discordLink)
+  const [twitterLink, setTwitterLink] = useState(initialThemeSiteSettings.twitterLink)
+  const [facebookLink, setFacebookLink] = useState(initialThemeSiteSettings.facebookLink)
+  const [instagramLink, setInstagramLink] = useState(initialThemeSiteSettings.instagramLink)
+  const [tiktokLink, setTiktokLink] = useState(initialThemeSiteSettings.tiktokLink)
+  const [linkedinLink, setLinkedinLink] = useState(initialThemeSiteSettings.linkedinLink)
+  const [youtubeLink, setYoutubeLink] = useState(initialThemeSiteSettings.youtubeLink)
+  const [whatsappLink, setWhatsappLink] = useState(initialThemeSiteSettings.whatsappLink)
+  const [telegramLink, setTelegramLink] = useState(initialThemeSiteSettings.telegramLink)
+  const [redditLink, setRedditLink] = useState(initialThemeSiteSettings.redditLink)
+  const [supportUrl, setSupportUrl] = useState(initialThemeSiteSettings.supportUrl)
+  const [footerDisclaimer, setFooterDisclaimer] = useState(initialThemeSiteSettings.footerDisclaimer)
+  const [blockedCountries, setBlockedCountries] = useState(initialBlockedCountries)
+  const [globalAnnouncementMessage, setGlobalAnnouncementMessage] = useState(initialGlobalAnnouncement.message)
+  const [globalAnnouncementLinkUrl, setGlobalAnnouncementLinkUrl] = useState(initialGlobalAnnouncement.linkUrl)
   const [globalAnnouncementDisabledOn, setGlobalAnnouncementDisabledOn] = useState<CustomJavascriptCodeDisablePage[]>(
-    initialGlobalAnnouncementDisabledOn,
+    initialGlobalAnnouncement.disabledOn,
   )
   const [customJavascriptCodes, setCustomJavascriptCodes] = useState<CustomJavascriptCodeDraft[]>(
     () => initialCustomJavascriptCodes.map(code => createCustomJavascriptCodeDraft(nextCustomJavascriptCodeIdRef.current++, code)),
   )
-  const [feeRecipientWallet, setFeeRecipientWallet] = useState(initialFeeRecipientWallet)
+  const [feeRecipientWallet, setFeeRecipientWallet] = useState(initialThemeSiteSettings.feeRecipientWallet)
   const [tosPdfPath, setTosPdfPath] = useState(initialTermsOfServicePdfPath)
-  const [lifiIntegrator, setLifiIntegrator] = useState(initialLiFiIntegrator)
-  const [lifiApiKey, setLifiApiKey] = useState(initialLiFiApiKey)
+  const [lifiIntegrator, setLifiIntegrator] = useState(initialThemeSiteSettings.lifiIntegrator)
+  const [lifiApiKey, setLifiApiKey] = useState(initialThemeSiteSettings.lifiApiKey)
   const [openRouterApiKey, setOpenRouterApiKey] = useState('')
   const [openRouterModel, setOpenRouterModel] = useState(initialOpenRouterModel)
   const [openRouterSelectValue, setOpenRouterSelectValue] = useState(
@@ -245,21 +238,24 @@ function AdminGeneralSettingsFormInner({
   const [pwaIcon512PreviewUrl, setPwaIcon512PreviewUrl] = useState<string | null>(null)
   const [openSections, setOpenSections] = useState<string[]>([])
 
-  useEffect(() => {
-    return () => {
-      if (logoPreviewUrl) {
-        URL.revokeObjectURL(logoPreviewUrl)
+  useEffect(function revokePreviewUrlsOnChange() {
+    const capturedLogoUrl = logoPreviewUrl
+    const capturedPwa192Url = pwaIcon192PreviewUrl
+    const capturedPwa512Url = pwaIcon512PreviewUrl
+    return function revokeUrls() {
+      if (capturedLogoUrl) {
+        URL.revokeObjectURL(capturedLogoUrl)
       }
-      if (pwaIcon192PreviewUrl) {
-        URL.revokeObjectURL(pwaIcon192PreviewUrl)
+      if (capturedPwa192Url) {
+        URL.revokeObjectURL(capturedPwa192Url)
       }
-      if (pwaIcon512PreviewUrl) {
-        URL.revokeObjectURL(pwaIcon512PreviewUrl)
+      if (capturedPwa512Url) {
+        URL.revokeObjectURL(capturedPwa512Url)
       }
     }
   }, [logoPreviewUrl, pwaIcon192PreviewUrl, pwaIcon512PreviewUrl])
 
-  useEffect(() => {
+  useEffect(function toastOnSettingsTransition() {
     const transitionedToIdle = wasPendingRef.current && !isPending
 
     if (transitionedToIdle && state.error === null) {
@@ -305,15 +301,270 @@ function AdminGeneralSettingsFormInner({
     [sanitizedLogoSvg],
   )
 
+  return {
+    router,
+    state,
+    formAction,
+    isPending,
+    isRemovingTermsOfServicePdf,
+    startRemovingTermsOfServicePdf,
+    nextCustomJavascriptCodeIdRef,
+    siteName,
+    setSiteName,
+    siteDescription,
+    setSiteDescription,
+    logoMode,
+    setLogoMode,
+    logoSvg,
+    setLogoSvg,
+    logoImagePath,
+    setLogoImagePath,
+    pwaIcon192Path,
+    pwaIcon512Path,
+    googleAnalyticsId,
+    setGoogleAnalyticsId,
+    discordLink,
+    setDiscordLink,
+    twitterLink,
+    setTwitterLink,
+    facebookLink,
+    setFacebookLink,
+    instagramLink,
+    setInstagramLink,
+    tiktokLink,
+    setTiktokLink,
+    linkedinLink,
+    setLinkedinLink,
+    youtubeLink,
+    setYoutubeLink,
+    whatsappLink,
+    setWhatsappLink,
+    telegramLink,
+    setTelegramLink,
+    redditLink,
+    setRedditLink,
+    supportUrl,
+    setSupportUrl,
+    footerDisclaimer,
+    setFooterDisclaimer,
+    blockedCountries,
+    setBlockedCountries,
+    globalAnnouncementMessage,
+    setGlobalAnnouncementMessage,
+    globalAnnouncementLinkUrl,
+    setGlobalAnnouncementLinkUrl,
+    globalAnnouncementDisabledOn,
+    setGlobalAnnouncementDisabledOn,
+    customJavascriptCodes,
+    setCustomJavascriptCodes,
+    feeRecipientWallet,
+    setFeeRecipientWallet,
+    tosPdfPath,
+    setTosPdfPath,
+    lifiIntegrator,
+    setLifiIntegrator,
+    lifiApiKey,
+    setLifiApiKey,
+    openRouterApiKey,
+    setOpenRouterApiKey,
+    openRouterModel,
+    setOpenRouterModel,
+    openRouterSelectValue,
+    setOpenRouterSelectValue,
+    openRouterModelOptions,
+    setOpenRouterModelOptions,
+    openRouterModelsError,
+    setOpenRouterModelsError,
+    isRefreshingOpenRouterModels,
+    setIsRefreshingOpenRouterModels,
+    selectedLogoFile,
+    setSelectedLogoFile,
+    selectedTermsOfServicePdfFile,
+    setSelectedTermsOfServicePdfFile,
+    logoPreviewUrl,
+    setLogoPreviewUrl,
+    pwaIcon192PreviewUrl,
+    setPwaIcon192PreviewUrl,
+    pwaIcon512PreviewUrl,
+    setPwaIcon512PreviewUrl,
+    openSections,
+    setOpenSections,
+    imagePreview,
+    pwaIcon192Preview,
+    pwaIcon512Preview,
+    serializedCustomJavascriptCodes,
+    serializedGlobalAnnouncementDisabledOn,
+    customJavascriptCodeDisablePageOptions,
+    sanitizedLogoSvg,
+    svgPreviewUrl,
+    initialLogoMode,
+    initialLiFiApiKeyConfigured: initialThemeSiteSettings.lifiApiKeyConfigured,
+    initialOpenRouterApiKeyConfigured: openRouterSettings.isApiKeyConfigured,
+  }
+}
+
+function AdminGeneralSettingsFormInner({
+  initialThemeSiteSettings,
+  initialGlobalAnnouncement,
+  initialBlockedCountries,
+  initialTermsOfServicePdfPath,
+  initialTermsOfServicePdfUrl,
+  openRouterSettings,
+}: AdminGeneralSettingsFormProps) {
+  const t = useExtracted()
+  const {
+    router,
+    state,
+    formAction,
+    isPending,
+    isRemovingTermsOfServicePdf,
+    startRemovingTermsOfServicePdf,
+    nextCustomJavascriptCodeIdRef,
+    siteName,
+    setSiteName,
+    siteDescription,
+    setSiteDescription,
+    logoMode,
+    setLogoMode,
+    logoSvg,
+    setLogoSvg,
+    logoImagePath,
+    setLogoImagePath,
+    pwaIcon192Path,
+    pwaIcon512Path,
+    googleAnalyticsId,
+    setGoogleAnalyticsId,
+    discordLink,
+    setDiscordLink,
+    twitterLink,
+    setTwitterLink,
+    facebookLink,
+    setFacebookLink,
+    instagramLink,
+    setInstagramLink,
+    tiktokLink,
+    setTiktokLink,
+    linkedinLink,
+    setLinkedinLink,
+    youtubeLink,
+    setYoutubeLink,
+    whatsappLink,
+    setWhatsappLink,
+    telegramLink,
+    setTelegramLink,
+    redditLink,
+    setRedditLink,
+    supportUrl,
+    setSupportUrl,
+    footerDisclaimer,
+    setFooterDisclaimer,
+    blockedCountries,
+    setBlockedCountries,
+    globalAnnouncementMessage,
+    setGlobalAnnouncementMessage,
+    globalAnnouncementLinkUrl,
+    setGlobalAnnouncementLinkUrl,
+    globalAnnouncementDisabledOn,
+    setGlobalAnnouncementDisabledOn,
+    customJavascriptCodes,
+    setCustomJavascriptCodes,
+    feeRecipientWallet,
+    setFeeRecipientWallet,
+    tosPdfPath,
+    setTosPdfPath,
+    lifiIntegrator,
+    setLifiIntegrator,
+    lifiApiKey,
+    setLifiApiKey,
+    openRouterApiKey,
+    setOpenRouterApiKey,
+    openRouterModel,
+    setOpenRouterModel,
+    openRouterSelectValue,
+    setOpenRouterSelectValue,
+    openRouterModelOptions,
+    setOpenRouterModelOptions,
+    openRouterModelsError,
+    setOpenRouterModelsError,
+    isRefreshingOpenRouterModels,
+    setIsRefreshingOpenRouterModels,
+    selectedLogoFile,
+    setSelectedLogoFile,
+    selectedTermsOfServicePdfFile,
+    setSelectedTermsOfServicePdfFile,
+    logoPreviewUrl,
+    setLogoPreviewUrl,
+    pwaIcon192PreviewUrl,
+    setPwaIcon192PreviewUrl,
+    pwaIcon512PreviewUrl,
+    setPwaIcon512PreviewUrl,
+    openSections,
+    setOpenSections,
+    imagePreview,
+    pwaIcon192Preview,
+    pwaIcon512Preview,
+    serializedCustomJavascriptCodes,
+    serializedGlobalAnnouncementDisabledOn,
+    customJavascriptCodeDisablePageOptions,
+    sanitizedLogoSvg,
+    svgPreviewUrl,
+    initialLogoMode,
+    initialLiFiApiKeyConfigured,
+    initialOpenRouterApiKeyConfigured,
+  } = useGeneralSettingsFormState({
+    initialThemeSiteSettings,
+    initialGlobalAnnouncement,
+    initialBlockedCountries,
+    initialTermsOfServicePdfPath,
+    openRouterSettings,
+  })
+
   const showImagePreview = Boolean(imagePreview)
   const showSvgPreview = !showImagePreview && Boolean(sanitizedLogoSvg.trim())
   const hasUploadedTermsOfServicePdf = Boolean(initialTermsOfServicePdfUrl && tosPdfPath.trim())
   const trimmedOpenRouterApiKey = openRouterApiKey.trim()
   const openRouterModelSelectEnabled = openRouterSettings.isModelSelectEnabled || Boolean(trimmedOpenRouterApiKey)
+  const [isBlockedCountriesDialogOpen, setIsBlockedCountriesDialogOpen] = useState(false)
+  const [blockedCountrySearch, setBlockedCountrySearch] = useState('')
+  const blockedCountriesValue = useMemo(() => formatBlockedCountriesValue(blockedCountries), [blockedCountries])
+  const blockedCountryOptionsByCode = useMemo(
+    () => new Map(GEOBLOCK_COUNTRY_OPTIONS.map(option => [option.code, option])),
+    [],
+  )
+  const selectedBlockedCountryOptions = useMemo(() => {
+    return blockedCountries.map((code) => {
+      return blockedCountryOptionsByCode.get(code) ?? { code, name: code }
+    })
+  }, [blockedCountries, blockedCountryOptionsByCode])
+  const filteredBlockedCountryOptions = useMemo(() => {
+    const normalizedSearch = blockedCountrySearch.trim().toLowerCase()
+    if (!normalizedSearch) {
+      return GEOBLOCK_COUNTRY_OPTIONS
+    }
+
+    return GEOBLOCK_COUNTRY_OPTIONS.filter(option =>
+      option.code.toLowerCase().includes(normalizedSearch)
+      || option.name.toLowerCase().includes(normalizedSearch),
+    )
+  }, [blockedCountrySearch])
 
   function handleOpenRouterModelChange(nextValue: string) {
     setOpenRouterSelectValue(nextValue)
     setOpenRouterModel(nextValue === AUTOMATIC_MODEL_VALUE ? '' : nextValue)
+  }
+
+  function handleToggleBlockedCountry(code: string, checked: boolean) {
+    setBlockedCountries((previous) => {
+      if (checked) {
+        if (previous.includes(code)) {
+          return previous
+        }
+
+        return [...previous, code]
+      }
+
+      return previous.filter(countryCode => countryCode !== code)
+    })
   }
 
   function toggleSection(value: string) {
@@ -964,7 +1215,7 @@ function AdminGeneralSettingsFormInner({
           value="legal"
           isOpen={openSections.includes('legal')}
           onToggle={toggleSection}
-          header={<h3 className="text-base font-medium">{t('Legal')}</h3>}
+          header={<h3 className="text-base font-medium">{t('Legal & Geoblocking')}</h3>}
         >
           <div className="grid gap-4">
             <div className="grid gap-2">
@@ -1024,6 +1275,146 @@ function AdminGeneralSettingsFormInner({
                   </Button>
                 </div>
               )}
+
+            <div className="grid gap-3 border-t border-border/50 pt-4">
+              <input type="hidden" name="blocked_countries" value={blockedCountriesValue} />
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="grid gap-1">
+                  <Label>{t('Blocked countries')}</Label>
+                </div>
+
+                <Dialog
+                  open={isBlockedCountriesDialogOpen}
+                  onOpenChange={(nextOpen) => {
+                    setIsBlockedCountriesDialogOpen(nextOpen)
+                    if (!nextOpen) {
+                      setBlockedCountrySearch('')
+                    }
+                  }}
+                >
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isPending || isRemovingTermsOfServicePdf}
+                    onClick={() => setIsBlockedCountriesDialogOpen(true)}
+                  >
+                    {blockedCountries.length > 0 ? t('Manage countries') : t('Select countries')}
+                  </Button>
+
+                  <DialogContent className="max-w-2xl sm:max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>{t('Blocked countries')}</DialogTitle>
+                      <DialogDescription>
+                        {t('Search and select the countries where users should not be able to access the platform. If none are selected, the site stays available for everyone.')}
+                      </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="grid gap-4">
+                      <div className="relative">
+                        <SearchIcon className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          value={blockedCountrySearch}
+                          onChange={event => setBlockedCountrySearch(event.target.value)}
+                          placeholder={t('Search by country or code')}
+                          className="pl-9"
+                        />
+                      </div>
+
+                      {selectedBlockedCountryOptions.length > 0
+                        ? (
+                            <div className="flex flex-wrap gap-2 rounded-xl border border-border/60 bg-muted/20 p-3">
+                              {selectedBlockedCountryOptions.map(option => (
+                                <Badge key={option.code} variant="secondary" className="gap-1.5 pr-1">
+                                  <span>{option.code}</span>
+                                  <button
+                                    type="button"
+                                    className="rounded-sm p-0.5 hover:bg-black/10"
+                                    onClick={() => handleToggleBlockedCountry(option.code, false)}
+                                    aria-label={t('Remove blocked country')}
+                                  >
+                                    <XIcon className="size-3" />
+                                  </button>
+                                </Badge>
+                              ))}
+                            </div>
+                          )
+                        : (
+                            <p className="text-sm text-muted-foreground">
+                              {t('No countries selected yet.')}
+                            </p>
+                          )}
+
+                      <div className="max-h-96 overflow-y-auto rounded-xl border border-border/60">
+                        <div className="divide-y divide-border/60">
+                          {filteredBlockedCountryOptions.map(option => (
+                            <label
+                              key={option.code}
+                              htmlFor={`blocked-country-${option.code}`}
+                              className={cn(
+                                `
+                                  flex cursor-pointer items-center justify-between gap-4 px-4 py-3 transition-colors
+                                  hover:bg-muted/30
+                                `,
+                                blockedCountries.includes(option.code) && 'bg-primary/5',
+                              )}
+                            >
+                              <div className="grid gap-1">
+                                <span className="text-sm font-medium">{option.name}</span>
+                                <span className="font-mono text-xs text-muted-foreground">{option.code}</span>
+                              </div>
+                              <Checkbox
+                                id={`blocked-country-${option.code}`}
+                                checked={blockedCountries.includes(option.code)}
+                                onCheckedChange={checked => handleToggleBlockedCountry(option.code, checked === true)}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <DialogFooter className="sm:justify-between">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        disabled={blockedCountries.length === 0}
+                        onClick={() => setBlockedCountries([])}
+                      >
+                        {t('Clear all')}
+                      </Button>
+                      <Button type="button" onClick={() => setIsBlockedCountriesDialogOpen(false)}>
+                        {t('Done')}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+
+              {selectedBlockedCountryOptions.length > 0
+                ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedBlockedCountryOptions.map(option => (
+                        <Badge key={option.code} variant="outline" className="gap-1.5 pr-1">
+                          <span>{option.code}</span>
+                          <button
+                            type="button"
+                            className="rounded-sm p-0.5 hover:bg-black/10"
+                            onClick={() => handleToggleBlockedCountry(option.code, false)}
+                            aria-label={t('Remove blocked country')}
+                          >
+                            <XIcon className="size-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )
+                : (
+                    <p className="text-sm text-muted-foreground">
+                      {t('No blocked countries selected.')}
+                    </p>
+                  )}
+            </div>
           </div>
         </SettingsAccordionSection>
 
@@ -1359,6 +1750,7 @@ export default function AdminGeneralSettingsForm(props: AdminGeneralSettingsForm
   const formResetKey = JSON.stringify({
     initialThemeSiteSettings: props.initialThemeSiteSettings,
     initialGlobalAnnouncement: props.initialGlobalAnnouncement,
+    initialBlockedCountries: props.initialBlockedCountries,
     initialTermsOfServicePdfPath: props.initialTermsOfServicePdfPath,
     initialTermsOfServicePdfUrl: props.initialTermsOfServicePdfUrl,
     openRouterSettings: props.openRouterSettings,

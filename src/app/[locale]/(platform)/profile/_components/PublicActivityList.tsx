@@ -1,5 +1,6 @@
 'use client'
 
+import type { RefObject } from 'react'
 import type { ActivitySort, ActivityTypeFilter } from '@/app/[locale]/(platform)/profile/_types/PublicActivityTypes'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePublicActivityQuery } from '@/app/[locale]/(platform)/profile/_hooks/usePublicActivityQuery'
@@ -12,42 +13,37 @@ interface PublicActivityListProps {
   userAddress: string
 }
 
-export default function PublicActivityList({ userAddress }: PublicActivityListProps) {
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+type PublicActivityItem = ReturnType<typeof usePublicActivityQuery>['data'] extends infer T
+  ? T extends { pages: (infer P)[] }
+    ? P extends (infer Item)[] ? Item : never
+    : never
+  : never
+
+interface LoadMoreState {
+  key: string
+  infiniteScrollError: string | null
+  isLoadingMore: boolean
+}
+
+function usePublicActivityFilters() {
   const [searchQuery, setSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<ActivityTypeFilter>('all')
   const [sortFilter, setSortFilter] = useState<ActivitySort>('newest')
-  const loadMoreScopeKey = `${userAddress}:${searchQuery}:${typeFilter}:${sortFilter}`
-  const [loadMoreState, setLoadMoreState] = useState<{
-    key: string
-    infiniteScrollError: string | null
-    isLoadingMore: boolean
-  }>({
-    key: loadMoreScopeKey,
-    infiniteScrollError: null,
-    isLoadingMore: false,
-  })
-  const scopedLoadMoreState = loadMoreState.key === loadMoreScopeKey
-    ? loadMoreState
-    : {
-        key: loadMoreScopeKey,
-        infiniteScrollError: null,
-        isLoadingMore: false,
-      }
-  const infiniteScrollError = scopedLoadMoreState.infiniteScrollError
-  const isLoadingMore = scopedLoadMoreState.isLoadingMore
-  const site = useSiteIdentity()
 
-  const {
-    status,
-    data,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    refetch,
-  } = usePublicActivityQuery({ userAddress, typeFilter, sortFilter })
+  return { searchQuery, setSearchQuery, typeFilter, setTypeFilter, sortFilter, setSortFilter }
+}
 
-  const hasUserAddress = Boolean(userAddress)
+function useVisibleActivities({
+  data,
+  searchQuery,
+  typeFilter,
+  sortFilter,
+}: {
+  data: ReturnType<typeof usePublicActivityQuery>['data']
+  searchQuery: string
+  typeFilter: ActivityTypeFilter
+  sortFilter: ActivitySort
+}) {
   const activities = useMemo(
     () => data?.pages.flat() ?? [],
     [data?.pages],
@@ -74,27 +70,50 @@ export default function PublicActivityList({ userAddress }: PublicActivityListPr
     return sorted
   }, [activities, searchQuery, sortFilter, typeFilter])
 
-  const isLoading = hasUserAddress && status === 'pending'
-  const hasError = hasUserAddress && status === 'error'
-  function handleExportCsv() {
-    if (visibleActivities.length === 0) {
-      return
-    }
+  return { activities, visibleActivities }
+}
 
-    const siteName = site.name
-    const { csvContent, filename } = buildActivityCsv(visibleActivities, siteName)
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
+function useLoadMoreScopedState(loadMoreScopeKey: string) {
+  const [loadMoreState, setLoadMoreState] = useState<LoadMoreState>({
+    key: loadMoreScopeKey,
+    infiniteScrollError: null,
+    isLoadingMore: false,
+  })
+  const scopedLoadMoreState = loadMoreState.key === loadMoreScopeKey
+    ? loadMoreState
+    : {
+        key: loadMoreScopeKey,
+        infiniteScrollError: null,
+        isLoadingMore: false,
+      }
+
+  return {
+    infiniteScrollError: scopedLoadMoreState.infiniteScrollError,
+    isLoadingMore: scopedLoadMoreState.isLoadingMore,
+    setLoadMoreState,
   }
+}
 
-  useEffect(() => {
+function useActivityInfiniteScrollSentinel({
+  hasNextPage,
+  isFetchingNextPage,
+  isLoadingMore,
+  infiniteScrollError,
+  fetchNextPage,
+  loadMoreScopeKey,
+  setLoadMoreState,
+}: {
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  isLoadingMore: boolean
+  infiniteScrollError: string | null
+  fetchNextPage: () => Promise<unknown>
+  loadMoreScopeKey: string
+  setLoadMoreState: (state: LoadMoreState) => void
+}): { loadMoreRef: RefObject<HTMLDivElement | null> } {
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(function observeActivityLoadMoreSentinel() {
     if (!hasNextPage || !loadMoreRef.current) {
       return undefined
     }
@@ -135,8 +154,93 @@ export default function PublicActivityList({ userAddress }: PublicActivityListPr
 
     observer.observe(loadMoreRef.current)
 
-    return () => observer.disconnect()
-  }, [fetchNextPage, hasNextPage, infiniteScrollError, isFetchingNextPage, isLoadingMore, loadMoreScopeKey])
+    return function disconnectActivityLoadMoreObserver() {
+      observer.disconnect()
+    }
+  }, [fetchNextPage, hasNextPage, infiniteScrollError, isFetchingNextPage, isLoadingMore, loadMoreScopeKey, setLoadMoreState])
+
+  return { loadMoreRef }
+}
+
+export default function PublicActivityList({ userAddress }: PublicActivityListProps) {
+  const { searchQuery, setSearchQuery, typeFilter, setTypeFilter, sortFilter, setSortFilter } = usePublicActivityFilters()
+  const loadMoreScopeKey = `${userAddress}:${searchQuery}:${typeFilter}:${sortFilter}`
+  const { infiniteScrollError, isLoadingMore, setLoadMoreState } = useLoadMoreScopedState(loadMoreScopeKey)
+  const site = useSiteIdentity()
+
+  const {
+    status,
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    refetch,
+  } = usePublicActivityQuery({ userAddress, typeFilter, sortFilter })
+
+  const hasUserAddress = Boolean(userAddress)
+  const { visibleActivities } = useVisibleActivities({ data, searchQuery, typeFilter, sortFilter })
+
+  const { loadMoreRef } = useActivityInfiniteScrollSentinel({
+    hasNextPage,
+    isFetchingNextPage,
+    isLoadingMore,
+    infiniteScrollError,
+    fetchNextPage,
+    loadMoreScopeKey,
+    setLoadMoreState,
+  })
+
+  const isLoading = hasUserAddress && status === 'pending'
+  const hasError = hasUserAddress && status === 'error'
+
+  function handleExportCsv() {
+    if (visibleActivities.length === 0) {
+      return
+    }
+
+    const siteName = site.name
+    const { csvContent, filename } = buildActivityCsv(visibleActivities as PublicActivityItem[], siteName)
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  function handleRetryLoadMore() {
+    setLoadMoreState({
+      key: loadMoreScopeKey,
+      infiniteScrollError: null,
+      isLoadingMore: true,
+    })
+    fetchNextPage()
+      .then(() => {
+        setLoadMoreState({
+          key: loadMoreScopeKey,
+          infiniteScrollError: null,
+          isLoadingMore: false,
+        })
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') {
+          setLoadMoreState({
+            key: loadMoreScopeKey,
+            infiniteScrollError: error.message || 'Failed to load more activity.',
+            isLoadingMore: false,
+          })
+          return
+        }
+        setLoadMoreState({
+          key: loadMoreScopeKey,
+          infiniteScrollError: null,
+          isLoadingMore: false,
+        })
+      })
+  }
 
   return (
     <div className="space-y-3 pb-0">
@@ -159,30 +263,7 @@ export default function PublicActivityList({ userAddress }: PublicActivityListPr
         isFetchingNextPage={isFetchingNextPage}
         isLoadingMore={isLoadingMore}
         infiniteScrollError={infiniteScrollError}
-        onRetryLoadMore={() => {
-          setLoadMoreState({
-            key: loadMoreScopeKey,
-            infiniteScrollError: null,
-            isLoadingMore: true,
-          })
-          fetchNextPage()
-            .catch((error) => {
-              if (error.name !== 'AbortError') {
-                setLoadMoreState({
-                  key: loadMoreScopeKey,
-                  infiniteScrollError: error.message || 'Failed to load more activity.',
-                  isLoadingMore: false,
-                })
-              }
-            })
-            .finally(() => {
-              setLoadMoreState(previous => ({
-                key: loadMoreScopeKey,
-                infiniteScrollError: previous.key === loadMoreScopeKey ? previous.infiniteScrollError : null,
-                isLoadingMore: false,
-              }))
-            })
-        }}
+        onRetryLoadMore={handleRetryLoadMore}
         loadMoreRef={loadMoreRef}
       />
     </div>

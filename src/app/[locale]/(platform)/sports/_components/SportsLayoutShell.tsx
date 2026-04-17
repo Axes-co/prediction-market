@@ -166,19 +166,20 @@ function getSportsPathContext(params: {
   }
 }
 
-export default function SportsLayoutShell({
-  children,
-  vertical = 'sports',
-  sportsCountsBySlug = {},
+function useSportsPathContext({
+  vertical,
+  pathname,
   sportsMenuEntries,
   canonicalSlugByAliasKey,
   h1TitleBySlug,
-  sectionsBySlug,
-}: SportsLayoutShellProps) {
-  const pathname = usePathname()
-  const router = useRouter()
-  const verticalConfig = getSportsVerticalConfig(vertical)
-  const context = useMemo(
+}: {
+  vertical: SportsVertical
+  pathname: string
+  sportsMenuEntries: SportsMenuEntry[]
+  canonicalSlugByAliasKey: Record<string, string>
+  h1TitleBySlug: Record<string, string>
+}) {
+  return useMemo(
     () => getSportsPathContext({
       vertical,
       pathname,
@@ -188,33 +189,10 @@ export default function SportsLayoutShell({
     }),
     [vertical, pathname, sportsMenuEntries, canonicalSlugByAliasKey, h1TitleBySlug],
   )
+}
 
-  const sectionConfig = context.sportSlug ? sectionsBySlug[context.sportSlug] : null
-  const showSportSectionPills = context.mode === 'all'
-    && Boolean(context.sportSlug)
-    && !context.isEventRoute
-    && Boolean(sectionConfig?.gamesEnabled && sectionConfig?.propsEnabled)
-  const useIndependentColumns = context.mode === 'live'
-    || context.mode === 'soon'
-    || (
-      context.mode === 'all'
-      && (context.section === 'games' || context.isEventRoute)
-    )
-  const headerInsideGamesCenter = !context.isEventRoute
-    && (
-      context.mode === 'live'
-      || context.mode === 'soon'
-      || (context.mode === 'all' && context.section === 'games')
-    )
-  const showShellHeader = !headerInsideGamesCenter
-  const showTitle = Boolean(context.title) && !context.isEventRoute
-  const activeSection = context.section ?? 'games'
-  const shouldConstrainHeaderToCenterColumn = activeSection === 'games'
-  const centerColumnHeaderClass = shouldConstrainHeaderToCenterColumn
-    ? 'min-[1200px]:max-w-[calc(100%-22.75rem)]'
-    : ''
-
-  useEffect(() => {
+function useCenterPaneWheelRouting(useIndependentColumns: boolean) {
+  useEffect(function routeWheelToSportsCenterPane() {
     if (typeof window === 'undefined' || !useIndependentColumns) {
       return
     }
@@ -261,10 +239,58 @@ export default function SportsLayoutShell({
 
     window.addEventListener('wheel', handleWindowWheel, { passive: false })
 
-    return () => {
+    return function removeWheelRoutingListener() {
       window.removeEventListener('wheel', handleWindowWheel)
     }
   }, [useIndependentColumns])
+}
+
+export default function SportsLayoutShell({
+  children,
+  vertical = 'sports',
+  sportsCountsBySlug = {},
+  sportsMenuEntries,
+  canonicalSlugByAliasKey,
+  h1TitleBySlug,
+  sectionsBySlug,
+}: SportsLayoutShellProps) {
+  const pathname = usePathname()
+  const router = useRouter()
+  const verticalConfig = getSportsVerticalConfig(vertical)
+  const context = useSportsPathContext({
+    vertical,
+    pathname,
+    sportsMenuEntries,
+    canonicalSlugByAliasKey,
+    h1TitleBySlug,
+  })
+
+  const sectionConfig = context.sportSlug ? sectionsBySlug[context.sportSlug] : null
+  const showSportSectionPills = context.mode === 'all'
+    && Boolean(context.sportSlug)
+    && !context.isEventRoute
+    && Boolean(sectionConfig?.gamesEnabled && sectionConfig?.propsEnabled)
+  const useIndependentColumns = context.mode === 'live'
+    || context.mode === 'soon'
+    || (
+      context.mode === 'all'
+      && (context.section === 'games' || context.isEventRoute)
+    )
+  const headerInsideGamesCenter = !context.isEventRoute
+    && (
+      context.mode === 'live'
+      || context.mode === 'soon'
+      || (context.mode === 'all' && context.section === 'games')
+    )
+  const showShellHeader = !headerInsideGamesCenter
+  const showTitle = Boolean(context.title) && !context.isEventRoute
+  const activeSection = context.section ?? 'games'
+  const shouldConstrainHeaderToCenterColumn = activeSection === 'games'
+  const centerColumnHeaderClass = shouldConstrainHeaderToCenterColumn
+    ? 'min-[1200px]:max-w-[calc(100%-22.75rem)]'
+    : ''
+
+  useCenterPaneWheelRouting(useIndependentColumns)
 
   return (
     <main

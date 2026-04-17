@@ -12,7 +12,7 @@ type AppLinkProps = Omit<ComponentPropsWithoutRef<typeof Link>, 'prefetch'> & {
 }
 type AppLinkRef = ComponentRef<typeof Link>
 
-function AppLink({ ref, intentPrefetch = false, onFocus, onMouseEnter, onTouchStart, prefetch = false, ...props }: AppLinkProps) {
+function useIntentPrefetch(intentPrefetch: boolean, prefetch: NextLinkPrefetch | false) {
   const [shouldPrefetch, setShouldPrefetch] = useState(false)
   const nextPrefetch = prefetch === false ? null : prefetch
   const resolvedPrefetch = intentPrefetch
@@ -22,6 +22,12 @@ function AppLink({ ref, intentPrefetch = false, onFocus, onMouseEnter, onTouchSt
   function enableIntentPrefetch() {
     setShouldPrefetch(true)
   }
+
+  return { resolvedPrefetch, enableIntentPrefetch }
+}
+
+function AppLink({ ref, intentPrefetch = false, onFocus, onMouseEnter, onTouchStart, prefetch = false, ...props }: AppLinkProps) {
+  const { resolvedPrefetch, enableIntentPrefetch } = useIntentPrefetch(intentPrefetch, prefetch)
 
   return (
     <Link

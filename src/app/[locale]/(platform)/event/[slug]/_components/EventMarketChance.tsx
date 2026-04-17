@@ -18,6 +18,15 @@ interface EventMarketChanceProps {
   showInReviewTag?: boolean
 }
 
+function useResolutionDialog(market: EventMarketRow['market'], siteName: string) {
+  const [isResolutionDialogOpen, setIsResolutionDialogOpen] = useState(false)
+  const umaDetailsUrl = useMemo(
+    () => buildUmaSettledUrl(market.condition, siteName) ?? buildUmaProposeUrl(market.condition, siteName),
+    [market.condition, siteName],
+  )
+  return { isResolutionDialogOpen, setIsResolutionDialogOpen, umaDetailsUrl }
+}
+
 export default function EventMarketChance({
   market,
   chanceMeta,
@@ -27,14 +36,10 @@ export default function EventMarketChance({
 }: EventMarketChanceProps) {
   const t = useExtracted()
   const siteIdentity = useSiteIdentity()
-  const [isResolutionDialogOpen, setIsResolutionDialogOpen] = useState(false)
+  const { isResolutionDialogOpen, setIsResolutionDialogOpen, umaDetailsUrl } = useResolutionDialog(market, siteIdentity.name)
   const chanceChangeColorClass = chanceMeta.isChanceChangePositive ? 'text-yes' : 'text-no'
   const shouldReserveDelta = layout === 'desktop' && !showInReviewTag
   const shouldRenderDelta = !showInReviewTag && (chanceMeta.shouldShowChanceChange || shouldReserveDelta)
-  const umaDetailsUrl = useMemo(
-    () => buildUmaSettledUrl(market.condition, siteIdentity.name) ?? buildUmaProposeUrl(market.condition, siteIdentity.name),
-    [market.condition, siteIdentity.name],
-  )
 
   const baseClass = layout === 'mobile'
     ? 'text-lg font-medium'

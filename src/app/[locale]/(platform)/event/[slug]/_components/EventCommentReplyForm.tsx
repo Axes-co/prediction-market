@@ -19,6 +19,12 @@ interface EventCommentReplyFormProps {
   isCreatingComment: boolean
 }
 
+function useReplyFormState(initialValue?: string) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [content, setContent] = useState(initialValue || '')
+  return { inputRef, content, setContent }
+}
+
 export default function EventCommentReplyForm({
   user,
   parentCommentId,
@@ -28,8 +34,7 @@ export default function EventCommentReplyForm({
   createReply,
   isCreatingComment,
 }: EventCommentReplyFormProps) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [content, setContent] = useState(initialValue || '')
+  const { inputRef, content, setContent } = useReplyFormState(initialValue)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

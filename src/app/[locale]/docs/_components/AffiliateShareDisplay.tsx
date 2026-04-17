@@ -1,8 +1,6 @@
 'use client'
 
-import type { AffiliateDataResult } from '@/lib/affiliate-data'
-import { useEffect, useState } from 'react'
-import { fetchAffiliateSettingsFromAPI } from '@/lib/affiliate-data'
+import { useAffiliateData } from '@/hooks/useAffiliateData'
 import { ErrorDisplay } from './ErrorDisplay'
 
 interface AffiliateShareDisplayProps {
@@ -14,14 +12,7 @@ export function AffiliateShareDisplay({
   showSymbol = true,
   className = 'font-semibold text-primary',
 }: AffiliateShareDisplayProps) {
-  const [data, setData] = useState<AffiliateDataResult | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-
-  useEffect(() => {
-    fetchAffiliateSettingsFromAPI()
-      .then(setData)
-      .finally(() => setIsLoading(false))
-  }, [])
+  const { data, isLoading } = useAffiliateData()
 
   if (isLoading) {
     return (

@@ -5,12 +5,12 @@ import { useEffect } from 'react'
 import { detectIos, detectStandaloneMode } from '@/lib/pwa-install'
 import { usePwaInstallStore } from '@/stores/usePwaInstall'
 
-export default function PwaInstallStateSync() {
+function usePwaInstallSync() {
   const setEnvironment = usePwaInstallStore(state => state.setEnvironment)
   const setDeferredPrompt = usePwaInstallStore(state => state.setDeferredPrompt)
   const setStandalone = usePwaInstallStore(state => state.setStandalone)
 
-  useEffect(() => {
+  useEffect(function syncPwaInstallState() {
     setEnvironment({
       isIos: detectIos(),
       isStandalone: detectStandaloneMode(),
@@ -42,7 +42,7 @@ export default function PwaInstallStateSync() {
       displayModeQuery.addListener(handleDisplayModeChange)
     }
 
-    return () => {
+    return function cleanupPwaInstallListeners() {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
       window.removeEventListener('appinstalled', handleAppInstalled)
 
@@ -54,6 +54,10 @@ export default function PwaInstallStateSync() {
       }
     }
   }, [setDeferredPrompt, setEnvironment, setStandalone])
+}
+
+export default function PwaInstallStateSync() {
+  usePwaInstallSync()
 
   return null
 }

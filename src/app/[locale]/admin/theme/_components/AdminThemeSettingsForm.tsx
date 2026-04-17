@@ -277,20 +277,7 @@ function getRadiusPresetButtonStyle(presetValue: string): CSSProperties {
   return { borderRadius: DEFAULT_RADIUS_VALUE }
 }
 
-function RadiusControl({
-  radiusValue,
-  disabled,
-  onRadiusChange,
-  onRadiusReset,
-  error,
-}: {
-  radiusValue: string
-  disabled: boolean
-  onRadiusChange: (radius: string) => void
-  onRadiusReset: () => void
-  error: string | null
-}) {
-  const t = useExtracted()
+function useRadiusControlState(radiusValue: string) {
   const normalizedRadius = radiusValue.trim()
   const effectiveRadius = normalizedRadius || DEFAULT_RADIUS_VALUE
   const selectedPresetValue = useMemo(() => {
@@ -306,6 +293,25 @@ function RadiusControl({
 
     return matchedPreset?.value ?? null
   }, [effectiveRadius])
+
+  return { normalizedRadius, selectedPresetValue }
+}
+
+function RadiusControl({
+  radiusValue,
+  disabled,
+  onRadiusChange,
+  onRadiusReset,
+  error,
+}: {
+  radiusValue: string
+  disabled: boolean
+  onRadiusChange: (radius: string) => void
+  onRadiusReset: () => void
+  error: string | null
+}) {
+  const t = useExtracted()
+  const { normalizedRadius, selectedPresetValue } = useRadiusControlState(radiusValue)
 
   return (
     <div className="grid gap-3 rounded-md border border-border p-3">
@@ -358,6 +364,11 @@ function RadiusControl({
   )
 }
 
+function useThemePreviewCardState(overrides: ThemeOverrides, radius: string | null) {
+  const style = useMemo(() => buildPreviewStyle(overrides, radius), [overrides, radius])
+  return { style }
+}
+
 function ThemePreviewCard({
   presetId,
   isDark,
@@ -376,7 +387,7 @@ function ThemePreviewCard({
   logoImageUrl: string | null
 }) {
   const t = useExtracted()
-  const style = useMemo(() => buildPreviewStyle(overrides, radius), [overrides, radius])
+  const { style } = useThemePreviewCardState(overrides, radius)
 
   return (
     <div
@@ -601,6 +612,31 @@ function resolveBaseThemeValues(presetId: string) {
   }
 }
 
+function useThemeTokenMatrixState(presetId: string) {
+  const [baseThemeValues, setBaseThemeValues] = useState<{
+    lightValues: ThemeOverrides
+    darkValues: ThemeOverrides
+  }>({
+    lightValues: {},
+    darkValues: {},
+  })
+  const { lightValues: baseLightValues, darkValues: baseDarkValues } = baseThemeValues
+
+  useLayoutEffect(function syncBaseThemeValues() {
+    setBaseThemeValues(resolveBaseThemeValues(presetId))
+  }, [presetId])
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
+    const initialState: Record<string, boolean> = {}
+    TOKEN_GROUPS.forEach((group) => {
+      initialState[group.id] = group.id === 'core'
+    })
+    return initialState
+  })
+
+  return { baseLightValues, baseDarkValues, openGroups, setOpenGroups }
+}
+
 function ThemeTokenMatrix({
   presetId,
   lightOverrides,
@@ -625,25 +661,7 @@ function ThemeTokenMatrix({
   darkParseError: string | null
 }) {
   const t = useExtracted()
-  const [baseThemeValues, setBaseThemeValues] = useState<{
-    lightValues: ThemeOverrides
-    darkValues: ThemeOverrides
-  }>({
-    lightValues: {},
-    darkValues: {},
-  })
-  const { lightValues: baseLightValues, darkValues: baseDarkValues } = baseThemeValues
-
-  useLayoutEffect(() => {
-    setBaseThemeValues(resolveBaseThemeValues(presetId))
-  }, [presetId])
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
-    const initialState: Record<string, boolean> = {}
-    TOKEN_GROUPS.forEach((group) => {
-      initialState[group.id] = group.id === 'core'
-    })
-    return initialState
-  })
+  const { baseLightValues, baseDarkValues, openGroups, setOpenGroups } = useThemeTokenMatrixState(presetId)
 
   return (
     <div className="flex flex-col gap-3">
@@ -765,19 +783,12 @@ function ThemeTokenMatrix({
   )
 }
 
-function AdminThemeSettingsFormInner({
-  presetOptions,
-  initialThemeSettings,
-  initialThemeSiteSettings,
-}: AdminThemeSettingsFormProps) {
+function useThemeSettingsForm(initialThemeSettings: AdminThemeSettingsInitialState) {
   const t = useExtracted()
   const initialPreset = initialThemeSettings.preset
   const initialRadius = initialThemeSettings.radius
   const initialLightJson = initialThemeSettings.lightJson
   const initialDarkJson = initialThemeSettings.darkJson
-  const siteName = initialThemeSiteSettings.siteName
-  const logoSvg = initialThemeSiteSettings.logoSvg
-  const logoImageUrl = initialThemeSiteSettings.logoImageUrl
 
   const [state, formAction, isPending] = useActionState(updateThemeSettingsAction, initialState)
   const wasPendingRef = useRef(isPending)
@@ -820,47 +831,18 @@ function AdminThemeSettingsFormInner({
     [darkOverrides, lightOverrides, radiusValidation.value],
   )
 
-  function handlePresetChange(nextPreset: string) {
-    setPreset(nextPreset)
-    setLightOverrides({})
-    setDarkOverrides({})
-  }
-
-  function applyThemeToDocument(nextPreset: string, cssText: string) {
-    const rootElement = document.documentElement
-    rootElement.setAttribute('data-theme-preset', nextPreset)
-
-    const currentThemeStyle = document.getElementById('theme-vars')
-    if (cssText) {
-      const styleElement = currentThemeStyle instanceof HTMLStyleElement
-        ? currentThemeStyle
-        : document.createElement('style')
-
-      styleElement.id = 'theme-vars'
-      styleElement.textContent = cssText
-
-      if (!currentThemeStyle) {
-        document.body.prepend(styleElement)
-      }
-      return
-    }
-
-    if (currentThemeStyle) {
-      currentThemeStyle.remove()
-    }
-  }
-
-  useEffect(() => {
+  useEffect(function captureAndRestorePersistedTheme() {
     const rootElement = document.documentElement
     const currentThemeStyle = document.getElementById('theme-vars')
+    const capturedPersistedThemeRef = persistedThemeRef
 
-    persistedThemeRef.current = {
+    capturedPersistedThemeRef.current = {
       preset: rootElement.getAttribute('data-theme-preset'),
       cssText: currentThemeStyle instanceof HTMLStyleElement ? currentThemeStyle.textContent ?? '' : null,
     }
 
-    return () => {
-      const persistedTheme = persistedThemeRef.current
+    return function restorePersistedTheme() {
+      const persistedTheme = capturedPersistedThemeRef.current
       if (!persistedTheme) {
         return
       }
@@ -891,11 +873,31 @@ function AdminThemeSettingsFormInner({
     }
   }, [])
 
-  useEffect(() => {
-    applyThemeToDocument(parsedPreset, draftCssText)
+  useEffect(function applyDraftThemeToDocument() {
+    const rootElement = document.documentElement
+    rootElement.setAttribute('data-theme-preset', parsedPreset)
+
+    const currentThemeStyle = document.getElementById('theme-vars')
+    if (draftCssText) {
+      const styleElement = currentThemeStyle instanceof HTMLStyleElement
+        ? currentThemeStyle
+        : document.createElement('style')
+
+      styleElement.id = 'theme-vars'
+      styleElement.textContent = draftCssText
+
+      if (!currentThemeStyle) {
+        document.body.prepend(styleElement)
+      }
+      return
+    }
+
+    if (currentThemeStyle) {
+      currentThemeStyle.remove()
+    }
   }, [draftCssText, parsedPreset])
 
-  useEffect(() => {
+  useEffect(function toastOnThemeTransition() {
     const transitionedToIdle = wasPendingRef.current && !isPending
 
     if (transitionedToIdle && state.error === null) {
@@ -912,6 +914,63 @@ function AdminThemeSettingsFormInner({
 
     wasPendingRef.current = isPending
   }, [draftCssText, isPending, parsedPreset, state.error, t])
+
+  return {
+    state,
+    formAction,
+    isPending,
+    preset,
+    setPreset,
+    radius,
+    setRadius,
+    lightOverrides,
+    setLightOverrides,
+    darkOverrides,
+    setDarkOverrides,
+    parsedPreset,
+    radiusValidation,
+    lightJsonValue,
+    darkJsonValue,
+    initialLightParse,
+    initialDarkParse,
+  }
+}
+
+function AdminThemeSettingsFormInner({
+  presetOptions,
+  initialThemeSettings,
+  initialThemeSiteSettings,
+}: AdminThemeSettingsFormProps) {
+  const t = useExtracted()
+  const {
+    state,
+    formAction,
+    isPending,
+    preset,
+    setPreset,
+    radius,
+    setRadius,
+    lightOverrides,
+    setLightOverrides,
+    darkOverrides,
+    setDarkOverrides,
+    parsedPreset,
+    radiusValidation,
+    lightJsonValue,
+    darkJsonValue,
+    initialLightParse,
+    initialDarkParse,
+  } = useThemeSettingsForm(initialThemeSettings)
+
+  const siteName = initialThemeSiteSettings.siteName
+  const logoSvg = initialThemeSiteSettings.logoSvg
+  const logoImageUrl = initialThemeSiteSettings.logoImageUrl
+
+  function handlePresetChange(nextPreset: string) {
+    setPreset(nextPreset)
+    setLightOverrides({})
+    setDarkOverrides({})
+  }
 
   return (
     <Form action={formAction} className="grid gap-6 rounded-lg border p-6">
@@ -1020,16 +1079,28 @@ function AdminThemeSettingsFormInner({
   )
 }
 
-export default function AdminThemeSettingsForm(props: AdminThemeSettingsFormProps) {
-  const formResetKey = useMemo(() => JSON.stringify({
-    presetOptions: props.presetOptions,
-    initialThemeSettings: props.initialThemeSettings,
-    initialThemeSiteSettings: props.initialThemeSiteSettings,
+function useThemeFormResetKey({
+  presetOptions,
+  initialThemeSettings,
+  initialThemeSiteSettings,
+}: {
+  presetOptions: AdminThemeSettingsFormProps['presetOptions']
+  initialThemeSettings: AdminThemeSettingsFormProps['initialThemeSettings']
+  initialThemeSiteSettings: AdminThemeSettingsFormProps['initialThemeSiteSettings']
+}) {
+  return useMemo(() => JSON.stringify({
+    presetOptions,
+    initialThemeSettings,
+    initialThemeSiteSettings,
   }), [
-    props.presetOptions,
-    props.initialThemeSettings,
-    props.initialThemeSiteSettings,
+    presetOptions,
+    initialThemeSettings,
+    initialThemeSiteSettings,
   ])
+}
+
+export default function AdminThemeSettingsForm(props: AdminThemeSettingsFormProps) {
+  const formResetKey = useThemeFormResetKey(props)
 
   return <AdminThemeSettingsFormInner key={formResetKey} {...props} />
 }

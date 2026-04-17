@@ -25,6 +25,14 @@ function getViewportWidthServerSnapshot() {
   return 1024
 }
 
+function useViewportWidth() {
+  return useSyncExternalStore(
+    subscribeToWindowResize,
+    getViewportWidthSnapshot,
+    getViewportWidthServerSnapshot,
+  )
+}
+
 export default function PublicPositionsLoadingState({
   skeletonCount,
   isSearchActive = false,
@@ -32,11 +40,7 @@ export default function PublicPositionsLoadingState({
   marketStatusFilter = 'active',
   retryCount = 0,
 }: PositionsLoadingStateProps) {
-  const viewportWidth = useSyncExternalStore(
-    subscribeToWindowResize,
-    getViewportWidthSnapshot,
-    getViewportWidthServerSnapshot,
-  )
+  const viewportWidth = useViewportWidth()
   const resolvedCount = skeletonCount ?? (viewportWidth < 768 ? 6 : 8)
 
   return (

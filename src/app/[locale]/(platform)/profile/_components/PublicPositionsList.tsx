@@ -1,10 +1,12 @@
 'use client'
 
-import type { InfiniteData } from '@tanstack/react-query'
+import type { InfiniteData, QueryClient } from '@tanstack/react-query'
+import type { RefObject } from 'react'
 import type { MergeableMarket } from './MergePositionsDialog'
 import type { PublicPosition } from './PublicPositionItem'
 import type { SortDirection, SortOption } from '@/app/[locale]/(platform)/profile/_types/PublicPositionsTypes'
 import type { NormalizedBookLevel } from '@/lib/order-panel-utils'
+import type { User } from '@/types'
 import { useAppKitAccount } from '@reown/appkit/react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
@@ -48,29 +50,46 @@ interface PublicPositionsListProps {
   userAddress: string
 }
 
-export default function PublicPositionsList({ userAddress }: PublicPositionsListProps) {
-  const queryClient = useQueryClient()
-  const router = useRouter()
-  const { open } = useAppKit()
-  const { isConnected } = useAppKitAccount()
-  const { signTypedDataAsync } = useSignTypedData()
-  const { runWithSignaturePrompt } = useSignaturePromptRunner()
-  const { ensureTradingReady, openTradeRequirements } = useTradingOnboarding()
-  const affiliateMetadata = useAffiliateOrderMetadata()
+interface SellModalPayload {
+  position: PublicPosition
+  shares: number
+  filledShares: number | null
+  avgPriceCents: number | null
+  receiveAmount: number | null
+  sellBids: NormalizedBookLevel[]
+  tokenId: string | null
+  isNegRisk: boolean
+}
+
+interface LoadMoreStateValue {
+  key: string
+  infiniteScrollError: string | null
+  isLoadingMore: boolean
+}
+
+function useUserTradingContext(userAddress: string) {
   const user = useUser()
-  const { signMessageAsync } = useSignMessage()
   const hasDeployedProxyWallet = Boolean(user?.proxy_wallet_address && user?.proxy_wallet_status === 'deployed')
   const proxyWalletAddress = hasDeployedProxyWallet ? normalizeAddress(user?.proxy_wallet_address) : null
   const userAddressNormalized = normalizeAddress(user?.address)
   const makerAddress = proxyWalletAddress ?? null
-  const signatureType = proxyWalletAddress ? 2 : 0
+  const signatureType: 0 | 2 = proxyWalletAddress ? 2 : 0
   const canSell = Boolean(
     hasDeployedProxyWallet
     && user?.proxy_wallet_address
     && user.proxy_wallet_address.toLowerCase() === userAddress.toLowerCase(),
   )
 
-  const marketStatusFilter: 'active' | 'closed' = 'active'
+  return {
+    user,
+    userAddressNormalized,
+    makerAddress,
+    signatureType,
+    canSell,
+  }
+}
+
+function useSearchAndSortState(userAddress: string) {
   const [searchQueryState, setSearchQueryState] = useState<{ key: string, value: string }>({
     key: userAddress,
     value: '',
@@ -79,70 +98,6 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
   const debouncedSearchQuery = useDebounce(searchQuery, 300)
   const [sortBy, setSortBy] = useState<SortOption>('currentValue')
   const [sortDirection, setSortDirection] = useState<SortDirection>(() => getDefaultSortDirection('currentValue'))
-  const minAmountFilter = 'All'
-  const loadMoreScopeKey = `${userAddress}:${debouncedSearchQuery}:${minAmountFilter}:${marketStatusFilter}:${sortBy}:${sortDirection}`
-  const [loadMoreState, setLoadMoreState] = useState<{
-    key: string
-    infiniteScrollError: string | null
-    isLoadingMore: boolean
-  }>({
-    key: loadMoreScopeKey,
-    infiniteScrollError: null,
-    isLoadingMore: false,
-  })
-  const scopedLoadMoreState = loadMoreState.key === loadMoreScopeKey
-    ? loadMoreState
-    : {
-        key: loadMoreScopeKey,
-        infiniteScrollError: null,
-        isLoadingMore: false,
-      }
-  const infiniteScrollError = scopedLoadMoreState.infiniteScrollError
-  const isLoadingMore = scopedLoadMoreState.isLoadingMore
-  const [retryCountState, setRetryCountState] = useState<{ key: string, value: number }>({
-    key: userAddress,
-    value: 0,
-  })
-  const retryCount = retryCountState.key === userAddress ? retryCountState.value : 0
-  const [isMergeDialogOpen, setIsMergeDialogOpen] = useState(false)
-  const [mergeSuccess, setMergeSuccess] = useState(false)
-  const [hideMergeButtonState, setHideMergeButtonState] = useState<{ key: string, value: boolean }>({
-    key: userAddress,
-    value: false,
-  })
-  const hideMergeButton = hideMergeButtonState.key === userAddress ? hideMergeButtonState.value : false
-  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false)
-  const [sharePosition, setSharePosition] = useState<PublicPosition | null>(null)
-  const [availableMergeableMarketsState, setAvailableMergeableMarketsState] = useState<{
-    key: string
-    markets: MergeableMarket[]
-  }>({
-    key: 'inactive',
-    markets: [],
-  })
-  const [sellModalPayload, setSellModalPayload] = useState<{
-    position: PublicPosition
-    shares: number
-    filledShares: number | null
-    avgPriceCents: number | null
-    receiveAmount: number | null
-    sellBids: NormalizedBookLevel[]
-    tokenId: string | null
-    isNegRisk: boolean
-  } | null>(null)
-  const [isCashOutSubmitting, setIsCashOutSubmitting] = useState(false)
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
-  const sellRequestIdRef = useRef(0)
-
-  const handleSearchChange = useCallback((query: string) => {
-    setLoadMoreState({
-      key: loadMoreScopeKey,
-      infiniteScrollError: null,
-      isLoadingMore: false,
-    })
-    setRetryCountState({ key: userAddress, value: 0 })
-    setSearchQueryState({ key: userAddress, value: query })
-  }, [loadMoreScopeKey, userAddress])
 
   const handleSortChange = useCallback((value: SortOption) => {
     setSortBy(value)
@@ -161,22 +116,165 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
     })
   }, [])
 
-  const {
-    status,
-    data,
-    isFetchingNextPage,
-    fetchNextPage,
-    hasNextPage,
-    refetch,
-  } = usePublicPositionsQuery({
-    userAddress,
-    status: marketStatusFilter,
-    minAmountFilter,
+  return {
+    searchQuery,
+    debouncedSearchQuery,
     sortBy,
     sortDirection,
-    searchQuery: debouncedSearchQuery,
-  })
+    setSearchQueryState,
+    handleSortChange,
+    handleHeaderSortToggle,
+  }
+}
 
+function useLoadMoreState(loadMoreScopeKey: string) {
+  const [loadMoreState, setLoadMoreState] = useState<LoadMoreStateValue>({
+    key: loadMoreScopeKey,
+    infiniteScrollError: null,
+    isLoadingMore: false,
+  })
+  const scopedLoadMoreState = loadMoreState.key === loadMoreScopeKey
+    ? loadMoreState
+    : {
+        key: loadMoreScopeKey,
+        infiniteScrollError: null,
+        isLoadingMore: false,
+      }
+
+  return {
+    infiniteScrollError: scopedLoadMoreState.infiniteScrollError,
+    isLoadingMore: scopedLoadMoreState.isLoadingMore,
+    setLoadMoreState,
+  }
+}
+
+function useRetryCountState(userAddress: string) {
+  const [retryCountState, setRetryCountState] = useState<{ key: string, value: number }>({
+    key: userAddress,
+    value: 0,
+  })
+  const retryCount = retryCountState.key === userAddress ? retryCountState.value : 0
+
+  return { retryCount, setRetryCountState }
+}
+
+function useSearchChangeHandler({
+  userAddress,
+  loadMoreScopeKey,
+  setLoadMoreState,
+  setRetryCountState,
+  setSearchQueryState,
+}: {
+  userAddress: string
+  loadMoreScopeKey: string
+  setLoadMoreState: (value: LoadMoreStateValue) => void
+  setRetryCountState: (value: { key: string, value: number }) => void
+  setSearchQueryState: (value: { key: string, value: string }) => void
+}) {
+  return useCallback((query: string) => {
+    setLoadMoreState({
+      key: loadMoreScopeKey,
+      infiniteScrollError: null,
+      isLoadingMore: false,
+    })
+    setRetryCountState({ key: userAddress, value: 0 })
+    setSearchQueryState({ key: userAddress, value: query })
+  }, [loadMoreScopeKey, setLoadMoreState, setRetryCountState, setSearchQueryState, userAddress])
+}
+
+function useMergeButtonVisibility(userAddress: string) {
+  const [hideMergeButtonState, setHideMergeButtonState] = useState<{ key: string, value: boolean }>({
+    key: userAddress,
+    value: false,
+  })
+  const hideMergeButton = hideMergeButtonState.key === userAddress ? hideMergeButtonState.value : false
+
+  return { hideMergeButton, setHideMergeButtonState }
+}
+
+function useShareDialog() {
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false)
+  const [sharePosition, setSharePosition] = useState<PublicPosition | null>(null)
+
+  const handleShareOpenChange = useCallback((open: boolean) => {
+    setIsShareDialogOpen(open)
+    if (!open) {
+      setSharePosition(null)
+    }
+  }, [])
+
+  const handleShareClick = useCallback((position: PublicPosition) => {
+    setSharePosition(position)
+    setIsShareDialogOpen(true)
+  }, [])
+
+  return {
+    isShareDialogOpen,
+    sharePosition,
+    handleShareOpenChange,
+    handleShareClick,
+  }
+}
+
+function useShareCardPayload({
+  sharePosition,
+  user,
+}: {
+  sharePosition: PublicPosition | null
+  user: User | null
+}) {
+  return useMemo(() => {
+    if (!sharePosition) {
+      return null
+    }
+
+    return buildShareCardPayload(sharePosition, {
+      userName: user?.username || undefined,
+      userImage: user?.image || undefined,
+    })
+  }, [sharePosition, user?.image, user?.username])
+}
+
+function useMergeDialog({
+  userAddress,
+  setHideMergeButtonState,
+}: {
+  userAddress: string
+  setHideMergeButtonState: (value: { key: string, value: boolean }) => void
+}) {
+  const [isMergeDialogOpen, setIsMergeDialogOpen] = useState(false)
+  const [mergeSuccess, setMergeSuccess] = useState(false)
+
+  const handleMergeDialogChange = useCallback((open: boolean) => {
+    setIsMergeDialogOpen(open)
+    if (!open) {
+      if (mergeSuccess) {
+        setHideMergeButtonState({ key: userAddress, value: true })
+      }
+      setMergeSuccess(false)
+    }
+  }, [mergeSuccess, setHideMergeButtonState, userAddress])
+
+  return {
+    isMergeDialogOpen,
+    setIsMergeDialogOpen,
+    mergeSuccess,
+    setMergeSuccess,
+    handleMergeDialogChange,
+  }
+}
+
+function usePositionsDerivations({
+  data,
+  debouncedSearchQuery,
+  sortBy,
+  sortDirection,
+}: {
+  data: InfiniteData<PublicPosition[]> | undefined
+  debouncedSearchQuery: string
+  sortBy: SortOption
+  sortDirection: SortDirection
+}) {
   const positions = useMemo(
     () =>
       (data?.pages.flat() ?? []).filter(
@@ -229,15 +327,31 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
     [sortBy, sortDirection, visiblePositions],
   )
 
-  const hasUserAddress = Boolean(userAddress)
-  const loading = hasUserAddress && status === 'pending'
-  const hasInitialError = hasUserAddress && status === 'error'
+  const totals = useMemo(
+    () => calculatePositionsTotals(visiblePositions),
+    [visiblePositions],
+  )
 
-  const isSearchActive = debouncedSearchQuery.trim().length > 0
+  return {
+    positionsWithIcons,
+    visiblePositions,
+    sortedPositions,
+    totals,
+  }
+}
+
+function useMergeableMarketsAvailability({
+  canSell,
+  positionsWithIcons,
+}: {
+  canSell: boolean
+  positionsWithIcons: PublicPosition[]
+}) {
   const mergeableMarkets = useMemo(
     () => buildMergeableMarkets(positionsWithIcons),
     [positionsWithIcons],
   )
+
   const positionsByCondition = useMemo(() => {
     const map: Record<string, Record<string, number>> = {}
 
@@ -262,6 +376,7 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
 
     return map
   }, [positionsWithIcons])
+
   const mergeableScopeKey = useMemo(() => {
     if (!canSell || mergeableMarkets.length === 0) {
       return 'inactive'
@@ -278,15 +393,23 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
 
     return `${marketsKey}::${lockedSharesKey}`
   }, [canSell, mergeableMarkets, positionsByCondition])
+
+  const [availableMergeableMarketsState, setAvailableMergeableMarketsState] = useState<{
+    key: string
+    markets: MergeableMarket[]
+  }>({
+    key: 'inactive',
+    markets: [],
+  })
   const availableMergeableMarkets = availableMergeableMarketsState.key === mergeableScopeKey
     ? availableMergeableMarketsState.markets
     : []
 
-  useEffect(() => {
+  useEffect(function resolveAvailableMergeableMarkets() {
     let cancelled = false
 
     if (!canSell || mergeableMarkets.length === 0) {
-      return () => {
+      return function cancelAvailabilityLookup() {
         cancelled = true
       }
     }
@@ -350,56 +473,144 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
         })
       })
 
-    return () => {
+    return function cancelAvailabilityLookup() {
       cancelled = true
     }
   }, [canSell, mergeableMarkets, positionsByCondition, mergeableScopeKey])
 
-  const hasMergeableMarkets = availableMergeableMarkets.length > 0
-
-  const { isMergeProcessing, mergeBatchCount, handleMergeAll } = useMergePositionsAction({
-    mergeableMarkets: availableMergeableMarkets,
+  return {
     positionsByCondition,
-    hasMergeableMarkets,
-    user,
-    ensureTradingReady,
-    openTradeRequirements,
-    queryClient,
-    signMessageAsync,
-    onSuccess: () => setMergeSuccess(true),
-  })
+    availableMergeableMarkets,
+  }
+}
 
-  const handleMergeDialogChange = useCallback((open: boolean) => {
-    setIsMergeDialogOpen(open)
-    if (!open) {
-      if (mergeSuccess) {
-        setHideMergeButtonState({ key: userAddress, value: true })
+function useScrollToTopOnFilterChange({
+  debouncedSearchQuery,
+  minAmountFilter,
+  marketStatusFilter,
+  sortBy,
+  sortDirection,
+}: {
+  debouncedSearchQuery: string
+  minAmountFilter: string
+  marketStatusFilter: string
+  sortBy: SortOption
+  sortDirection: SortDirection
+}) {
+  useEffect(function scrollToTopOnFilterChange() {
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }, [debouncedSearchQuery, minAmountFilter, marketStatusFilter, sortBy, sortDirection])
+}
+
+function useInfiniteScrollSentinel({
+  hasNextPage,
+  isFetchingNextPage,
+  isLoadingMore,
+  infiniteScrollError,
+  fetchNextPage,
+  loadMoreScopeKey,
+  userAddress,
+  setLoadMoreState,
+  setRetryCountState,
+}: {
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  isLoadingMore: boolean
+  infiniteScrollError: string | null
+  fetchNextPage: () => Promise<unknown>
+  loadMoreScopeKey: string
+  userAddress: string
+  setLoadMoreState: (value: LoadMoreStateValue) => void
+  setRetryCountState: (value: { key: string, value: number }) => void
+}): { loadMoreRef: RefObject<HTMLDivElement | null> } {
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(function observeLoadMoreSentinel() {
+    if (!hasNextPage || !loadMoreRef.current) {
+      return undefined
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      const [entry] = entries
+      if (entry?.isIntersecting && !isFetchingNextPage && !isLoadingMore && !infiniteScrollError) {
+        setLoadMoreState({
+          key: loadMoreScopeKey,
+          infiniteScrollError: null,
+          isLoadingMore: true,
+        })
+        fetchNextPage()
+          .then(() => {
+            setLoadMoreState({
+              key: loadMoreScopeKey,
+              infiniteScrollError: null,
+              isLoadingMore: false,
+            })
+            setRetryCountState({ key: userAddress, value: 0 })
+          })
+          .catch((error) => {
+            if (error.name !== 'AbortError') {
+              setLoadMoreState({
+                key: loadMoreScopeKey,
+                infiniteScrollError: error.message || 'Failed to load more positions',
+                isLoadingMore: false,
+              })
+              return
+            }
+            setLoadMoreState({
+              key: loadMoreScopeKey,
+              infiniteScrollError: null,
+              isLoadingMore: false,
+            })
+          })
       }
-      setMergeSuccess(false)
+    }, { rootMargin: '200px' })
+
+    observer.observe(loadMoreRef.current)
+
+    return function disconnectLoadMoreObserver() {
+      observer.disconnect()
     }
-  }, [mergeSuccess, userAddress])
+  }, [fetchNextPage, hasNextPage, infiniteScrollError, isFetchingNextPage, isLoadingMore, loadMoreScopeKey, setLoadMoreState, setRetryCountState, userAddress])
 
-  const shareCardPayload = useMemo(() => {
-    if (!sharePosition) {
-      return null
-    }
+  return { loadMoreRef }
+}
 
-    return buildShareCardPayload(sharePosition, { userName: userAddress })
-  }, [sharePosition, userAddress])
+function useRetryInitialLoad({
+  userAddress,
+  loadMoreScopeKey,
+  retryCount,
+  refetch,
+  setRetryCountState,
+  setLoadMoreState,
+}: {
+  userAddress: string
+  loadMoreScopeKey: string
+  retryCount: number
+  refetch: () => Promise<unknown>
+  setRetryCountState: (value: { key: string, value: number }) => void
+  setLoadMoreState: (value: LoadMoreStateValue) => void
+}) {
+  return useCallback(() => {
+    const currentRetryCount = retryCount + 1
+    setRetryCountState({ key: userAddress, value: currentRetryCount })
+    setLoadMoreState({
+      key: loadMoreScopeKey,
+      infiniteScrollError: null,
+      isLoadingMore: false,
+    })
 
-  const handleShareOpenChange = useCallback((open: boolean) => {
-    setIsShareDialogOpen(open)
-    if (!open) {
-      setSharePosition(null)
-    }
-  }, [])
+    const delay = Math.min(1000 * 2 ** (currentRetryCount - 1), 8000)
 
-  const handleShareClick = useCallback((position: PublicPosition) => {
-    setSharePosition(position)
-    setIsShareDialogOpen(true)
-  }, [])
+    setTimeout(() => {
+      void refetch()
+    }, delay)
+  }, [loadMoreScopeKey, refetch, retryCount, setLoadMoreState, setRetryCountState, userAddress])
+}
 
-  const resolveOutcomeIndex = useCallback((position: PublicPosition) => {
+function useResolveOutcomeIndex() {
+  return useCallback((position: PublicPosition) => {
     if (typeof position.outcomeIndex === 'number') {
       return position.outcomeIndex
     }
@@ -408,6 +619,44 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
       ? OUTCOME_INDEX.NO
       : OUTCOME_INDEX.YES
   }, [])
+}
+
+function useSellPositionFlow({
+  userAddress,
+  userAddressNormalized,
+  makerAddress,
+  signatureType,
+  user,
+  isConnected,
+  openWalletModal,
+  queryClient,
+  router,
+  affiliateMetadata,
+  ensureTradingReady,
+  openTradeRequirements,
+  runWithSignaturePrompt,
+  signTypedDataAsync,
+  resolveOutcomeIndex,
+}: {
+  userAddress: string
+  userAddressNormalized: `0x${string}` | null
+  makerAddress: `0x${string}` | null
+  signatureType: 0 | 2
+  user: User | null
+  isConnected: boolean
+  openWalletModal: ReturnType<typeof useAppKit>['open']
+  queryClient: QueryClient
+  router: ReturnType<typeof useRouter>
+  affiliateMetadata: ReturnType<typeof useAffiliateOrderMetadata>
+  ensureTradingReady: () => boolean
+  openTradeRequirements: (options?: { forceTradingAuth?: boolean }) => void
+  runWithSignaturePrompt: ReturnType<typeof useSignaturePromptRunner>['runWithSignaturePrompt']
+  signTypedDataAsync: ReturnType<typeof useSignTypedData>['signTypedDataAsync']
+  resolveOutcomeIndex: (position: PublicPosition) => number
+}) {
+  const [sellModalPayload, setSellModalPayload] = useState<SellModalPayload | null>(null)
+  const [isCashOutSubmitting, setIsCashOutSubmitting] = useState(false)
+  const sellRequestIdRef = useRef(0)
 
   const handleSellClick = useCallback(async (position: PublicPosition) => {
     const shares = typeof position.size === 'number' ? position.size : 0
@@ -571,12 +820,12 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
     }
 
     if (!isConnected) {
-      handleValidationError('NOT_CONNECTED', { openWalletModal: open })
+      handleValidationError('NOT_CONNECTED', { openWalletModal })
       return
     }
 
     if (!user) {
-      handleValidationError('MISSING_USER', { openWalletModal: open })
+      handleValidationError('MISSING_USER', { openWalletModal })
       return
     }
 
@@ -728,7 +977,7 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
     isCashOutSubmitting,
     isConnected,
     makerAddress,
-    open,
+    openWalletModal,
     queryClient,
     resolveOutcomeIndex,
     runWithSignaturePrompt,
@@ -740,77 +989,183 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
     userAddressNormalized,
   ])
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-    }
-  }, [debouncedSearchQuery, minAmountFilter, marketStatusFilter, sortBy, sortDirection])
+  return {
+    sellModalPayload,
+    handleSellClick,
+    handleSellModalChange,
+    handleEditOrder,
+    handleCashOut,
+  }
+}
 
-  useEffect(() => {
-    if (!hasNextPage || !loadMoreRef.current) {
-      return undefined
-    }
+export default function PublicPositionsList({ userAddress }: PublicPositionsListProps) {
+  const queryClient = useQueryClient()
+  const router = useRouter()
+  const { open } = useAppKit()
+  const { isConnected } = useAppKitAccount()
+  const { signTypedDataAsync } = useSignTypedData()
+  const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const { ensureTradingReady, openTradeRequirements } = useTradingOnboarding()
+  const affiliateMetadata = useAffiliateOrderMetadata()
+  const { signMessageAsync } = useSignMessage()
+  const {
+    user,
+    userAddressNormalized,
+    makerAddress,
+    signatureType,
+    canSell,
+  } = useUserTradingContext(userAddress)
 
-    const observer = new IntersectionObserver((entries) => {
-      const [entry] = entries
-      if (entry?.isIntersecting && !isFetchingNextPage && !isLoadingMore && !infiniteScrollError) {
-        setLoadMoreState({
-          key: loadMoreScopeKey,
-          infiniteScrollError: null,
-          isLoadingMore: true,
-        })
-        fetchNextPage()
-          .then(() => {
-            setLoadMoreState({
-              key: loadMoreScopeKey,
-              infiniteScrollError: null,
-              isLoadingMore: false,
-            })
-            setRetryCountState({ key: userAddress, value: 0 })
-          })
-          .catch((error) => {
-            if (error.name !== 'AbortError') {
-              setLoadMoreState({
-                key: loadMoreScopeKey,
-                infiniteScrollError: error.message || 'Failed to load more positions',
-                isLoadingMore: false,
-              })
-              return
-            }
-            setLoadMoreState({
-              key: loadMoreScopeKey,
-              infiniteScrollError: null,
-              isLoadingMore: false,
-            })
-          })
-      }
-    }, { rootMargin: '200px' })
+  const marketStatusFilter: 'active' | 'closed' = 'active'
+  const minAmountFilter = 'All'
 
-    observer.observe(loadMoreRef.current)
+  const {
+    searchQuery,
+    debouncedSearchQuery,
+    sortBy,
+    sortDirection,
+    setSearchQueryState,
+    handleSortChange,
+    handleHeaderSortToggle,
+  } = useSearchAndSortState(userAddress)
 
-    return () => observer.disconnect()
-  }, [fetchNextPage, hasNextPage, infiniteScrollError, isFetchingNextPage, isLoadingMore, loadMoreScopeKey, userAddress])
+  const loadMoreScopeKey = `${userAddress}:${debouncedSearchQuery}:${minAmountFilter}:${marketStatusFilter}:${sortBy}:${sortDirection}`
 
-  const retryInitialLoad = useCallback(() => {
-    const currentRetryCount = retryCount + 1
-    setRetryCountState({ key: userAddress, value: currentRetryCount })
-    setLoadMoreState({
-      key: loadMoreScopeKey,
-      infiniteScrollError: null,
-      isLoadingMore: false,
-    })
+  const { infiniteScrollError, isLoadingMore, setLoadMoreState } = useLoadMoreState(loadMoreScopeKey)
+  const { retryCount, setRetryCountState } = useRetryCountState(userAddress)
 
-    const delay = Math.min(1000 * 2 ** (currentRetryCount - 1), 8000)
+  const handleSearchChange = useSearchChangeHandler({
+    userAddress,
+    loadMoreScopeKey,
+    setLoadMoreState,
+    setRetryCountState,
+    setSearchQueryState,
+  })
 
-    setTimeout(() => {
-      void refetch()
-    }, delay)
-  }, [loadMoreScopeKey, refetch, retryCount, userAddress])
+  const { hideMergeButton, setHideMergeButtonState } = useMergeButtonVisibility(userAddress)
 
-  const totals = useMemo(
-    () => calculatePositionsTotals(visiblePositions),
-    [visiblePositions],
-  )
+  const {
+    isShareDialogOpen,
+    sharePosition,
+    handleShareOpenChange,
+    handleShareClick,
+  } = useShareDialog()
+
+  const {
+    isMergeDialogOpen,
+    setIsMergeDialogOpen,
+    mergeSuccess,
+    setMergeSuccess,
+    handleMergeDialogChange,
+  } = useMergeDialog({ userAddress, setHideMergeButtonState })
+
+  const {
+    status,
+    data,
+    isFetchingNextPage,
+    fetchNextPage,
+    hasNextPage,
+    refetch,
+  } = usePublicPositionsQuery({
+    userAddress,
+    status: marketStatusFilter,
+    minAmountFilter,
+    sortBy,
+    sortDirection,
+    searchQuery: debouncedSearchQuery,
+  })
+
+  const {
+    positionsWithIcons,
+    sortedPositions,
+    totals,
+  } = usePositionsDerivations({
+    data,
+    debouncedSearchQuery,
+    sortBy,
+    sortDirection,
+  })
+
+  const {
+    positionsByCondition,
+    availableMergeableMarkets,
+  } = useMergeableMarketsAvailability({ canSell, positionsWithIcons })
+
+  const hasMergeableMarkets = availableMergeableMarkets.length > 0
+
+  const { isMergeProcessing, mergeBatchCount, handleMergeAll } = useMergePositionsAction({
+    mergeableMarkets: availableMergeableMarkets,
+    positionsByCondition,
+    hasMergeableMarkets,
+    user,
+    ensureTradingReady,
+    openTradeRequirements,
+    queryClient,
+    signMessageAsync,
+    onSuccess: () => setMergeSuccess(true),
+  })
+
+  const shareCardPayload = useShareCardPayload({ sharePosition, user })
+
+  const resolveOutcomeIndex = useResolveOutcomeIndex()
+
+  const {
+    sellModalPayload,
+    handleSellClick,
+    handleSellModalChange,
+    handleEditOrder,
+    handleCashOut,
+  } = useSellPositionFlow({
+    userAddress,
+    userAddressNormalized,
+    makerAddress,
+    signatureType,
+    user,
+    isConnected,
+    openWalletModal: open,
+    queryClient,
+    router,
+    affiliateMetadata,
+    ensureTradingReady,
+    openTradeRequirements,
+    runWithSignaturePrompt,
+    signTypedDataAsync,
+    resolveOutcomeIndex,
+  })
+
+  useScrollToTopOnFilterChange({
+    debouncedSearchQuery,
+    minAmountFilter,
+    marketStatusFilter,
+    sortBy,
+    sortDirection,
+  })
+
+  const { loadMoreRef } = useInfiniteScrollSentinel({
+    hasNextPage,
+    isFetchingNextPage,
+    isLoadingMore,
+    infiniteScrollError,
+    fetchNextPage,
+    loadMoreScopeKey,
+    userAddress,
+    setLoadMoreState,
+    setRetryCountState,
+  })
+
+  const retryInitialLoad = useRetryInitialLoad({
+    userAddress,
+    loadMoreScopeKey,
+    retryCount,
+    refetch,
+    setRetryCountState,
+    setLoadMoreState,
+  })
+
+  const hasUserAddress = Boolean(userAddress)
+  const loading = hasUserAddress && status === 'pending'
+  const hasInitialError = hasUserAddress && status === 'error'
+  const isSearchActive = debouncedSearchQuery.trim().length > 0
 
   return (
     <div className="space-y-3 pb-0">

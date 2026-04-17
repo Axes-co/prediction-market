@@ -37,6 +37,12 @@ function mergeDateAndTime(date: Date, time: string) {
   return nextDate
 }
 
+function useCalendarDates(value?: Date) {
+  const [minDate] = useState<Date>(() => new Date())
+  const [internalDate, setInternalDate] = useState<Date>(() => value ?? new Date(minDate.getTime()))
+  return { minDate, internalDate, setInternalDate }
+}
+
 export default function EventLimitExpirationCalendar({
   value,
   onChange,
@@ -47,8 +53,7 @@ export default function EventLimitExpirationCalendar({
   applyLabel,
 }: EventLimitExpirationCalendarProps) {
   const t = useExtracted()
-  const [minDate] = useState<Date>(() => new Date())
-  const [internalDate, setInternalDate] = useState<Date>(() => value ?? new Date(minDate.getTime()))
+  const { minDate, internalDate, setInternalDate } = useCalendarDates(value)
   const selectedDate = value ?? internalDate
   const timeValue = formatTimeInput(selectedDate)
   const showActions = Boolean(onCancel || onApply)

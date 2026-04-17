@@ -48,39 +48,26 @@ interface DataTableProps<TData, TValue> {
   searchLeadingIcon?: ReactNode
 }
 
-export function DataTable<TData, TValue>({
+function useDataTableState<TData, TValue>({
   columns,
   data,
   totalCount,
-  searchPlaceholder,
-  enableSelection = false,
-  enablePagination = true,
-  enableColumnVisibility = true,
-  isLoading = false,
-  error = null,
-  emptyMessage,
-  emptyDescription,
-  onRetry,
-  search,
-  onSearchChange,
   sortBy,
   sortOrder,
   onSortChange,
   pageIndex,
   pageSize,
-  onPageChange,
-  onPageSizeChange,
-  toolbarLeftContent,
-  toolbarRightContent,
-  searchInputClassName,
-  searchLeadingIcon,
-}: DataTableProps<TData, TValue>) {
-  const t = useExtracted()
-  const resolvedSearchPlaceholder = searchPlaceholder ?? t('Search...')
-  const resolvedEmptyMessage = emptyMessage ?? t('No entries found')
-  const resolvedEmptyDescription = emptyDescription ?? t('There are no entries to display yet.')
+}: {
+  columns: ColumnDef<TData, TValue>[]
+  data: TData[]
+  totalCount: number
+  sortBy: string | null
+  sortOrder: 'asc' | 'desc' | null
+  onSortChange: (column: string | null, order: 'asc' | 'desc' | null) => void
+  pageIndex: number
+  pageSize: number
+}) {
   const [rowSelection, setRowSelection] = useState({})
-
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
 
   const sorting: SortingState = useMemo(() => {
@@ -138,6 +125,52 @@ export function DataTable<TData, TValue>({
         pageSize,
       },
     },
+  })
+
+  return { table }
+}
+
+export function DataTable<TData, TValue>({
+  columns,
+  data,
+  totalCount,
+  searchPlaceholder,
+  enableSelection = false,
+  enablePagination = true,
+  enableColumnVisibility = true,
+  isLoading = false,
+  error = null,
+  emptyMessage,
+  emptyDescription,
+  onRetry,
+  search,
+  onSearchChange,
+  sortBy,
+  sortOrder,
+  onSortChange,
+  pageIndex,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+  toolbarLeftContent,
+  toolbarRightContent,
+  searchInputClassName,
+  searchLeadingIcon,
+}: DataTableProps<TData, TValue>) {
+  const t = useExtracted()
+  const resolvedSearchPlaceholder = searchPlaceholder ?? t('Search...')
+  const resolvedEmptyMessage = emptyMessage ?? t('No entries found')
+  const resolvedEmptyDescription = emptyDescription ?? t('There are no entries to display yet.')
+
+  const { table } = useDataTableState({
+    columns,
+    data,
+    totalCount,
+    sortBy,
+    sortOrder,
+    onSortChange,
+    pageIndex,
+    pageSize,
   })
 
   if (error) {

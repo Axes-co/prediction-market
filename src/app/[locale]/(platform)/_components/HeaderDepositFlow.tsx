@@ -4,15 +4,11 @@ import { useEffect, useRef } from 'react'
 import { useTradingOnboarding } from '@/app/[locale]/(platform)/_providers/TradingOnboardingContext'
 import { TradingOnboardingProvider } from '@/app/[locale]/(platform)/_providers/TradingOnboardingProvider'
 
-interface HeaderDepositFlowInnerProps {
-  requestId: number
-}
-
-function HeaderDepositFlowInner({ requestId }: HeaderDepositFlowInnerProps) {
+function useStartDepositFlowOnRequest(requestId: number) {
   const { startDepositFlow } = useTradingOnboarding()
   const lastRequestIdRef = useRef(0)
 
-  useEffect(() => {
+  useEffect(function startDepositFlowWhenRequestIdChanges() {
     if (requestId === 0 || lastRequestIdRef.current === requestId) {
       return
     }
@@ -20,6 +16,14 @@ function HeaderDepositFlowInner({ requestId }: HeaderDepositFlowInnerProps) {
     lastRequestIdRef.current = requestId
     startDepositFlow()
   }, [requestId, startDepositFlow])
+}
+
+interface HeaderDepositFlowInnerProps {
+  requestId: number
+}
+
+function HeaderDepositFlowInner({ requestId }: HeaderDepositFlowInnerProps) {
+  useStartDepositFlowOnRequest(requestId)
 
   return null
 }

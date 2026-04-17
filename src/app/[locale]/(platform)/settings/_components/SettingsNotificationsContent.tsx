@@ -17,10 +17,15 @@ interface NotificationSettings {
   inapp_resolutions: boolean
 }
 
-export default function SettingsNotificationsContent({ user }: { user: User }) {
-  const t = useExtracted()
+function useNotificationsFormState() {
   const [status, setStatus] = useState<{ error: string } | null>(null)
   const formRef = useRef<HTMLFormElement>(null)
+  return { status, setStatus, formRef }
+}
+
+export default function SettingsNotificationsContent({ user }: { user: User }) {
+  const t = useExtracted()
+  const { status, setStatus, formRef } = useNotificationsFormState()
   const initialSettings = user.settings?.notifications ?? {
     email_resolutions: false,
     inapp_order_fills: false,

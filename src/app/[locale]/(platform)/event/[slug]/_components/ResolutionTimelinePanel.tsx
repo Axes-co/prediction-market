@@ -163,6 +163,40 @@ function TimelineLabel({
   )
 }
 
+function useResolutionTimeline(market: Event['markets'][number], siteName: string) {
+  const [nowMs, setNowMs] = useState(() => Date.now())
+
+  const timeline = useMemo(
+    () => buildResolutionTimeline(market, { nowMs }),
+    [market, nowMs],
+  )
+  const disputeUrl = useMemo(
+    () => buildUmaProposeUrl(market.condition, siteName),
+    [market.condition, siteName],
+  )
+
+  const hasActiveCountdown = timeline.items.some(item =>
+    (item.type === 'finalReview' || item.type === 'disputeWindow')
+    && item.state === 'active'
+    && (item.remainingSeconds ?? 0) > 0)
+
+  useEffect(function countdownTickEffect() {
+    if (!hasActiveCountdown) {
+      return
+    }
+
+    const interval = window.setInterval(() => {
+      setNowMs(Date.now())
+    }, 1000)
+
+    return function cleanupCountdownTick() {
+      window.clearInterval(interval)
+    }
+  }, [hasActiveCountdown])
+
+  return { timeline, disputeUrl }
+}
+
 export default function ResolutionTimelinePanel({
   market,
   settledUrl,
@@ -173,39 +207,11 @@ export default function ResolutionTimelinePanel({
   const t = useExtracted()
   const normalizeOutcomeLabel = useOutcomeLabel()
   const siteIdentity = useSiteIdentity()
-  const [nowMs, setNowMs] = useState(() => Date.now())
+  const { timeline, disputeUrl } = useResolutionTimeline(market, siteIdentity.name)
   const yesOutcomeText = market.outcomes.find(outcome => outcome.outcome_index === OUTCOME_INDEX.YES)?.outcome_text
   const noOutcomeText = market.outcomes.find(outcome => outcome.outcome_index === OUTCOME_INDEX.NO)?.outcome_text
   const yesOutcomeLabel = (yesOutcomeText ? normalizeOutcomeLabel(yesOutcomeText) : '') || yesOutcomeText || t('Yes')
   const noOutcomeLabel = (noOutcomeText ? normalizeOutcomeLabel(noOutcomeText) : '') || noOutcomeText || t('No')
-
-  const timeline = useMemo(
-    () => buildResolutionTimeline(market, { nowMs }),
-    [market, nowMs],
-  )
-  const disputeUrl = useMemo(
-    () => buildUmaProposeUrl(market.condition, siteIdentity.name),
-    [market.condition, siteIdentity.name],
-  )
-
-  const hasActiveCountdown = timeline.items.some(item =>
-    (item.type === 'finalReview' || item.type === 'disputeWindow')
-    && item.state === 'active'
-    && (item.remainingSeconds ?? 0) > 0)
-
-  useEffect(() => {
-    if (!hasActiveCountdown) {
-      return
-    }
-
-    const interval = window.setInterval(() => {
-      setNowMs(Date.now())
-    }, 1000)
-
-    return () => {
-      window.clearInterval(interval)
-    }
-  }, [hasActiveCountdown])
 
   if (timeline.items.length === 0) {
     return null

@@ -1,5 +1,6 @@
 'use client'
 
+import type { InfiniteData, UseInfiniteQueryResult } from '@tanstack/react-query'
 import type { Route } from 'next'
 import type {
   PredictionResultsSortOption,
@@ -380,6 +381,188 @@ async function fetchPredictionResults({
   })
 }
 
+function usePredictionResultsFilters({
+  initialInputValue,
+  initialSort,
+  initialStatus,
+  routeScopeKey,
+  searchScopeKey,
+  initialCurrentTimestamp,
+}: {
+  initialInputValue: string
+  initialSort: PredictionResultsSortOption
+  initialStatus: PredictionResultsStatusOption
+  routeScopeKey: string
+  searchScopeKey: string
+  initialCurrentTimestamp: number | null
+}) {
+  const [isBookmarkedState, setIsBookmarkedState] = useState<{ key: string, value: boolean }>({ key: routeScopeKey, value: false })
+  const [isDrawerOpenState, setIsDrawerOpenState] = useState<{ key: string, value: boolean }>({ key: routeScopeKey, value: false })
+  const [searchValueState, setSearchValueState] = useState<{ key: string, value: string }>({ key: searchScopeKey, value: initialInputValue })
+  const [selectedSortState, setSelectedSortState] = useState<{ key: string, value: PredictionResultsSortOption }>({
+    key: routeScopeKey,
+    value: initialSort,
+  })
+  const [selectedStatusState, setSelectedStatusState] = useState<{ key: string, value: PredictionResultsStatusOption }>({
+    key: routeScopeKey,
+    value: initialStatus,
+  })
+  const [searchParamsString, setSearchParamsString] = useState('')
+  const searchDebounceTimeoutRef = useRef<number | null>(null)
+
+  const currentTimestamp = useSyncExternalStore(
+    subscribeToCurrentTimestamp,
+    getCurrentTimestampSnapshot,
+    () => initialCurrentTimestamp,
+  )
+
+  useEffect(function cleanupSearchDebounceTimeout() {
+    const timeoutRef = searchDebounceTimeoutRef
+    return function disposeSearchDebounceTimeout() {
+      if (timeoutRef.current) {
+        window.clearTimeout(timeoutRef.current)
+      }
+    }
+  }, [])
+
+  const isBookmarked = isBookmarkedState.key === routeScopeKey ? isBookmarkedState.value : false
+  const searchValue = searchValueState.key === searchScopeKey ? searchValueState.value : initialInputValue
+  const isDrawerOpen = isDrawerOpenState.key === routeScopeKey ? isDrawerOpenState.value : false
+  const selectedSort = selectedSortState.key === routeScopeKey ? selectedSortState.value : initialSort
+  const selectedStatus = selectedStatusState.key === routeScopeKey ? selectedStatusState.value : initialStatus
+
+  return {
+    currentTimestamp,
+    isBookmarked,
+    isDrawerOpen,
+    searchDebounceTimeoutRef,
+    searchParamsString,
+    searchValue,
+    selectedSort,
+    selectedStatus,
+    setIsBookmarkedState,
+    setIsDrawerOpenState,
+    setSearchParamsString,
+    setSearchValueState,
+    setSelectedSortState,
+    setSelectedStatusState,
+  }
+}
+
+function usePredictionResultsQuery({
+  canRetryLoadMore,
+  fetchNextPage,
+  hasNextPage,
+  infiniteScrollScopeKey,
+  isFetchingNextPage,
+  setCanRetryLoadMoreState,
+  setInfiniteScrollErrorState,
+}: {
+  canRetryLoadMore: boolean
+  fetchNextPage: UseInfiniteQueryResult<InfiniteData<Event[]>, Error>['fetchNextPage']
+  hasNextPage: boolean
+  infiniteScrollScopeKey: string
+  isFetchingNextPage: boolean
+  setCanRetryLoadMoreState: React.Dispatch<React.SetStateAction<{ key: string, value: boolean }>>
+  setInfiniteScrollErrorState: React.Dispatch<React.SetStateAction<{ key: string, value: string | null }>>
+}) {
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(function observeInfiniteScrollSentinel() {
+    const sentinel = loadMoreRef.current
+    if (!sentinel || !hasNextPage) {
+      return
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry?.isIntersecting || !canRetryLoadMore || isFetchingNextPage) {
+        return
+      }
+
+      void fetchNextPage().catch((fetchError: Error) => {
+        setCanRetryLoadMoreState({ key: infiniteScrollScopeKey, value: false })
+        setInfiniteScrollErrorState({ key: infiniteScrollScopeKey, value: fetchError.message || 'Failed to load more results.' })
+      })
+    }, { rootMargin: '240px 0px' })
+
+    observer.observe(sentinel)
+
+    return function disconnectInfiniteScrollObserver() {
+      observer.disconnect()
+    }
+  }, [canRetryLoadMore, fetchNextPage, hasNextPage, isFetchingNextPage, infiniteScrollScopeKey, setCanRetryLoadMoreState, setInfiniteScrollErrorState])
+
+  return { loadMoreRef }
+}
+
+function useInfiniteScrollError(infiniteScrollScopeKey: string) {
+  const [canRetryLoadMoreState, setCanRetryLoadMoreState] = useState<{ key: string, value: boolean }>({
+    key: infiniteScrollScopeKey,
+    value: true,
+  })
+  const [infiniteScrollErrorState, setInfiniteScrollErrorState] = useState<{ key: string, value: string | null }>({
+    key: infiniteScrollScopeKey,
+    value: null,
+  })
+
+  const canRetryLoadMore = canRetryLoadMoreState.key === infiniteScrollScopeKey ? canRetryLoadMoreState.value : true
+  const infiniteScrollError = infiniteScrollErrorState.key === infiniteScrollScopeKey ? infiniteScrollErrorState.value : null
+
+  return {
+    canRetryLoadMore,
+    infiniteScrollError,
+    setCanRetryLoadMoreState,
+    setInfiniteScrollErrorState,
+  }
+}
+
+function useVisibleEvents({
+  data,
+  initialEvents,
+  selectedSort,
+  selectedStatus,
+}: {
+  data: { pages: Event[][] } | undefined
+  initialEvents: Event[]
+  selectedSort: PredictionResultsSortOption
+  selectedStatus: PredictionResultsStatusOption
+}) {
+  return useMemo(() => {
+    const pages = data?.pages.flat() ?? initialEvents
+    const filteredPages = filterPredictionEventsByStatus(pages, selectedStatus)
+    return sortPredictionEvents(filteredPages, selectedSort)
+  }, [data, initialEvents, selectedSort, selectedStatus])
+}
+
+function useResolvedResultDisplay({
+  event,
+  isResolvedEvent,
+  normalizeOutcomeLabel,
+  showResolvedOutcomeLayout,
+  t,
+}: {
+  event: Event
+  isResolvedEvent: boolean
+  normalizeOutcomeLabel: (label: string) => string | null
+  showResolvedOutcomeLayout: boolean
+  t: (key: string) => string
+}) {
+  return useMemo(() => {
+    if (!showResolvedOutcomeLayout || !isResolvedEvent) {
+      return {
+        label: null,
+        outcomeIndex: null,
+      }
+    }
+
+    const resolvedDisplay = resolveResolvedPredictionResultLabel(event)
+    return {
+      label: resolvedDisplay.label ? (normalizeOutcomeLabel(resolvedDisplay.label) || resolvedDisplay.label) : t('Resolved'),
+      outcomeIndex: resolvedDisplay.outcomeIndex,
+    }
+  }, [event, isResolvedEvent, normalizeOutcomeLabel, showResolvedOutcomeLayout, t])
+}
+
 export default function PredictionResultsClient({
   displayLabel,
   initialCurrentTimestamp,
@@ -400,41 +583,38 @@ export default function PredictionResultsClient({
   const router = useRouter()
   const routeScopeKey = `${routeMainTag}:${routeTag}:${initialQuery}`
   const searchScopeKey = `${routeScopeKey}:${initialInputValue}`
-  const [isBookmarkedState, setIsBookmarkedState] = useState<{ key: string, value: boolean }>({ key: routeScopeKey, value: false })
-  const [isDrawerOpenState, setIsDrawerOpenState] = useState<{ key: string, value: boolean }>({ key: routeScopeKey, value: false })
-  const [searchValueState, setSearchValueState] = useState<{ key: string, value: string }>({ key: searchScopeKey, value: initialInputValue })
-  const [selectedSortState, setSelectedSortState] = useState<{ key: string, value: PredictionResultsSortOption }>({
-    key: routeScopeKey,
-    value: initialSort,
+
+  const {
+    currentTimestamp,
+    isBookmarked,
+    isDrawerOpen,
+    searchDebounceTimeoutRef,
+    searchParamsString,
+    searchValue,
+    selectedSort,
+    selectedStatus,
+    setIsBookmarkedState,
+    setIsDrawerOpenState,
+    setSearchParamsString,
+    setSearchValueState,
+    setSelectedSortState,
+    setSelectedStatusState,
+  } = usePredictionResultsFilters({
+    initialInputValue,
+    initialSort,
+    initialStatus,
+    routeScopeKey,
+    searchScopeKey,
+    initialCurrentTimestamp,
   })
-  const [selectedStatusState, setSelectedStatusState] = useState<{ key: string, value: PredictionResultsStatusOption }>({
-    key: routeScopeKey,
-    value: initialStatus,
-  })
-  const isBookmarked = isBookmarkedState.key === routeScopeKey ? isBookmarkedState.value : false
-  const searchValue = searchValueState.key === searchScopeKey ? searchValueState.value : initialInputValue
-  const isDrawerOpen = isDrawerOpenState.key === routeScopeKey ? isDrawerOpenState.value : false
-  const selectedSort = selectedSortState.key === routeScopeKey ? selectedSortState.value : initialSort
-  const selectedStatus = selectedStatusState.key === routeScopeKey ? selectedStatusState.value : initialStatus
-  const currentTimestamp = useSyncExternalStore(
-    subscribeToCurrentTimestamp,
-    getCurrentTimestampSnapshot,
-    () => initialCurrentTimestamp,
-  )
-  const [searchParamsString, setSearchParamsString] = useState('')
-  const searchDebounceTimeoutRef = useRef<number | null>(null)
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+
   const infiniteScrollScopeKey = `${initialQuery}:${selectedSort}:${selectedStatus}:${isBookmarked}:${locale}:${routeMainTag}:${routeTag}`
-  const [canRetryLoadMoreState, setCanRetryLoadMoreState] = useState<{ key: string, value: boolean }>({
-    key: infiniteScrollScopeKey,
-    value: true,
-  })
-  const [infiniteScrollErrorState, setInfiniteScrollErrorState] = useState<{ key: string, value: string | null }>({
-    key: infiniteScrollScopeKey,
-    value: null,
-  })
-  const canRetryLoadMore = canRetryLoadMoreState.key === infiniteScrollScopeKey ? canRetryLoadMoreState.value : true
-  const infiniteScrollError = infiniteScrollErrorState.key === infiniteScrollScopeKey ? infiniteScrollErrorState.value : null
+  const {
+    canRetryLoadMore,
+    infiniteScrollError,
+    setCanRetryLoadMoreState,
+    setInfiniteScrollErrorState,
+  } = useInfiniteScrollError(infiniteScrollScopeKey)
   const canUseInitialData = !isBookmarked && selectedSort === initialSort && selectedStatus === initialStatus
 
   const {
@@ -476,40 +656,22 @@ export default function PredictionResultsClient({
     staleTime: 'static',
   })
 
-  useEffect(() => {
-    return () => {
-      if (searchDebounceTimeoutRef.current) {
-        window.clearTimeout(searchDebounceTimeoutRef.current)
-      }
-    }
-  }, [])
+  const { loadMoreRef } = usePredictionResultsQuery({
+    canRetryLoadMore,
+    fetchNextPage,
+    hasNextPage,
+    infiniteScrollScopeKey,
+    isFetchingNextPage,
+    setCanRetryLoadMoreState,
+    setInfiniteScrollErrorState,
+  })
 
-  useEffect(() => {
-    if (!loadMoreRef.current || !hasNextPage) {
-      return
-    }
-
-    const observer = new IntersectionObserver(([entry]) => {
-      if (!entry?.isIntersecting || !canRetryLoadMore || isFetchingNextPage) {
-        return
-      }
-
-      void fetchNextPage().catch((fetchError: Error) => {
-        setCanRetryLoadMoreState({ key: infiniteScrollScopeKey, value: false })
-        setInfiniteScrollErrorState({ key: infiniteScrollScopeKey, value: fetchError.message || 'Failed to load more results.' })
-      })
-    }, { rootMargin: '240px 0px' })
-
-    observer.observe(loadMoreRef.current)
-
-    return () => observer.disconnect()
-  }, [canRetryLoadMore, fetchNextPage, hasNextPage, isFetchingNextPage, infiniteScrollScopeKey])
-
-  const visibleEvents = useMemo(() => {
-    const pages = data?.pages.flat() ?? initialEvents
-    const filteredPages = filterPredictionEventsByStatus(pages, selectedStatus)
-    return sortPredictionEvents(filteredPages, selectedSort)
-  }, [data, initialEvents, selectedSort, selectedStatus])
+  const visibleEvents = useVisibleEvents({
+    data,
+    initialEvents,
+    selectedSort,
+    selectedStatus,
+  })
 
   const isEmptyState = !isPending && !isFetching && visibleEvents.length === 0
   const showInitialSkeleton = visibleEvents.length === 0 && (isPending || isFetching)
@@ -847,20 +1009,13 @@ function PredictionResultRow({
   const selectedMarketLabel = primaryMarket?.short_title?.trim()
     || primaryMarket?.title?.trim()
     || (event.status === 'resolved' ? t('Resolved') : t('Market'))
-  const resolvedResultDisplay = useMemo(() => {
-    if (!showResolvedOutcomeLayout || !isResolvedEvent) {
-      return {
-        label: null,
-        outcomeIndex: null,
-      }
-    }
-
-    const resolvedDisplay = resolveResolvedPredictionResultLabel(event)
-    return {
-      label: resolvedDisplay.label ? (normalizeOutcomeLabel(resolvedDisplay.label) || resolvedDisplay.label) : t('Resolved'),
-      outcomeIndex: resolvedDisplay.outcomeIndex,
-    }
-  }, [event, isResolvedEvent, normalizeOutcomeLabel, showResolvedOutcomeLayout, t])
+  const resolvedResultDisplay = useResolvedResultDisplay({
+    event,
+    isResolvedEvent,
+    normalizeOutcomeLabel,
+    showResolvedOutcomeLayout,
+    t,
+  })
   const resolvedBadgeOutcome = resolvedResultDisplay.outcomeIndex === OUTCOME_INDEX.NO
     ? 'no'
     : resolvedResultDisplay.outcomeIndex === OUTCOME_INDEX.YES

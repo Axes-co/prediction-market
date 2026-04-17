@@ -83,6 +83,51 @@ function formatTime(timestamp: number) {
   return new Date(timestamp).toLocaleTimeString()
 }
 
+function useWebSocketState(endpoint: string, defaultMessage: string) {
+  const [url, setUrl] = useState(endpoint)
+  const [token, setToken] = useState('')
+  const [message, setMessage] = useState(defaultMessage)
+  const [status, setStatus] = useState<ConnectionStatus>('disconnected')
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [errorMessage, setErrorMessage] = useState('')
+  const socketRef = useRef<WebSocket | null>(null)
+  const nextLogIdRef = useRef(0)
+  const instanceId = useId()
+
+  useEffect(function cleanupSocketOnUnmount() {
+    return function cleanup() {
+      const socket = socketRef.current
+      socketRef.current = null
+
+      if (!socket) {
+        return
+      }
+
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        socket.close(1000, 'Component unmounted')
+      }
+    }
+  }, [])
+
+  return {
+    url,
+    setUrl,
+    token,
+    setToken,
+    message,
+    setMessage,
+    status,
+    setStatus,
+    logs,
+    setLogs,
+    errorMessage,
+    setErrorMessage,
+    socketRef,
+    nextLogIdRef,
+    instanceId,
+  }
+}
+
 export function WebSocketPlayground({
   endpoint = DEFAULT_ENDPOINT,
   defaultMessage = DEFAULT_MESSAGE,
@@ -90,16 +135,23 @@ export function WebSocketPlayground({
   maxLogs = 120,
   className,
 }: WebSocketPlaygroundProps) {
-  const [url, setUrl] = useState(endpoint)
-  const [token, setToken] = useState('')
-  const [message, setMessage] = useState(defaultMessage)
-  const [status, setStatus] = useState<ConnectionStatus>('disconnected')
-  const [logs, setLogs] = useState<LogEntry[]>([])
-  const [errorMessage, setErrorMessage] = useState('')
-
-  const socketRef = useRef<WebSocket | null>(null)
-  const nextLogIdRef = useRef(0)
-  const instanceId = useId()
+  const {
+    url,
+    setUrl,
+    token,
+    setToken,
+    message,
+    setMessage,
+    status,
+    setStatus,
+    logs,
+    setLogs,
+    errorMessage,
+    setErrorMessage,
+    socketRef,
+    nextLogIdRef,
+    instanceId,
+  } = useWebSocketState(endpoint, defaultMessage)
   const logLimit = Math.max(maxLogs, 10)
 
   function pushLog(level: LogLevel, entryMessage: string) {
@@ -220,21 +272,6 @@ export function WebSocketPlayground({
   function clearLogs() {
     setLogs([])
   }
-
-  useEffect(() => {
-    return () => {
-      const socket = socketRef.current
-      socketRef.current = null
-
-      if (!socket) {
-        return
-      }
-
-      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-        socket.close(1000, 'Component unmounted')
-      }
-    }
-  }, [])
 
   const isConnected = status === 'connected'
   const previewUrl = buildSocketUrl(url.trim(), token.trim(), authQueryKey)

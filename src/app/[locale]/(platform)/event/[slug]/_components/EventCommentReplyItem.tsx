@@ -34,29 +34,26 @@ interface ReplyItemProps {
   isTogglingLikeForComment: (commentId: string) => boolean
 }
 
-export default function EventCommentReplyItem({
+function useCommentReplyItemHandlers({
   reply,
-  parentDisplayName,
-  parentProfileSlug,
   commentId,
   user,
-  usePrimaryPositionTone = false,
-  isSingleMarket,
-  marketsByConditionId,
-  onLikeToggle,
-  onDelete,
   replyingTo,
   onSetReplyingTo,
-  replyText,
   onSetReplyText,
-  createReply,
-  isCreatingComment,
-  isTogglingLikeForComment,
-}: ReplyItemProps) {
+  onLikeToggle,
+  onDelete,
+}: {
+  reply: Comment
+  commentId: string
+  user: any
+  replyingTo: string | null
+  onSetReplyingTo: (id: string | null) => void
+  onSetReplyText: (text: string) => void
+  onLikeToggle: (commentId: string, replyId: string) => void
+  onDelete: (commentId: string, replyId: string) => void
+}) {
   const { open } = useAppKit()
-  const { displayName, profileSlug } = resolveCommentUserIdentity(reply)
-  const parentHref = parentProfileSlug ? ((buildPublicProfilePath(parentProfileSlug) ?? '#') as any) : ('#' as any)
-  const t = useExtracted()
 
   const handleReplyClick = useCallback(() => {
     if (!user) {
@@ -87,6 +84,54 @@ export default function EventCommentReplyItem({
     onSetReplyingTo(null)
     onSetReplyText('')
   }, [onSetReplyingTo, onSetReplyText])
+
+  return {
+    handleReplyClick,
+    handleLikeToggle,
+    handleDelete,
+    handleReplyAdded,
+    handleReplyCancel,
+  }
+}
+
+export default function EventCommentReplyItem({
+  reply,
+  parentDisplayName,
+  parentProfileSlug,
+  commentId,
+  user,
+  usePrimaryPositionTone = false,
+  isSingleMarket,
+  marketsByConditionId,
+  onLikeToggle,
+  onDelete,
+  replyingTo,
+  onSetReplyingTo,
+  replyText,
+  onSetReplyText,
+  createReply,
+  isCreatingComment,
+  isTogglingLikeForComment,
+}: ReplyItemProps) {
+  const { displayName, profileSlug } = resolveCommentUserIdentity(reply)
+  const parentHref = parentProfileSlug ? ((buildPublicProfilePath(parentProfileSlug) ?? '#') as any) : ('#' as any)
+  const t = useExtracted()
+  const {
+    handleReplyClick,
+    handleLikeToggle,
+    handleDelete,
+    handleReplyAdded,
+    handleReplyCancel,
+  } = useCommentReplyItemHandlers({
+    reply,
+    commentId,
+    user,
+    replyingTo,
+    onSetReplyingTo,
+    onSetReplyText,
+    onLikeToggle,
+    onDelete,
+  })
 
   return (
     <>

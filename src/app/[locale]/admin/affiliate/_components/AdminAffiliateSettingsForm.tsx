@@ -21,18 +21,12 @@ interface AdminAffiliateSettingsFormProps {
   updatedAtLabel?: string
 }
 
-export default function AdminAffiliateSettingsForm({
-  tradeFeeBps,
-  affiliateShareBps,
-  minTradeFeeBps = 0,
-  updatedAtLabel,
-}: AdminAffiliateSettingsFormProps) {
+function useAffiliateSettingsForm() {
   const t = useExtracted()
   const [state, formAction, isPending] = useActionState(updateForkSettingsAction, initialState)
   const wasPendingRef = useRef(isPending)
-  const minTradeFeePercent = (minTradeFeeBps / 100).toFixed(2)
 
-  useEffect(() => {
+  useEffect(function toastOnSettingsTransition() {
     const transitionedToIdle = wasPendingRef.current && !isPending
 
     if (transitionedToIdle && state.error === null) {
@@ -44,6 +38,19 @@ export default function AdminAffiliateSettingsForm({
 
     wasPendingRef.current = isPending
   }, [isPending, state.error, t])
+
+  return { state, formAction, isPending }
+}
+
+export default function AdminAffiliateSettingsForm({
+  tradeFeeBps,
+  affiliateShareBps,
+  minTradeFeeBps = 0,
+  updatedAtLabel,
+}: AdminAffiliateSettingsFormProps) {
+  const t = useExtracted()
+  const { state, formAction, isPending } = useAffiliateSettingsForm()
+  const minTradeFeePercent = (minTradeFeeBps / 100).toFixed(2)
 
   return (
     <Form action={formAction} className="grid gap-6 rounded-lg border p-6">

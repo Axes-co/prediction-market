@@ -1,6 +1,7 @@
 'use client'
 
 import type { Route } from 'next'
+import type { RefObject } from 'react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import NavigationMoreMenu from '@/app/[locale]/(platform)/_components/NavigationMoreMenu'
 import NavigationTab from '@/app/[locale]/(platform)/_components/NavigationTab'
@@ -31,31 +32,22 @@ function getMainTagHref(slug: string, dynamicHomeCategorySlugSet: ReadonlySet<st
   return '/' as Route
 }
 
-export default function NavigationTabs() {
-  const pathname = usePathname()
-  const { filters } = useFilters()
-  const { tags, childParentMap } = usePlatformNavigationData()
+type NavigationTag = ReturnType<typeof usePlatformNavigationData>['tags'][number]
+
+function useNavigationTabsRefs(tagCount: number) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const tabItemRef = useRef<(HTMLSpanElement | null)[]>([])
+
+  useEffect(function syncTabItemRefLengthToTags() {
+    tabItemRef.current = Array.from({ length: tagCount }).map((_, index) => tabItemRef.current[index] ?? null)
+  }, [tagCount])
+
+  return { containerRef, tabItemRef }
+}
+
+function useScrollShadows(containerRef: RefObject<HTMLDivElement | null>) {
   const [showLeftShadow, setShowLeftShadow] = useState(false)
   const [showRightShadow, setShowRightShadow] = useState(false)
-  const dynamicHomeCategorySlugSet = useMemo(() => buildDynamicHomeCategorySlugSet(tags), [tags])
-
-  const navigationSelection = useMemo(() => resolvePlatformNavigationSelection({
-    dynamicHomeCategorySlugSet,
-    pathname,
-    filters: {
-      tag: filters.tag,
-      mainTag: filters.mainTag,
-      bookmarked: filters.bookmarked,
-    },
-    childParentMap,
-  }), [childParentMap, dynamicHomeCategorySlugSet, filters.bookmarked, filters.mainTag, filters.tag, pathname])
-
-  const activeIndex = useMemo(
-    () => tags.findIndex(tag => tag.slug === navigationSelection.activeMainTagSlug),
-    [navigationSelection.activeMainTagSlug, tags],
-  )
 
   const updateScrollShadows = useCallback(() => {
     const container = containerRef.current
@@ -70,21 +62,19 @@ export default function NavigationTabs() {
 
     setShowLeftShadow(scrollLeft > 4)
     setShowRightShadow(scrollLeft < maxScrollLeft - 4)
-  }, [])
+  }, [containerRef])
 
-  useEffect(() => {
-    tabItemRef.current = Array.from({ length: tags.length }).map((_, index) => tabItemRef.current[index] ?? null)
-  }, [tags.length])
-
-  useLayoutEffect(() => {
+  useLayoutEffect(function runInitialScrollShadowUpdate() {
     const rafId = requestAnimationFrame(() => {
       updateScrollShadows()
     })
 
-    return () => cancelAnimationFrame(rafId)
+    return function cancelInitialScrollShadowFrame() {
+      cancelAnimationFrame(rafId)
+    }
   }, [updateScrollShadows])
 
-  useEffect(() => {
+  useEffect(function bindScrollShadowListeners() {
     const container = containerRef.current
     if (!container) {
       return
@@ -106,14 +96,26 @@ export default function NavigationTabs() {
     container.addEventListener('scroll', handleScroll)
     window.addEventListener('resize', handleResize)
 
-    return () => {
+    return function unbindScrollShadowListeners() {
       container.removeEventListener('scroll', handleScroll)
       window.removeEventListener('resize', handleResize)
       clearTimeout(resizeTimeout)
     }
-  }, [updateScrollShadows])
+  }, [containerRef, updateScrollShadows])
 
-  useEffect(() => {
+  return { showLeftShadow, showRightShadow }
+}
+
+function useScrollActiveTabIntoView({
+  activeIndex,
+  containerRef,
+  tabItemRef,
+}: {
+  activeIndex: number
+  containerRef: RefObject<HTMLDivElement | null>
+  tabItemRef: RefObject<(HTMLSpanElement | null)[]>
+}) {
+  useEffect(function scrollActiveTabIntoView() {
     if (activeIndex < 0) {
       return
     }
@@ -139,8 +141,43 @@ export default function NavigationTabs() {
       container.scrollTo({ left: clampedLeft, behavior: 'smooth' })
     }, 100)
 
-    return () => clearTimeout(timeoutId)
-  }, [activeIndex])
+    return function cancelActiveTabScrollTimeout() {
+      clearTimeout(timeoutId)
+    }
+  }, [activeIndex, containerRef, tabItemRef])
+}
+
+function useNavigationSelection(tags: ReadonlyArray<NavigationTag>) {
+  const pathname = usePathname()
+  const { filters } = useFilters()
+  const { childParentMap } = usePlatformNavigationData()
+  const dynamicHomeCategorySlugSet = useMemo(() => buildDynamicHomeCategorySlugSet([...tags]), [tags])
+
+  const navigationSelection = useMemo(() => resolvePlatformNavigationSelection({
+    dynamicHomeCategorySlugSet,
+    pathname,
+    filters: {
+      tag: filters.tag,
+      mainTag: filters.mainTag,
+      bookmarked: filters.bookmarked,
+    },
+    childParentMap,
+  }), [childParentMap, dynamicHomeCategorySlugSet, filters.bookmarked, filters.mainTag, filters.tag, pathname])
+
+  const activeIndex = useMemo(
+    () => tags.findIndex(tag => tag.slug === navigationSelection.activeMainTagSlug),
+    [navigationSelection.activeMainTagSlug, tags],
+  )
+
+  return { navigationSelection, activeIndex, dynamicHomeCategorySlugSet }
+}
+
+export default function NavigationTabs() {
+  const { tags } = usePlatformNavigationData()
+  const { containerRef, tabItemRef } = useNavigationTabsRefs(tags.length)
+  const { showLeftShadow, showRightShadow } = useScrollShadows(containerRef)
+  const { navigationSelection, activeIndex, dynamicHomeCategorySlugSet } = useNavigationSelection(tags)
+  useScrollActiveTabIntoView({ activeIndex, containerRef, tabItemRef })
 
   return (
     <nav className="sticky top-15 z-20 bg-background md:top-17">

@@ -70,6 +70,114 @@ interface EventConvertPositionsDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+function parseQuestionIndex(questionId?: string) {
+  if (!questionId) {
+    return null
+  }
+  const normalized = questionId.startsWith('0x') ? questionId.slice(2) : questionId
+  if (normalized.length < 2) {
+    return null
+  }
+  const lastByte = normalized.slice(-2)
+  const index = Number.parseInt(lastByte, 16)
+  return Number.isFinite(index) ? index : null
+}
+
+function useConvertPositionsSelection({
+  options,
+  outcomes,
+}: {
+  options: ConvertPositionOption[]
+  outcomes: ConvertOutcomeOption[]
+}) {
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(options.map(option => option.id)))
+
+  function toggleOption(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) {
+        next.delete(id)
+      }
+      else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  const selectedMax = useMemo(() => {
+    let minValue: number | null = null
+    options.forEach((option) => {
+      if (!selectedIds.has(option.id)) {
+        return
+      }
+      if (minValue === null || option.shares < minValue) {
+        minValue = option.shares
+      }
+    })
+    return minValue ?? 0
+  }, [options, selectedIds])
+
+  const selectedOptions = useMemo(
+    () => options.filter(option => selectedIds.has(option.id)),
+    [options, selectedIds],
+  )
+
+  const selectedConditionIds = useMemo(
+    () => new Set(selectedOptions.map(option => option.conditionId)),
+    [selectedOptions],
+  )
+
+  const conversionOutcomes = useMemo(
+    () => outcomes.filter(outcome => !selectedConditionIds.has(outcome.conditionId)),
+    [outcomes, selectedConditionIds],
+  )
+
+  const questionIndexByCondition = useMemo(() => {
+    const map = new Map<string, number>()
+    outcomes.forEach((outcome) => {
+      const questionIndex = parseQuestionIndex(outcome.questionId)
+      if (questionIndex !== null) {
+        map.set(outcome.conditionId, questionIndex)
+      }
+    })
+    return map
+  }, [outcomes])
+
+  const selectedIndexSet = useMemo(() => {
+    let indexSet = 0n
+    selectedConditionIds.forEach((conditionId) => {
+      const questionIndex = questionIndexByCondition.get(conditionId)
+      if (questionIndex !== undefined) {
+        indexSet |= 1n << BigInt(questionIndex)
+      }
+    })
+    return indexSet
+  }, [selectedConditionIds, questionIndexByCondition])
+
+  const hasMissingQuestionIndex = useMemo(() => {
+    if (selectedConditionIds.size === 0) {
+      return false
+    }
+    for (const conditionId of selectedConditionIds) {
+      if (!questionIndexByCondition.has(conditionId)) {
+        return true
+      }
+    }
+    return false
+  }, [selectedConditionIds, questionIndexByCondition])
+
+  return {
+    selectedIds,
+    toggleOption,
+    selectedMax,
+    selectedOptions,
+    conversionOutcomes,
+    selectedIndexSet,
+    hasMissingQuestionIndex,
+  }
+}
+
 export default function EventConvertPositionsDialog({
   open,
   options,
@@ -116,80 +224,19 @@ function EventConvertPositionsDialogContent({
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
   const checkboxBaseId = useId()
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(options.map(option => option.id)))
   const [amount, setAmount] = useState('0')
   const [step, setStep] = useState<'select' | 'review'>('select')
   const [submitState, setSubmitState] = useState<'idle' | 'signing' | 'submitting'>('idle')
 
-  const selectedMax = useMemo(() => {
-    let minValue: number | null = null
-    options.forEach((option) => {
-      if (!selectedIds.has(option.id)) {
-        return
-      }
-      if (minValue === null || option.shares < minValue) {
-        minValue = option.shares
-      }
-    })
-    return minValue ?? 0
-  }, [options, selectedIds])
-  const selectedOptions = useMemo(
-    () => options.filter(option => selectedIds.has(option.id)),
-    [options, selectedIds],
-  )
-  const selectedConditionIds = useMemo(
-    () => new Set(selectedOptions.map(option => option.conditionId)),
-    [selectedOptions],
-  )
-  const conversionOutcomes = useMemo(
-    () => outcomes.filter(outcome => !selectedConditionIds.has(outcome.conditionId)),
-    [outcomes, selectedConditionIds],
-  )
-  function parseQuestionIndex(questionId?: string) {
-    if (!questionId) {
-      return null
-    }
-    const normalized = questionId.startsWith('0x') ? questionId.slice(2) : questionId
-    if (normalized.length < 2) {
-      return null
-    }
-    const lastByte = normalized.slice(-2)
-    const index = Number.parseInt(lastByte, 16)
-    return Number.isFinite(index) ? index : null
-  }
-
-  const questionIndexByCondition = useMemo(() => {
-    const map = new Map<string, number>()
-    outcomes.forEach((outcome) => {
-      const questionIndex = parseQuestionIndex(outcome.questionId)
-      if (questionIndex !== null) {
-        map.set(outcome.conditionId, questionIndex)
-      }
-    })
-    return map
-  }, [outcomes])
-
-  const selectedIndexSet = useMemo(() => {
-    let indexSet = 0n
-    selectedConditionIds.forEach((conditionId) => {
-      const questionIndex = questionIndexByCondition.get(conditionId)
-      if (questionIndex !== undefined) {
-        indexSet |= 1n << BigInt(questionIndex)
-      }
-    })
-    return indexSet
-  }, [selectedConditionIds, questionIndexByCondition])
-  const hasMissingQuestionIndex = useMemo(() => {
-    if (selectedConditionIds.size === 0) {
-      return false
-    }
-    for (const conditionId of selectedConditionIds) {
-      if (!questionIndexByCondition.has(conditionId)) {
-        return true
-      }
-    }
-    return false
-  }, [selectedConditionIds, questionIndexByCondition])
+  const {
+    selectedIds,
+    toggleOption,
+    selectedMax,
+    selectedOptions,
+    conversionOutcomes,
+    selectedIndexSet,
+    hasMissingQuestionIndex,
+  } = useConvertPositionsSelection({ options, outcomes })
   const hasSelection = selectedOptions.length > 0
   const numericAmount = Number(amount)
   const hasValidAmount = Number.isFinite(numericAmount) && numericAmount > 0
@@ -224,19 +271,6 @@ function EventConvertPositionsDialogContent({
     && Boolean(negRiskMarketId)
     && selectedIndexSet > 0n
     && !isSubmitting
-
-  function toggleOption(id: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      if (next.has(id)) {
-        next.delete(id)
-      }
-      else {
-        next.add(id)
-      }
-      return next
-    })
-  }
 
   function handleAmountChange(value: string) {
     const sanitized = value.replace(/,/g, '.')

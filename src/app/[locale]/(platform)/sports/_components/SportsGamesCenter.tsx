@@ -13,7 +13,7 @@ import type { SportsGamesButton, SportsGamesCard } from '@/app/[locale]/(platfor
 import type { OddsFormat } from '@/lib/odds-format'
 import type { NormalizedBookLevel } from '@/lib/order-panel-utils'
 import type { SportsVertical } from '@/lib/sports-vertical'
-import type { Market, Outcome, UserPosition } from '@/types'
+import type { Event, Market, Outcome, UserPosition } from '@/types'
 import type { DataPoint, PredictionChartCursorSnapshot, PredictionChartProps } from '@/types/PredictionChartTypes'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -1189,42 +1189,35 @@ function resolveSwitchTooltip(market: Market | null, nextOutcome: Outcome | null
   return `Switch to ${nextOutcomeLabel} - ${marketDescriptor}`
 }
 
-export function SportsGameGraph({
-  card,
-  selectedMarketType,
-  selectedConditionId,
-  defaultTimeRange = '1W',
-  variant = 'default',
-}: {
-  card: SportsGamesCard
-  selectedMarketType: SportsGamesMarketType
-  selectedConditionId: string | null
-  defaultTimeRange?: (typeof TIME_RANGES)[number]
-  variant?: SportsGameGraphVariant
-}) {
-  function resolveInitialGraphChartSettings() {
+function useSportsGameGraphChartSettings() {
+  const [chartSettings, setChartSettings] = useState(function resolveInitialGraphChartSettings() {
     const stored = loadStoredChartSettings()
     return { ...stored, bothOutcomes: false }
-  }
+  })
 
-  const { width: windowWidth } = useWindowSize()
-  const [cursorSnapshot, setCursorSnapshot] = useState<PredictionChartCursorSnapshot | null>(null)
-  const [activeTimeRange, setActiveTimeRange] = useState<(typeof TIME_RANGES)[number]>(defaultTimeRange)
-  const [chartSettings, setChartSettings] = useState(resolveInitialGraphChartSettings)
-  const [exportDialogOpen, setExportDialogOpen] = useState(false)
-  const [embedDialogOpen, setEmbedDialogOpen] = useState(false)
-  const [tradeFlowItems, setTradeFlowItems] = useState<SportsTradeFlowLabelItem[]>([])
-  const isSecondaryMarketGraph = selectedMarketType === 'spread' || selectedMarketType === 'total'
+  useEffect(function persistGraphChartSettings() {
+    storeChartSettings({ ...chartSettings, bothOutcomes: false })
+    return function noopGraphChartSettingsCleanup() {}
+  }, [chartSettings])
+
+  return [chartSettings, setChartSettings] as const
+}
+
+function useSportsGameGraphChartDimensions({
+  windowWidth,
+  variant,
+}: {
+  windowWidth: number | undefined
+  variant: SportsGameGraphVariant
+}) {
   const isSportsEventHeroVariant = variant === 'sportsEventHero'
   const usesPositionedSeriesLegend = variant === 'sportsEventHero' || variant === 'sportsCardLegend'
   const chartHeight = isSportsEventHeroVariant ? 332 : 300
   const chartMargin = usesPositionedSeriesLegend
     ? { top: 12, right: 46, bottom: 40, left: 0 }
     : { top: 12, right: 30, bottom: 40, left: 0 }
-  const tradeFlowIdRef = useRef(0)
-  const canRenderPositionedSeriesLegend = usesPositionedSeriesLegend
 
-  const fallbackChartWidth = useMemo(() => {
+  const chartWidth = useMemo(() => {
     const viewportWidth = windowWidth ?? 1200
 
     if (viewportWidth < 768) {
@@ -1233,13 +1226,28 @@ export function SportsGameGraph({
 
     return Math.min(860, viewportWidth - 520)
   }, [windowWidth])
-  const chartWidth = fallbackChartWidth
 
-  useEffect(() => {
-    storeChartSettings({ ...chartSettings, bothOutcomes: false })
-    return () => {}
-  }, [chartSettings])
+  return {
+    isSportsEventHeroVariant,
+    usesPositionedSeriesLegend,
+    canRenderPositionedSeriesLegend: usesPositionedSeriesLegend,
+    chartHeight,
+    chartMargin,
+    chartWidth,
+  }
+}
 
+function useSportsGameGraphSeries({
+  card,
+  selectedConditionId,
+  isSecondaryMarketGraph,
+  isSportsEventHeroVariant,
+}: {
+  card: SportsGamesCard
+  selectedConditionId: string | null
+  isSecondaryMarketGraph: boolean
+  isSportsEventHeroVariant: boolean
+}) {
   const graphSeriesTargets = useMemo<SportsGraphSeriesTarget[]>(
     () => {
       if (
@@ -1384,15 +1392,6 @@ export function SportsGameGraph({
     [graphSeriesTargets],
   )
 
-  const { normalizedHistory } = useEventPriceHistory({
-    eventId: card.id,
-    range: activeTimeRange,
-    targets: marketTargets,
-    eventCreatedAt: card.eventCreatedAt,
-    eventResolvedAt: card.eventResolvedAt,
-  })
-  const leadingGapStart = normalizedHistory[0]?.date ?? null
-
   const chartSeries = useMemo(() => {
     return graphSeriesTargets.map(target => ({
       key: target.key,
@@ -1401,34 +1400,32 @@ export function SportsGameGraph({
     }))
   }, [graphSeriesTargets])
 
-  const heroLegendRenderedWidth = useMemo(() => {
-    if (!canRenderPositionedSeriesLegend || chartSeries.length === 0) {
-      return HERO_LEGEND_MIN_WIDTH_PX
-    }
+  return { graphSeriesTargets, tradeFlowSeriesByTokenId, marketTargets, chartSeries }
+}
 
-    if (typeof document === 'undefined') {
-      return HERO_LEGEND_MIN_WIDTH_PX
-    }
-
-    const context = document.createElement('canvas').getContext('2d')
-    if (!context) {
-      return HERO_LEGEND_MIN_WIDTH_PX
-    }
-
-    context.font = '500 13px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'
-
-    const longestLabelWidth = chartSeries.reduce((maxWidth, seriesItem) => {
-      const label = seriesItem.name.trim()
-      if (!label) {
-        return maxWidth
-      }
-
-      return Math.max(maxWidth, context.measureText(label).width)
-    }, 0)
-
-    const targetWidth = Math.ceil(longestLabelWidth + HERO_LEGEND_NAME_PADDING_PX)
-    return Math.max(HERO_LEGEND_MIN_WIDTH_PX, targetWidth)
-  }, [canRenderPositionedSeriesLegend, chartSeries])
+function useSportsGameGraphHistory({
+  card,
+  marketTargets,
+  activeTimeRange,
+  chartSeries,
+  graphSeriesTargets,
+  isSecondaryMarketGraph,
+}: {
+  card: SportsGamesCard
+  marketTargets: Array<{ conditionId: string, tokenId: string }>
+  activeTimeRange: (typeof TIME_RANGES)[number]
+  chartSeries: Array<{ key: string, name: string, color: string }>
+  graphSeriesTargets: SportsGraphSeriesTarget[]
+  isSecondaryMarketGraph: boolean
+}) {
+  const { normalizedHistory } = useEventPriceHistory({
+    eventId: card.id,
+    range: activeTimeRange,
+    targets: marketTargets,
+    eventCreatedAt: card.eventCreatedAt,
+    eventResolvedAt: card.eventResolvedAt,
+  })
+  const leadingGapStart = normalizedHistory[0]?.date ?? null
 
   const historyChartData = useMemo<DataPoint[]>(() => {
     return normalizedHistory
@@ -1531,6 +1528,59 @@ export function SportsGameGraph({
 
     return nextValues
   }, [chartData, chartSeries])
+
+  return { chartData, latestSnapshot, leadingGapStart }
+}
+
+function useSportsGameGraphHeroLegend({
+  canRenderPositionedSeriesLegend,
+  chartSeries,
+  chartData,
+  chartWidth,
+  chartHeight,
+  chartMargin,
+  cursorSnapshot,
+  latestSnapshot,
+  usesPositionedSeriesLegend,
+}: {
+  canRenderPositionedSeriesLegend: boolean
+  chartSeries: Array<{ key: string, name: string, color: string }>
+  chartData: DataPoint[]
+  chartWidth: number
+  chartHeight: number
+  chartMargin: { top: number, right: number, bottom: number, left: number }
+  cursorSnapshot: PredictionChartCursorSnapshot | null
+  latestSnapshot: Record<string, number>
+  usesPositionedSeriesLegend: boolean
+}) {
+  const heroLegendRenderedWidth = useMemo(() => {
+    if (!canRenderPositionedSeriesLegend || chartSeries.length === 0) {
+      return HERO_LEGEND_MIN_WIDTH_PX
+    }
+
+    if (typeof document === 'undefined') {
+      return HERO_LEGEND_MIN_WIDTH_PX
+    }
+
+    const context = document.createElement('canvas').getContext('2d')
+    if (!context) {
+      return HERO_LEGEND_MIN_WIDTH_PX
+    }
+
+    context.font = '500 13px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'
+
+    const longestLabelWidth = chartSeries.reduce((maxWidth, seriesItem) => {
+      const label = seriesItem.name.trim()
+      if (!label) {
+        return maxWidth
+      }
+
+      return Math.max(maxWidth, context.measureText(label).width)
+    }, 0)
+
+    const targetWidth = Math.ceil(longestLabelWidth + HERO_LEGEND_NAME_PADDING_PX)
+    return Math.max(HERO_LEGEND_MIN_WIDTH_PX, targetWidth)
+  }, [canRenderPositionedSeriesLegend, chartSeries])
 
   const chartXDomain = useMemo(() => {
     if (!usesPositionedSeriesLegend || chartData.length < 2) {
@@ -1749,6 +1799,43 @@ export function SportsGameGraph({
       .filter((entry): entry is { key: string, name: string, color: string, value: number } => entry !== null),
     [chartSeries, cursorSnapshot, latestSnapshot],
   )
+
+  return {
+    heroLegendRenderedWidth,
+    chartXDomain,
+    heroLegendSeriesWithValues,
+    heroLegendPositionedEntries,
+    legendSeriesWithValues,
+  }
+}
+
+function useSportsGameGraphInteractionState(defaultTimeRange: (typeof TIME_RANGES)[number]) {
+  const [cursorSnapshot, setCursorSnapshot] = useState<PredictionChartCursorSnapshot | null>(null)
+  const [activeTimeRange, setActiveTimeRange] = useState<(typeof TIME_RANGES)[number]>(defaultTimeRange)
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const [embedDialogOpen, setEmbedDialogOpen] = useState(false)
+
+  return {
+    cursorSnapshot,
+    setCursorSnapshot,
+    activeTimeRange,
+    setActiveTimeRange,
+    exportDialogOpen,
+    setExportDialogOpen,
+    embedDialogOpen,
+    setEmbedDialogOpen,
+  }
+}
+
+function useSportsGameGraphTradeFlow({
+  isSportsEventHeroVariant,
+  tradeFlowSeriesByTokenId,
+}: {
+  isSportsEventHeroVariant: boolean
+  tradeFlowSeriesByTokenId: Map<string, { color: string }>
+}) {
+  const [tradeFlowItems, setTradeFlowItems] = useState<SportsTradeFlowLabelItem[]>([])
+  const tradeFlowIdRef = useRef(0)
   const hasTradeFlowLabels = tradeFlowItems.length > 0
 
   useOptionalMarketChannelSubscription((payload) => {
@@ -1787,9 +1874,9 @@ export function SportsGameGraph({
     })
   })
 
-  useEffect(() => {
+  useEffect(function pruneExpiredTradeFlowItems() {
     if (!isSportsEventHeroVariant || !hasTradeFlowLabels) {
-      return
+      return undefined
     }
 
     const interval = window.setInterval(() => {
@@ -1803,10 +1890,87 @@ export function SportsGameGraph({
       })
     }, TRADE_FLOW_CLEANUP_INTERVAL_MS)
 
-    return () => {
+    return function clearTradeFlowPruneInterval() {
       window.clearInterval(interval)
     }
   }, [hasTradeFlowLabels, isSportsEventHeroVariant])
+
+  return { tradeFlowItems, hasTradeFlowLabels }
+}
+
+export function SportsGameGraph({
+  card,
+  selectedMarketType,
+  selectedConditionId,
+  defaultTimeRange = '1W',
+  variant = 'default',
+}: {
+  card: SportsGamesCard
+  selectedMarketType: SportsGamesMarketType
+  selectedConditionId: string | null
+  defaultTimeRange?: (typeof TIME_RANGES)[number]
+  variant?: SportsGameGraphVariant
+}) {
+  const { width: windowWidth } = useWindowSize()
+  const {
+    cursorSnapshot,
+    setCursorSnapshot,
+    activeTimeRange,
+    setActiveTimeRange,
+    exportDialogOpen,
+    setExportDialogOpen,
+    embedDialogOpen,
+    setEmbedDialogOpen,
+  } = useSportsGameGraphInteractionState(defaultTimeRange)
+  const isSecondaryMarketGraph = selectedMarketType === 'spread' || selectedMarketType === 'total'
+
+  const [chartSettings, setChartSettings] = useSportsGameGraphChartSettings()
+
+  const {
+    isSportsEventHeroVariant,
+    usesPositionedSeriesLegend,
+    canRenderPositionedSeriesLegend,
+    chartHeight,
+    chartMargin,
+    chartWidth,
+  } = useSportsGameGraphChartDimensions({ windowWidth, variant })
+
+  const { graphSeriesTargets, tradeFlowSeriesByTokenId, marketTargets, chartSeries } = useSportsGameGraphSeries({
+    card,
+    selectedConditionId,
+    isSecondaryMarketGraph,
+    isSportsEventHeroVariant,
+  })
+
+  const { chartData, latestSnapshot, leadingGapStart } = useSportsGameGraphHistory({
+    card,
+    marketTargets,
+    activeTimeRange,
+    chartSeries,
+    graphSeriesTargets,
+    isSecondaryMarketGraph,
+  })
+
+  const {
+    chartXDomain,
+    heroLegendPositionedEntries,
+    legendSeriesWithValues,
+  } = useSportsGameGraphHeroLegend({
+    canRenderPositionedSeriesLegend,
+    chartSeries,
+    chartData,
+    chartWidth,
+    chartHeight,
+    chartMargin,
+    cursorSnapshot,
+    latestSnapshot,
+    usesPositionedSeriesLegend,
+  })
+
+  const { tradeFlowItems, hasTradeFlowLabels } = useSportsGameGraphTradeFlow({
+    isSportsEventHeroVariant,
+    tradeFlowSeriesByTokenId,
+  })
 
   const legendContent = !isSecondaryMarketGraph && !usesPositionedSeriesLegend && legendSeriesWithValues.length > 0
     ? (
@@ -2520,35 +2684,7 @@ interface SportsGameDetailsPanelProps {
   ) => void
 }
 
-export function SportsGameDetailsPanel({
-  card,
-  activeDetailsTab,
-  selectedButtonKey,
-  showBottomContent,
-  defaultGraphTimeRange = '1W',
-  allowedConditionIds = null,
-  positionsTitle,
-  showAboutTab = false,
-  aboutEvent = null,
-  rulesEvent = null,
-  showRedeemInPositions = false,
-  onOpenRedeemForCondition = null,
-  oddsFormat = 'price',
-  marketContextEnabled = true,
-  onChangeTab,
-  onSelectButton,
-}: SportsGameDetailsPanelProps) {
-  const t = useExtracted()
-  const isMobile = useIsMobile()
-  const user = useUser()
-  const linePickerScrollerRef = useRef<HTMLDivElement | null>(null)
-  const linePickerButtonsRef = useRef<Record<string, HTMLButtonElement | null>>({})
-  const linePickerScrollSettleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const linePickerSuppressScrollSyncUntilRef = useRef(0)
-  const linePickerSpacerWidth = 'calc(50% - 28px)'
-  const [cashOutPayload, setCashOutPayload] = useState<SportsCashOutModalPayload | null>(null)
-  const [isPositionsExpanded, setIsPositionsExpanded] = useState(false)
-  const [convertTagKey, setConvertTagKey] = useState<string | null>(null)
+function useSportsGameDetailsPanelOrderStore() {
   const orderMarketConditionId = useOrder(state => state.market?.condition_id ?? null)
   const orderOutcomeIndex = useOrder(state => state.outcome?.outcome_index ?? null)
   const setOrderOutcome = useOrder(state => state.setOutcome)
@@ -2558,13 +2694,34 @@ export function SportsGameDetailsPanel({
   const setOrderAmount = useOrder(state => state.setAmount)
   const setIsMobileOrderPanelOpen = useOrder(state => state.setIsMobileOrderPanelOpen)
 
-  const ownerAddress = useMemo(() => {
-    if (user?.proxy_wallet_address && user.proxy_wallet_status === 'deployed') {
-      return user.proxy_wallet_address
-    }
-    return null
-  }, [user?.proxy_wallet_address, user?.proxy_wallet_status])
+  return {
+    orderMarketConditionId,
+    orderOutcomeIndex,
+    setOrderOutcome,
+    setOrderMarket,
+    setOrderType,
+    setOrderSide,
+    setOrderAmount,
+    setIsMobileOrderPanelOpen,
+  }
+}
 
+function useSportsGameDetailsPanelLocalState() {
+  const [cashOutPayload, setCashOutPayload] = useState<SportsCashOutModalPayload | null>(null)
+  const [isPositionsExpanded, setIsPositionsExpanded] = useState(false)
+  const [convertTagKey, setConvertTagKey] = useState<string | null>(null)
+
+  return {
+    cashOutPayload,
+    setCashOutPayload,
+    isPositionsExpanded,
+    setIsPositionsExpanded,
+    convertTagKey,
+    setConvertTagKey,
+  }
+}
+
+function useSportsCardDerivations(card: SportsGamesCard) {
   const cardMarketByConditionId = useMemo(
     () => new Map(card.detailMarkets.map(market => [market.condition_id, market] as const)),
     [card.detailMarkets],
@@ -2597,8 +2754,35 @@ export function SportsGameDetailsPanel({
     [card.buttons],
   )
 
+  const isNegRiskEnabled = useMemo(() => {
+    return Boolean(
+      card.event.neg_risk
+      || card.event.neg_risk_augmented
+      || card.event.neg_risk_market_id
+      || card.detailMarkets.some(market => market.neg_risk || market.neg_risk_market_id),
+    )
+  }, [card.detailMarkets, card.event.neg_risk, card.event.neg_risk_augmented, card.event.neg_risk_market_id])
+
+  return {
+    cardMarketByConditionId,
+    cardButtonsByConditionAndOutcome,
+    cardFirstButtonByCondition,
+    moneylineConditionIds,
+    isNegRiskEnabled,
+  }
+}
+
+function useSportsCardUserPositionsQuery({
+  ownerAddress,
+  cardId,
+  showBottomContent,
+}: {
+  ownerAddress: string | null
+  cardId: string
+  showBottomContent: boolean
+}) {
   const { data: userPositions } = useQuery<UserPosition[]>({
-    queryKey: ['sports-card-user-positions', ownerAddress, card.id],
+    queryKey: ['sports-card-user-positions', ownerAddress, cardId],
     enabled: Boolean(ownerAddress),
     staleTime: 1000 * 30,
     gcTime: 1000 * 60 * 10,
@@ -2612,6 +2796,26 @@ export function SportsGameDetailsPanel({
     }),
   })
 
+  return userPositions
+}
+
+function useSportsPositionTags({
+  ownerAddress,
+  userPositions,
+  allowedConditionIds,
+  card,
+  cardMarketByConditionId,
+  cardButtonsByConditionAndOutcome,
+  cardFirstButtonByCondition,
+}: {
+  ownerAddress: string | null
+  userPositions: UserPosition[] | undefined
+  allowedConditionIds: Set<string> | null
+  card: SportsGamesCard
+  cardMarketByConditionId: Map<string, Market>
+  cardButtonsByConditionAndOutcome: Map<string, SportsGamesButton>
+  cardFirstButtonByCondition: Map<string, SportsGamesButton>
+}) {
   const positionTags = useMemo<SportsPositionTag[]>(() => {
     if (!ownerAddress || !userPositions?.length) {
       return []
@@ -2776,15 +2980,20 @@ export function SportsGameDetailsPanel({
     [positionTags.length, visiblePositionTags.length],
   )
 
-  const isNegRiskEnabled = useMemo(() => {
-    return Boolean(
-      card.event.neg_risk
-      || card.event.neg_risk_augmented
-      || card.event.neg_risk_market_id
-      || card.detailMarkets.some(market => market.neg_risk || market.neg_risk_market_id),
-    )
-  }, [card.detailMarkets, card.event.neg_risk, card.event.neg_risk_augmented, card.event.neg_risk_market_id])
+  return { positionTags, visiblePositionTags, hiddenPositionTagsCount }
+}
 
+function useSportsConvertDialog({
+  convertTagKey,
+  positionTags,
+  card,
+  allowedConditionIds,
+}: {
+  convertTagKey: string | null
+  positionTags: SportsPositionTag[]
+  card: SportsGamesCard
+  allowedConditionIds: Set<string> | null
+}) {
   const activeConvertTagKey = useMemo(
     () => (convertTagKey && positionTags.some(tag => tag.key === convertTagKey) ? convertTagKey : null),
     [convertTagKey, positionTags],
@@ -2829,6 +3038,20 @@ export function SportsGameDetailsPanel({
       }))
   }, [allowedConditionIds, card.detailMarkets])
 
+  return { convertDialogTag, convertDialogOptions, convertDialogOutcomes }
+}
+
+function useSportsSelectedMarketDerivations({
+  card,
+  selectedButtonKey,
+  orderMarketConditionId,
+  orderOutcomeIndex,
+}: {
+  card: SportsGamesCard
+  selectedButtonKey: string | null
+  orderMarketConditionId: string | null
+  orderOutcomeIndex: number | null
+}) {
   const selectedButton = useMemo(
     () => resolveSelectedButton(card, selectedButtonKey),
     [card, selectedButtonKey],
@@ -2868,32 +3091,6 @@ export function SportsGameDetailsPanel({
       : null
   }, [selectedButton])
 
-  const linePickerOptions = useMemo(
-    () => {
-      if (!selectedLinePickerMarketType) {
-        return []
-      }
-
-      const options = buildLinePickerOptions(card, selectedLinePickerMarketType)
-      if (!allowedConditionIds) {
-        return options
-      }
-
-      return options.filter(option => allowedConditionIds.has(option.conditionId))
-    },
-    [allowedConditionIds, card, selectedLinePickerMarketType],
-  )
-
-  const activeLineOptionIndex = useMemo(() => {
-    if (!selectedButton || linePickerOptions.length === 0) {
-      return -1
-    }
-
-    return linePickerOptions.findIndex(option => option.conditionId === selectedButton.conditionId)
-  }, [linePickerOptions, selectedButton])
-
-  const hasLinePicker = selectedLinePickerMarketType !== null && linePickerOptions.length > 1
-
   const nextOutcome = useMemo(() => {
     if (!selectedMarket || !selectedOutcome) {
       return null
@@ -2924,104 +3121,75 @@ export function SportsGameDetailsPanel({
     return resolveSwitchTooltip(selectedMarket, nextOutcome)
   }, [nextOutcome, selectedMarket])
 
-  const handleToggleOutcome = useCallback(() => {
-    if (!selectedMarket || !nextOutcome) {
-      return
+  const selectedMarketTokenIds = useMemo(() => {
+    if (!selectedMarket) {
+      return []
     }
 
-    setOrderMarket(selectedMarket)
-    setOrderOutcome(nextOutcome)
-    if (nextButton) {
-      onSelectButton(nextButton.key, { panelMode: 'preserve' })
+    return selectedMarket.outcomes
+      .map(outcome => outcome.token_id)
+      .filter((tokenId): tokenId is string => Boolean(tokenId))
+  }, [selectedMarket])
+
+  const isSelectedMarketResolved = Boolean(selectedMarket?.is_resolved || selectedMarket?.condition?.resolved)
+
+  return {
+    selectedButton,
+    selectedMarket,
+    selectedOutcome,
+    selectedLinePickerMarketType,
+    nextOutcome,
+    nextButton,
+    tradeSelectionLabel,
+    switchTooltip,
+    selectedMarketTokenIds,
+    isSelectedMarketResolved,
+  }
+}
+
+function useSportsLinePicker({
+  card,
+  allowedConditionIds,
+  selectedLinePickerMarketType,
+  selectedButton,
+  onSelectButton,
+}: {
+  card: SportsGamesCard
+  allowedConditionIds: Set<string> | null
+  selectedLinePickerMarketType: LinePickerMarketType | null
+  selectedButton: SportsGamesButton | null
+  onSelectButton: (buttonKey: string, options?: { panelMode?: 'full' | 'partial' | 'preserve' }) => void
+}) {
+  const linePickerScrollerRef = useRef<HTMLDivElement | null>(null)
+  const linePickerButtonsRef = useRef<Record<string, HTMLButtonElement | null>>({})
+  const linePickerScrollSettleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const linePickerSuppressScrollSyncUntilRef = useRef(0)
+
+  const linePickerOptions = useMemo(
+    () => {
+      if (!selectedLinePickerMarketType) {
+        return []
+      }
+
+      const options = buildLinePickerOptions(card, selectedLinePickerMarketType)
+      if (!allowedConditionIds) {
+        return options
+      }
+
+      return options.filter(option => allowedConditionIds.has(option.conditionId))
+    },
+    [allowedConditionIds, card, selectedLinePickerMarketType],
+  )
+
+  const activeLineOptionIndex = useMemo(() => {
+    if (!selectedButton || linePickerOptions.length === 0) {
+      return -1
     }
-  }, [nextButton, nextOutcome, onSelectButton, selectedMarket, setOrderMarket, setOrderOutcome])
 
-  const handleCashOutTag = useCallback(async (
-    tag: SportsPositionTag,
-    event?: ReactMouseEventType<HTMLElement>,
-  ) => {
-    event?.stopPropagation()
+    return linePickerOptions.findIndex(option => option.conditionId === selectedButton.conditionId)
+  }, [linePickerOptions, selectedButton])
 
-    const tokenId = tag.outcome.token_id ? String(tag.outcome.token_id) : null
-    if (!tokenId) {
-      return
-    }
-
-    let summary = await fetchOrderBookSummaries([tokenId])
-      .then(result => result[tokenId])
-      .catch(() => null)
-
-    if (!summary) {
-      summary = null
-    }
-
-    const bids = normalizeBookLevels(summary?.bids, 'bid')
-    const asks = normalizeBookLevels(summary?.asks, 'ask')
-    const fill = calculateMarketFill(ORDER_SIDE.SELL, tag.shares, bids, asks)
-
-    setOrderType(ORDER_TYPE.MARKET)
-    setOrderSide(ORDER_SIDE.SELL)
-    setOrderMarket(tag.market)
-    setOrderOutcome(tag.outcome)
-    setOrderAmount(formatAmountInputValue(tag.shares, { roundingMode: 'floor' }))
-
-    if (isMobile) {
-      setIsMobileOrderPanelOpen(true)
-    }
-
-    setCashOutPayload({
-      outcomeLabel: tag.summaryLabel,
-      outcomeShortLabel: card.event.title || tag.market.short_title || tag.market.title,
-      outcomeIconUrl: tag.market.icon_url,
-      shares: tag.shares,
-      filledShares: fill.filledShares,
-      avgPriceCents: fill.avgPriceCents,
-      receiveAmount: fill.totalCost > 0 ? fill.totalCost : null,
-      sellBids: bids,
-    })
-  }, [
-    card.event.title,
-    isMobile,
-    setIsMobileOrderPanelOpen,
-    setOrderAmount,
-    setOrderMarket,
-    setOrderOutcome,
-    setOrderSide,
-    setOrderType,
-  ])
-
-  const handleOpenConvert = useCallback((
-    tag: SportsPositionTag,
-    event?: ReactMouseEventType<HTMLElement>,
-  ) => {
-    event?.stopPropagation()
-    if (
-      !isNegRiskEnabled
-      || !moneylineConditionIds.has(tag.conditionId)
-      || tag.outcomeIndex !== OUTCOME_INDEX.NO
-      || tag.outcome.outcome_index !== OUTCOME_INDEX.NO
-      || tag.shares <= 0
-    ) {
-      return
-    }
-    setConvertTagKey(tag.key)
-  }, [isNegRiskEnabled, moneylineConditionIds])
-
-  const handleCashOutModalChange = useCallback((open: boolean) => {
-    if (!open) {
-      setCashOutPayload(null)
-    }
-  }, [])
-
-  const handleCashOutSubmit = useCallback((sharesToSell: number) => {
-    if (!(sharesToSell > 0)) {
-      return
-    }
-    setOrderAmount(formatAmountInputValue(sharesToSell, { roundingMode: 'floor' }))
-    setCashOutPayload(null)
-    const form = document.getElementById('event-order-form') as HTMLFormElement | null
-    form?.requestSubmit()
-  }, [setOrderAmount])
+  const hasLinePicker = selectedLinePickerMarketType !== null && linePickerOptions.length > 1
 
   const suppressLinePickerScrollSync = useCallback((durationMs = 220) => {
     linePickerSuppressScrollSyncUntilRef.current = Date.now() + durationMs
@@ -3115,31 +3283,32 @@ export function SportsGameDetailsPanel({
     })
   }, [activeLineOptionIndex, linePickerOptions, suppressLinePickerScrollSync])
 
-  useEffect(() => {
+  useEffect(function alignActiveLineOptionOnIndexChange() {
     if (activeLineOptionIndex < 0) {
-      return
+      return undefined
     }
     alignActiveLineOption('auto')
+    return undefined
   }, [activeLineOptionIndex, alignActiveLineOption])
 
-  useEffect(() => {
+  useEffect(function alignActiveLineOptionOnPickerMount() {
     if (!hasLinePicker) {
-      return
+      return undefined
     }
 
     const frame = window.requestAnimationFrame(() => {
       alignActiveLineOption('auto')
     })
 
-    return () => {
+    return function cancelAlignActiveLineOptionFrame() {
       window.cancelAnimationFrame(frame)
     }
   }, [alignActiveLineOption, hasLinePicker])
 
-  useEffect(() => {
+  useEffect(function syncLinePickerScrollToCenteredOption() {
     const scrollerElement = linePickerScrollerRef.current
     if (!hasLinePicker || !scrollerElement) {
-      return
+      return undefined
     }
 
     function syncCenteredLineOption() {
@@ -3168,7 +3337,7 @@ export function SportsGameDetailsPanel({
 
     scrollerElement.addEventListener('scroll', handleScroll, { passive: true })
 
-    return () => {
+    return function detachLinePickerScrollSync() {
       scrollerElement.removeEventListener('scroll', handleScroll)
       if (linePickerScrollSettleTimeoutRef.current) {
         clearTimeout(linePickerScrollSettleTimeoutRef.current)
@@ -3177,17 +3346,33 @@ export function SportsGameDetailsPanel({
     }
   }, [activeLineOptionIndex, hasLinePicker, pickLineOption, resolveCenteredLineOptionIndex])
 
-  const selectedMarketTokenIds = useMemo(() => {
-    if (!selectedMarket) {
-      return []
-    }
+  return {
+    linePickerScrollerRef,
+    linePickerButtonsRef,
+    linePickerOptions,
+    activeLineOptionIndex,
+    hasLinePicker,
+    pickLineOption,
+    handlePickPreviousLine,
+    handlePickNextLine,
+  }
+}
 
-    return selectedMarket.outcomes
-      .map(outcome => outcome.token_id)
-      .filter((tokenId): tokenId is string => Boolean(tokenId))
-  }, [selectedMarket])
-  const isSelectedMarketResolved = Boolean(selectedMarket?.is_resolved || selectedMarket?.condition?.resolved)
-
+function useSportsDetailsTabs({
+  activeDetailsTab,
+  showBottomContent,
+  showAboutTab,
+  aboutEvent,
+  isSelectedMarketResolved,
+  onChangeTab,
+}: {
+  activeDetailsTab: DetailsTab
+  showBottomContent: boolean
+  showAboutTab: boolean
+  aboutEvent: SportsGamesCard['event'] | null
+  isSelectedMarketResolved: boolean
+  onChangeTab: (tab: DetailsTab) => void
+}) {
   const detailTabs = useMemo<Array<{ id: DetailsTab, label: string }>>(() => {
     const tabs: Array<{ id: DetailsTab, label: string }> = []
 
@@ -3212,17 +3397,307 @@ export function SportsGameDetailsPanel({
     return detailTabs[0]?.id ?? 'orderBook'
   }, [activeDetailsTab, detailTabs])
 
-  useEffect(() => {
+  useEffect(function syncResolvedDetailsTabUpstream() {
     if (!showBottomContent) {
-      return
+      return undefined
     }
 
     if (resolvedActiveDetailsTab !== activeDetailsTab) {
       onChangeTab(resolvedActiveDetailsTab)
     }
 
-    return () => {}
+    return undefined
   }, [activeDetailsTab, onChangeTab, resolvedActiveDetailsTab, showBottomContent])
+
+  return { detailTabs, resolvedActiveDetailsTab }
+}
+
+function useSportsOwnerAddress() {
+  const user = useUser()
+  const ownerAddress = useMemo(() => {
+    if (user?.proxy_wallet_address && user.proxy_wallet_status === 'deployed') {
+      return user.proxy_wallet_address
+    }
+    return null
+  }, [user?.proxy_wallet_address, user?.proxy_wallet_status])
+
+  return ownerAddress
+}
+
+function useSportsPositionOddsFormatters(oddsFormat: OddsFormat) {
+  const formatPositionOddsLabel = useCallback((cents: number | null) => {
+    if (oddsFormat === 'price') {
+      return formatCompactCentsLabel(cents)
+    }
+    return formatOddsFromCents(cents, oddsFormat)
+  }, [oddsFormat])
+
+  const formatAverageCellLabel = useCallback((cents: number | null) => {
+    if (oddsFormat === 'price') {
+      return formatCentsLabel(cents, { fallback: '—' })
+    }
+    return formatOddsFromCents(cents, oddsFormat)
+  }, [oddsFormat])
+
+  return { formatPositionOddsLabel, formatAverageCellLabel }
+}
+
+function useSportsCashOutHandlers({
+  card,
+  isMobile,
+  setCashOutPayload,
+  orderStore,
+}: {
+  card: SportsGamesCard
+  isMobile: boolean
+  setCashOutPayload: (payload: SportsCashOutModalPayload | null) => void
+  orderStore: ReturnType<typeof useSportsGameDetailsPanelOrderStore>
+}) {
+  const { setOrderType, setOrderSide, setOrderMarket, setOrderOutcome, setOrderAmount, setIsMobileOrderPanelOpen } = orderStore
+
+  const handleCashOutTag = useCallback(async (
+    tag: SportsPositionTag,
+    event?: ReactMouseEventType<HTMLElement>,
+  ) => {
+    event?.stopPropagation()
+
+    const tokenId = tag.outcome.token_id ? String(tag.outcome.token_id) : null
+    if (!tokenId) {
+      return
+    }
+
+    let summary = await fetchOrderBookSummaries([tokenId])
+      .then(result => result[tokenId])
+      .catch(() => null)
+
+    if (!summary) {
+      summary = null
+    }
+
+    const bids = normalizeBookLevels(summary?.bids, 'bid')
+    const asks = normalizeBookLevels(summary?.asks, 'ask')
+    const fill = calculateMarketFill(ORDER_SIDE.SELL, tag.shares, bids, asks)
+
+    setOrderType(ORDER_TYPE.MARKET)
+    setOrderSide(ORDER_SIDE.SELL)
+    setOrderMarket(tag.market)
+    setOrderOutcome(tag.outcome)
+    setOrderAmount(formatAmountInputValue(tag.shares, { roundingMode: 'floor' }))
+
+    if (isMobile) {
+      setIsMobileOrderPanelOpen(true)
+    }
+
+    setCashOutPayload({
+      outcomeLabel: tag.summaryLabel,
+      outcomeShortLabel: card.event.title || tag.market.short_title || tag.market.title,
+      outcomeIconUrl: tag.market.icon_url,
+      shares: tag.shares,
+      filledShares: fill.filledShares,
+      avgPriceCents: fill.avgPriceCents,
+      receiveAmount: fill.totalCost > 0 ? fill.totalCost : null,
+      sellBids: bids,
+    })
+  }, [
+    card.event.title,
+    isMobile,
+    setCashOutPayload,
+    setIsMobileOrderPanelOpen,
+    setOrderAmount,
+    setOrderMarket,
+    setOrderOutcome,
+    setOrderSide,
+    setOrderType,
+  ])
+
+  const handleCashOutModalChange = useCallback((open: boolean) => {
+    if (!open) {
+      setCashOutPayload(null)
+    }
+  }, [setCashOutPayload])
+
+  const handleCashOutSubmit = useCallback((sharesToSell: number) => {
+    if (!(sharesToSell > 0)) {
+      return
+    }
+    setOrderAmount(formatAmountInputValue(sharesToSell, { roundingMode: 'floor' }))
+    setCashOutPayload(null)
+    const form = document.getElementById('event-order-form') as HTMLFormElement | null
+    form?.requestSubmit()
+  }, [setCashOutPayload, setOrderAmount])
+
+  return { handleCashOutTag, handleCashOutModalChange, handleCashOutSubmit }
+}
+
+function useSportsDetailsPanelInteractions({
+  selectedMarket,
+  nextOutcome,
+  nextButton,
+  onSelectButton,
+  setOrderMarket,
+  setOrderOutcome,
+  isNegRiskEnabled,
+  moneylineConditionIds,
+  setConvertTagKey,
+}: {
+  selectedMarket: Market | null
+  nextOutcome: Outcome | null
+  nextButton: SportsGamesButton | null
+  onSelectButton: SportsGameDetailsPanelProps['onSelectButton']
+  setOrderMarket: (market: Market) => void
+  setOrderOutcome: (outcome: Outcome) => void
+  isNegRiskEnabled: boolean
+  moneylineConditionIds: Set<string>
+  setConvertTagKey: (key: string | null) => void
+}) {
+  const handleToggleOutcome = useCallback(() => {
+    if (!selectedMarket || !nextOutcome) {
+      return
+    }
+
+    setOrderMarket(selectedMarket)
+    setOrderOutcome(nextOutcome)
+    if (nextButton) {
+      onSelectButton(nextButton.key, { panelMode: 'preserve' })
+    }
+  }, [nextButton, nextOutcome, onSelectButton, selectedMarket, setOrderMarket, setOrderOutcome])
+
+  const handleOpenConvert = useCallback((
+    tag: SportsPositionTag,
+    event?: ReactMouseEventType<HTMLElement>,
+  ) => {
+    event?.stopPropagation()
+    if (
+      !isNegRiskEnabled
+      || !moneylineConditionIds.has(tag.conditionId)
+      || tag.outcomeIndex !== OUTCOME_INDEX.NO
+      || tag.outcome.outcome_index !== OUTCOME_INDEX.NO
+      || tag.shares <= 0
+    ) {
+      return
+    }
+    setConvertTagKey(tag.key)
+  }, [isNegRiskEnabled, moneylineConditionIds, setConvertTagKey])
+
+  return { handleToggleOutcome, handleOpenConvert }
+}
+
+export function SportsGameDetailsPanel({
+  card,
+  activeDetailsTab,
+  selectedButtonKey,
+  showBottomContent,
+  defaultGraphTimeRange = '1W',
+  allowedConditionIds = null,
+  positionsTitle,
+  showAboutTab = false,
+  aboutEvent = null,
+  rulesEvent = null,
+  showRedeemInPositions = false,
+  onOpenRedeemForCondition = null,
+  oddsFormat = 'price',
+  marketContextEnabled = true,
+  onChangeTab,
+  onSelectButton,
+}: SportsGameDetailsPanelProps) {
+  const t = useExtracted()
+  const isMobile = useIsMobile()
+  const linePickerSpacerWidth = 'calc(50% - 28px)'
+
+  const orderStore = useSportsGameDetailsPanelOrderStore()
+  const {
+    orderMarketConditionId,
+    orderOutcomeIndex,
+    setOrderMarket,
+    setOrderOutcome,
+    setOrderAmount,
+  } = orderStore
+
+  const {
+    cashOutPayload,
+    setCashOutPayload,
+    isPositionsExpanded,
+    setIsPositionsExpanded,
+    convertTagKey,
+    setConvertTagKey,
+  } = useSportsGameDetailsPanelLocalState()
+
+  const ownerAddress = useSportsOwnerAddress()
+
+  const {
+    cardMarketByConditionId,
+    cardButtonsByConditionAndOutcome,
+    cardFirstButtonByCondition,
+    moneylineConditionIds,
+    isNegRiskEnabled,
+  } = useSportsCardDerivations(card)
+
+  const userPositions = useSportsCardUserPositionsQuery({
+    ownerAddress,
+    cardId: card.id,
+    showBottomContent,
+  })
+
+  const { positionTags, visiblePositionTags, hiddenPositionTagsCount } = useSportsPositionTags({
+    ownerAddress,
+    userPositions,
+    allowedConditionIds,
+    card,
+    cardMarketByConditionId,
+    cardButtonsByConditionAndOutcome,
+    cardFirstButtonByCondition,
+  })
+
+  const { convertDialogTag, convertDialogOptions, convertDialogOutcomes } = useSportsConvertDialog({
+    convertTagKey,
+    positionTags,
+    card,
+    allowedConditionIds,
+  })
+
+  const {
+    selectedButton,
+    selectedMarket,
+    selectedOutcome,
+    selectedLinePickerMarketType,
+    nextOutcome,
+    nextButton,
+    tradeSelectionLabel,
+    switchTooltip,
+    selectedMarketTokenIds,
+    isSelectedMarketResolved,
+  } = useSportsSelectedMarketDerivations({
+    card,
+    selectedButtonKey,
+    orderMarketConditionId,
+    orderOutcomeIndex,
+  })
+
+  const {
+    linePickerScrollerRef,
+    linePickerButtonsRef,
+    linePickerOptions,
+    activeLineOptionIndex,
+    hasLinePicker,
+    pickLineOption,
+    handlePickPreviousLine,
+    handlePickNextLine,
+  } = useSportsLinePicker({
+    card,
+    allowedConditionIds,
+    selectedLinePickerMarketType,
+    selectedButton,
+    onSelectButton,
+  })
+
+  const { detailTabs, resolvedActiveDetailsTab } = useSportsDetailsTabs({
+    activeDetailsTab,
+    showBottomContent,
+    showAboutTab,
+    aboutEvent,
+    isSelectedMarketResolved,
+    onChangeTab,
+  })
 
   const {
     data: orderBookSummaries,
@@ -3233,21 +3708,30 @@ export function SportsGameDetailsPanel({
     enabled: showBottomContent && activeDetailsTab === 'orderBook' && selectedMarketTokenIds.length > 0,
   })
 
+  const { formatPositionOddsLabel, formatAverageCellLabel } = useSportsPositionOddsFormatters(oddsFormat)
+
+  const { handleCashOutTag, handleCashOutModalChange, handleCashOutSubmit } = useSportsCashOutHandlers({
+    card,
+    isMobile,
+    setCashOutPayload,
+    orderStore,
+  })
+
+  const { handleToggleOutcome, handleOpenConvert } = useSportsDetailsPanelInteractions({
+    selectedMarket,
+    nextOutcome,
+    nextButton,
+    onSelectButton,
+    setOrderMarket,
+    setOrderOutcome,
+    isNegRiskEnabled,
+    moneylineConditionIds,
+    setConvertTagKey,
+  })
+
   const isStandalonePositionsCard = Boolean(positionsTitle)
   const shouldShowPortfolio = visiblePositionTags.length > 0
   const showPositionTagSummary = !isStandalonePositionsCard
-  const formatPositionOddsLabel = useCallback((cents: number | null) => {
-    if (oddsFormat === 'price') {
-      return formatCompactCentsLabel(cents)
-    }
-    return formatOddsFromCents(cents, oddsFormat)
-  }, [oddsFormat])
-  const formatAverageCellLabel = useCallback((cents: number | null) => {
-    if (oddsFormat === 'price') {
-      return formatCentsLabel(cents, { fallback: '—' })
-    }
-    return formatOddsFromCents(cents, oddsFormat)
-  }, [oddsFormat])
 
   if (!showBottomContent && !hasLinePicker && !shouldShowPortfolio) {
     return null
@@ -3743,20 +4227,7 @@ export function SportsGameDetailsPanel({
   )
 }
 
-export default function SportsGamesCenter({
-  cards,
-  sportSlug,
-  sportTitle,
-  pageMode = 'games',
-  categoryTitleBySlug = {},
-  initialWeek = null,
-  vertical = 'sports',
-  showHeading = true,
-}: SportsGamesCenterProps) {
-  const verticalConfig = getSportsVerticalConfig(vertical)
-  const router = useRouter()
-  const locale = useLocale()
-  const isMobile = useIsMobile()
+function useSportsGamesCenterShellState() {
   const [openCardId, setOpenCardId] = useState<string | null>(null)
   const [isDetailsContentVisible, setIsDetailsContentVisible] = useState(true)
   const [activeDetailsTab, setActiveDetailsTab] = useState<DetailsTab>('orderBook')
@@ -3766,22 +4237,34 @@ export default function SportsGamesCenter({
   const [searchQuery, setSearchQuery] = useState('')
   const [oddsFormat, setOddsFormat] = useState<OddsFormat>(() => resolveInitialSportsEventOddsFormat())
   const [showSpreadsAndTotals, setShowSpreadsAndTotals] = useState(() => resolveInitialShowSpreadsAndTotals())
-  const currentTimestamp = useCurrentTimestamp({ intervalMs: 60_000 })
-  const currentTimestampMs = currentTimestamp ?? 0
   const searchShellRef = useRef<HTMLDivElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
-  const openLivestream = useSportsLivestream(state => state.openStream)
-  const setOrderEvent = useOrder(state => state.setEvent)
-  const setOrderMarket = useOrder(state => state.setMarket)
-  const setOrderOutcome = useOrder(state => state.setOutcome)
-  const setOrderSide = useOrder(state => state.setSide)
-  const setIsMobileOrderPanelOpen = useOrder(state => state.setIsMobileOrderPanelOpen)
-  const orderMarketConditionId = useOrder(state => state.market?.condition_id ?? null)
-  const orderOutcomeIndex = useOrder(state => state.outcome?.outcome_index ?? null)
-  const isLivePage = pageMode === 'live'
-  const isLiveAndSoonPage = pageMode === 'liveAndSoon'
-  const isSoonPage = pageMode === 'soon'
-  const isFeedPage = isLivePage || isLiveAndSoonPage || isSoonPage
+
+  return {
+    openCardId,
+    setOpenCardId,
+    isDetailsContentVisible,
+    setIsDetailsContentVisible,
+    activeDetailsTab,
+    setActiveDetailsTab,
+    selectedConditionByCardId,
+    setSelectedConditionByCardId,
+    tradeSelection,
+    setTradeSelection,
+    isSearchOpen,
+    setIsSearchOpen,
+    searchQuery,
+    setSearchQuery,
+    oddsFormat,
+    setOddsFormat,
+    showSpreadsAndTotals,
+    setShowSpreadsAndTotals,
+    searchShellRef,
+    searchInputRef,
+  }
+}
+
+function useCategoryResolver(categoryTitleBySlug: Record<string, string>) {
   const normalizedCategoryTitleBySlug = useMemo(() => {
     return Object.fromEntries(
       Object.entries(categoryTitleBySlug).map(([slug, title]) => [slug.trim().toLowerCase(), title]),
@@ -3792,7 +4275,17 @@ export default function SportsGamesCenter({
     [normalizedCategoryTitleBySlug],
   )
 
-  useEffect(() => {
+  return { resolveCardCategory }
+}
+
+function useOddsFormatAndSpreadsTotalsPersistence({
+  oddsFormat,
+  showSpreadsAndTotals,
+}: {
+  oddsFormat: OddsFormat
+  showSpreadsAndTotals: boolean
+}) {
+  useEffect(function persistOddsFormatAndSpreadsTotals() {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(SPORTS_EVENT_ODDS_FORMAT_STORAGE_KEY, oddsFormat)
       window.localStorage.setItem(
@@ -3801,19 +4294,29 @@ export default function SportsGamesCenter({
       )
     }
 
-    return () => {}
+    return undefined
   }, [oddsFormat, showSpreadsAndTotals])
+}
 
-  useEffect(() => {
+function useResetMobileOrderPanelOnDeviceChange({
+  isMobile,
+  setIsMobileOrderPanelOpen,
+}: {
+  isMobile: boolean
+  setIsMobileOrderPanelOpen: (open: boolean) => void
+}) {
+  useEffect(function resetMobileOrderPanelOnDeviceChange() {
     if (!isMobile) {
-      return
+      return undefined
     }
 
     // Avoid carrying over an open trade drawer while browsing cards on mobile.
     setIsMobileOrderPanelOpen(false)
-    return () => {}
+    return undefined
   }, [isMobile, setIsMobileOrderPanelOpen])
+}
 
+function useSportsGamesButtonOddsFormatter(oddsFormat: OddsFormat) {
   const formatButtonOdds = useCallback((cents: number) => {
     if (oddsFormat === 'price') {
       return `${cents}¢`
@@ -3821,6 +4324,10 @@ export default function SportsGamesCenter({
     return formatOddsFromCents(cents, oddsFormat)
   }, [oddsFormat])
 
+  return { formatButtonOdds }
+}
+
+function useResolveDisplayButtonKey(showSpreadsAndTotals: boolean) {
   const resolveDisplayButtonKey = useCallback((
     card: SportsGamesCard,
     preferredKey: string | null | undefined,
@@ -3838,6 +4345,22 @@ export default function SportsGamesCenter({
       ?? resolveDefaultConditionId(card)
   }, [showSpreadsAndTotals])
 
+  return { resolveDisplayButtonKey }
+}
+
+function useVisiblePageCards({
+  cards,
+  isFeedPage,
+  isLivePage,
+  isSoonPage,
+  currentTimestampMs,
+}: {
+  cards: SportsGamesCard[]
+  isFeedPage: boolean
+  isLivePage: boolean
+  isSoonPage: boolean
+  currentTimestampMs: number
+}) {
   const visibleCards = useMemo(() => {
     if (isFeedPage) {
       return cards
@@ -3858,6 +4381,20 @@ export default function SportsGamesCenter({
     return visibleCards
   }, [currentTimestampMs, isLivePage, isSoonPage, visibleCards])
 
+  return { visibleCards, pageCards }
+}
+
+function useWeekFilterState({
+  initialWeek,
+  isFeedPage,
+  visibleCards,
+  pageCards,
+}: {
+  initialWeek: number | null
+  isFeedPage: boolean
+  visibleCards: SportsGamesCard[]
+  pageCards: SportsGamesCard[]
+}) {
   const weekOptions = useMemo(() => {
     if (isFeedPage) {
       return []
@@ -3926,17 +4463,44 @@ export default function SportsGamesCenter({
     return visibleCards.filter(card => card.week === week)
   }, [effectiveSelectedWeek, isFeedPage, pageCards, visibleCards])
 
-  useEffect(() => {
+  return {
+    weekOptions,
+    effectiveSelectedWeek,
+    setSelectedWeek,
+    weekFilteredCards,
+  }
+}
+
+function useSearchAutoFocus({
+  isSearchOpen,
+  searchInputRef,
+}: {
+  isSearchOpen: boolean
+  searchInputRef: React.RefObject<HTMLInputElement | null>
+}) {
+  useEffect(function focusSearchInputWhenSearchOpens() {
     if (!isSearchOpen) {
-      return
+      return undefined
     }
     searchInputRef.current?.focus()
-    return () => {}
-  }, [isSearchOpen])
+    return undefined
+  }, [isSearchOpen, searchInputRef])
+}
 
-  useEffect(() => {
+function useSearchOutsidePointerClose({
+  isSearchOpen,
+  searchQuery,
+  searchShellRef,
+  setIsSearchOpen,
+}: {
+  isSearchOpen: boolean
+  searchQuery: string
+  searchShellRef: React.RefObject<HTMLDivElement | null>
+  setIsSearchOpen: (open: boolean) => void
+}) {
+  useEffect(function closeSearchOnOutsidePointerDown() {
     if (!isSearchOpen) {
-      return
+      return undefined
     }
 
     function handlePointerDown(event: PointerEvent) {
@@ -3954,11 +4518,21 @@ export default function SportsGamesCenter({
     }
 
     window.addEventListener('pointerdown', handlePointerDown)
-    return () => {
+    return function removeSearchPointerDownListener() {
       window.removeEventListener('pointerdown', handlePointerDown)
     }
-  }, [isSearchOpen, searchQuery])
+  }, [isSearchOpen, searchQuery, searchShellRef, setIsSearchOpen])
+}
 
+function useSportsSearchFilteredCards({
+  weekFilteredCards,
+  searchQuery,
+  resolveCardCategory,
+}: {
+  weekFilteredCards: SportsGamesCard[]
+  searchQuery: string
+  resolveCardCategory: (card: SportsGamesCard) => string
+}) {
   const normalizedSearchQuery = useMemo(
     () => normalizeComparableText(searchQuery),
     [searchQuery],
@@ -3984,6 +4558,11 @@ export default function SportsGamesCenter({
       return searchableText.includes(normalizedSearchQuery)
     })
   }, [normalizedSearchQuery, resolveCardCategory, weekFilteredCards])
+
+  return { normalizedSearchQuery, filteredCards }
+}
+
+function useCardButtonPriceMap(filteredCards: SportsGamesCard[]) {
   const buttonTokenIds = useMemo(() => {
     const tokenIds = new Set<string>()
 
@@ -4038,20 +4617,24 @@ export default function SportsGamesCenter({
     return priceByKey
   }, [buttonOrderBookSummaries, filteredCards])
 
-  const emptyStateLabel = normalizedSearchQuery
-    ? 'No games found for this search.'
-    : isLiveAndSoonPage
-      ? 'No live or upcoming games available.'
-      : isLivePage
-        ? 'No live games available.'
-        : isSoonPage
-          ? 'No upcoming games available.'
-          : 'No games available for this week.'
+  return { buttonPriceCentsByKey }
+}
 
-  const liveSectionEmptyStateLabel = normalizedSearchQuery
-    ? 'No live games found for this search.'
-    : 'No live games available.'
-
+function useEffectiveOpenAndTradeSelection({
+  openCardId,
+  filteredCards,
+  tradeSelection,
+  selectedConditionByCardId,
+  showSpreadsAndTotals,
+  resolveDisplayButtonKey,
+}: {
+  openCardId: string | null
+  filteredCards: SportsGamesCard[]
+  tradeSelection: SportsTradeSelection
+  selectedConditionByCardId: Record<string, string>
+  showSpreadsAndTotals: boolean
+  resolveDisplayButtonKey: (card: SportsGamesCard, preferredKey: string | null | undefined) => string | null
+}) {
   const effectiveOpenCardId = useMemo(() => {
     if (!openCardId) {
       return null
@@ -4059,10 +4642,6 @@ export default function SportsGamesCenter({
 
     return filteredCards.some(card => card.id === openCardId) ? openCardId : null
   }, [filteredCards, openCardId])
-
-  const effectiveIsDetailsContentVisible = effectiveOpenCardId
-    ? isDetailsContentVisible
-    : true
 
   const effectiveTradeSelection = useMemo<SportsTradeSelection>(() => {
     if (filteredCards.length === 0) {
@@ -4108,6 +4687,10 @@ export default function SportsGamesCenter({
     }
   }, [filteredCards, resolveDisplayButtonKey, selectedConditionByCardId, showSpreadsAndTotals, tradeSelection])
 
+  return { effectiveOpenCardId, effectiveTradeSelection }
+}
+
+function useLocaleDateTimeFormatters(locale: string) {
   const dateLabelFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, {
       weekday: 'short',
@@ -4125,6 +4708,20 @@ export default function SportsGamesCenter({
     [locale],
   )
 
+  return { dateLabelFormatter, timeLabelFormatter }
+}
+
+function useCardGroupings({
+  filteredCards,
+  dateLabelFormatter,
+  resolveCardCategory,
+  currentTimestampMs,
+}: {
+  filteredCards: SportsGamesCard[]
+  dateLabelFormatter: Intl.DateTimeFormat
+  resolveCardCategory: (card: SportsGamesCard) => string
+  currentTimestampMs: number
+}) {
   const groupedCards = useMemo(() => {
     const grouped = new Map<string, { key: string, label: string, sortValue: number, cards: SportsGamesCard[] }>()
 
@@ -4264,14 +4861,31 @@ export default function SportsGamesCenter({
           .sort((left, right) => left.label.localeCompare(right.label)),
       }))
   }, [dateLabelFormatter, resolveCardCategory, sortedFutureCards])
-  const hasFeedResults = isLiveAndSoonPage
-    ? liveCardsByCategory.length > 0 || startingSoonGroupsByDate.length > 0
-    : isLivePage
-      ? liveCardsByCategory.length > 0
-      : isSoonPage
-        ? startingSoonGroupsByDate.length > 0
-        : false
 
+  return {
+    groupedCards,
+    liveCardsByCategory,
+    startingSoonGroupsByDate,
+  }
+}
+
+function useSportsActiveTradeContext({
+  effectiveOpenCardId,
+  effectiveTradeSelection,
+  filteredCards,
+  resolveDisplayButtonKey,
+  selectedConditionByCardId,
+  orderMarketConditionId,
+  orderOutcomeIndex,
+}: {
+  effectiveOpenCardId: string | null
+  effectiveTradeSelection: SportsTradeSelection
+  filteredCards: SportsGamesCard[]
+  resolveDisplayButtonKey: (card: SportsGamesCard, preferredKey: string | null | undefined) => string | null
+  selectedConditionByCardId: Record<string, string>
+  orderMarketConditionId: string | null
+  orderOutcomeIndex: number | null
+}) {
   const activeTradeContext = useMemo<SportsActiveTradeContext | null>(() => {
     if (filteredCards.length === 0) {
       return null
@@ -4377,9 +4991,31 @@ export default function SportsGamesCenter({
     [activeTradeContext, activeTradeHeaderContext],
   )
 
-  useEffect(() => {
+  return {
+    activeTradeContext,
+    activeTradePrimaryOutcomeIndex,
+    activeTradeHeaderContext,
+    orderPanelOutcomeLabelOverrides,
+    orderPanelOutcomeAccentOverrides,
+  }
+}
+
+function useSportsOrderStoreSync({
+  activeTradeContext,
+  setOrderEvent,
+  setOrderMarket,
+  setOrderOutcome,
+  setOrderSide,
+}: {
+  activeTradeContext: SportsActiveTradeContext | null
+  setOrderEvent: (event: Event) => void
+  setOrderMarket: (market: Market) => void
+  setOrderOutcome: (outcome: Outcome) => void
+  setOrderSide: (side: typeof ORDER_SIDE.BUY | typeof ORDER_SIDE.SELL) => void
+}) {
+  useEffect(function syncSportsOrderStoreFromActiveTrade() {
     if (!activeTradeContext) {
-      return
+      return undefined
     }
 
     const {
@@ -4409,7 +5045,7 @@ export default function SportsGamesCenter({
     if (!isSameSelection) {
       setOrderSide(ORDER_SIDE.BUY)
     }
-    return () => {}
+    return undefined
   }, [
     activeTradeContext,
     setOrderEvent,
@@ -4417,6 +5053,164 @@ export default function SportsGamesCenter({
     setOrderOutcome,
     setOrderSide,
   ])
+}
+
+export default function SportsGamesCenter({
+  cards,
+  sportSlug,
+  sportTitle,
+  pageMode = 'games',
+  categoryTitleBySlug = {},
+  initialWeek = null,
+  vertical = 'sports',
+  showHeading = true,
+}: SportsGamesCenterProps) {
+  const verticalConfig = getSportsVerticalConfig(vertical)
+  const router = useRouter()
+  const locale = useLocale()
+  const isMobile = useIsMobile()
+  const {
+    openCardId,
+    setOpenCardId,
+    isDetailsContentVisible,
+    setIsDetailsContentVisible,
+    activeDetailsTab,
+    setActiveDetailsTab,
+    selectedConditionByCardId,
+    setSelectedConditionByCardId,
+    tradeSelection,
+    setTradeSelection,
+    isSearchOpen,
+    setIsSearchOpen,
+    searchQuery,
+    setSearchQuery,
+    oddsFormat,
+    setOddsFormat,
+    showSpreadsAndTotals,
+    setShowSpreadsAndTotals,
+    searchShellRef,
+    searchInputRef,
+  } = useSportsGamesCenterShellState()
+  const currentTimestamp = useCurrentTimestamp({ intervalMs: 60_000 })
+  const currentTimestampMs = currentTimestamp ?? 0
+  const openLivestream = useSportsLivestream(state => state.openStream)
+  const setOrderEvent = useOrder(state => state.setEvent)
+  const setOrderMarket = useOrder(state => state.setMarket)
+  const setOrderOutcome = useOrder(state => state.setOutcome)
+  const setOrderSide = useOrder(state => state.setSide)
+  const setIsMobileOrderPanelOpen = useOrder(state => state.setIsMobileOrderPanelOpen)
+  const orderMarketConditionId = useOrder(state => state.market?.condition_id ?? null)
+  const orderOutcomeIndex = useOrder(state => state.outcome?.outcome_index ?? null)
+  const isLivePage = pageMode === 'live'
+  const isLiveAndSoonPage = pageMode === 'liveAndSoon'
+  const isSoonPage = pageMode === 'soon'
+  const isFeedPage = isLivePage || isLiveAndSoonPage || isSoonPage
+  const { resolveCardCategory } = useCategoryResolver(categoryTitleBySlug)
+
+  useOddsFormatAndSpreadsTotalsPersistence({ oddsFormat, showSpreadsAndTotals })
+
+  useResetMobileOrderPanelOnDeviceChange({ isMobile, setIsMobileOrderPanelOpen })
+
+  const { formatButtonOdds } = useSportsGamesButtonOddsFormatter(oddsFormat)
+
+  const { resolveDisplayButtonKey } = useResolveDisplayButtonKey(showSpreadsAndTotals)
+
+  const { visibleCards, pageCards } = useVisiblePageCards({
+    cards,
+    isFeedPage,
+    isLivePage,
+    isSoonPage,
+    currentTimestampMs,
+  })
+
+  const {
+    weekOptions,
+    effectiveSelectedWeek,
+    setSelectedWeek,
+    weekFilteredCards,
+  } = useWeekFilterState({ initialWeek, isFeedPage, visibleCards, pageCards })
+
+  useSearchAutoFocus({ isSearchOpen, searchInputRef })
+
+  useSearchOutsidePointerClose({ isSearchOpen, searchQuery, searchShellRef, setIsSearchOpen })
+
+  const { normalizedSearchQuery, filteredCards } = useSportsSearchFilteredCards({
+    weekFilteredCards,
+    searchQuery,
+    resolveCardCategory,
+  })
+  const { buttonPriceCentsByKey } = useCardButtonPriceMap(filteredCards)
+
+  const emptyStateLabel = normalizedSearchQuery
+    ? 'No games found for this search.'
+    : isLiveAndSoonPage
+      ? 'No live or upcoming games available.'
+      : isLivePage
+        ? 'No live games available.'
+        : isSoonPage
+          ? 'No upcoming games available.'
+          : 'No games available for this week.'
+
+  const liveSectionEmptyStateLabel = normalizedSearchQuery
+    ? 'No live games found for this search.'
+    : 'No live games available.'
+
+  const { effectiveOpenCardId, effectiveTradeSelection } = useEffectiveOpenAndTradeSelection({
+    openCardId,
+    filteredCards,
+    tradeSelection,
+    selectedConditionByCardId,
+    showSpreadsAndTotals,
+    resolveDisplayButtonKey,
+  })
+
+  const effectiveIsDetailsContentVisible = effectiveOpenCardId
+    ? isDetailsContentVisible
+    : true
+
+  const { dateLabelFormatter, timeLabelFormatter } = useLocaleDateTimeFormatters(locale)
+
+  const {
+    groupedCards,
+    liveCardsByCategory,
+    startingSoonGroupsByDate,
+  } = useCardGroupings({
+    filteredCards,
+    dateLabelFormatter,
+    resolveCardCategory,
+    currentTimestampMs,
+  })
+  const hasFeedResults = isLiveAndSoonPage
+    ? liveCardsByCategory.length > 0 || startingSoonGroupsByDate.length > 0
+    : isLivePage
+      ? liveCardsByCategory.length > 0
+      : isSoonPage
+        ? startingSoonGroupsByDate.length > 0
+        : false
+
+  const {
+    activeTradeContext,
+    activeTradePrimaryOutcomeIndex,
+    activeTradeHeaderContext,
+    orderPanelOutcomeLabelOverrides,
+    orderPanelOutcomeAccentOverrides,
+  } = useSportsActiveTradeContext({
+    effectiveOpenCardId,
+    effectiveTradeSelection,
+    filteredCards,
+    resolveDisplayButtonKey,
+    selectedConditionByCardId,
+    orderMarketConditionId,
+    orderOutcomeIndex,
+  })
+
+  useSportsOrderStoreSync({
+    activeTradeContext,
+    setOrderEvent,
+    setOrderMarket,
+    setOrderOutcome,
+    setOrderSide,
+  })
 
   function toggleCard(
     card: SportsGamesCard,

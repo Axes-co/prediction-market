@@ -15,6 +15,11 @@ interface EventCommentFormProps {
   isCreatingComment: boolean
 }
 
+function useCommentFormContent() {
+  const [content, setContent] = useState('')
+  return { content, setContent }
+}
+
 export default function EventCommentForm({
   user,
   onCommentAddedAction,
@@ -23,7 +28,7 @@ export default function EventCommentForm({
 }: EventCommentFormProps) {
   const t = useExtracted()
   const { open } = useAppKit()
-  const [content, setContent] = useState('')
+  const { content, setContent } = useCommentFormContent()
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()

@@ -21,6 +21,57 @@ interface EventMarketHistoryProps {
   market: Event['markets'][number]
 }
 
+function useClearInfiniteScrollErrorOnMarketChange({
+  conditionId,
+  setInfiniteScrollError,
+}: {
+  conditionId: string | undefined
+  setInfiniteScrollError: (value: string | null) => void
+}) {
+  useEffect(function clearInfiniteScrollErrorOnMarketChange() {
+    queueMicrotask(function clearErrorNow() {
+      setInfiniteScrollError(null)
+    })
+  }, [conditionId, setInfiniteScrollError])
+}
+
+function useInfiniteScrollSentinel({
+  sentinelRef,
+  hasNextPage,
+  isFetchingNextPage,
+  hasError,
+  fetchNextPage,
+  setInfiniteScrollError,
+}: {
+  sentinelRef: React.RefObject<HTMLDivElement | null>
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  hasError: boolean
+  fetchNextPage: () => Promise<unknown>
+  setInfiniteScrollError: (value: string | null) => void
+}) {
+  useEffect(function observeInfiniteScrollSentinel() {
+    const node = sentinelRef.current
+    if (!node) {
+      return
+    }
+
+    const observer = new IntersectionObserver(function handleSentinelIntersection(entries) {
+      const entry = entries[0]
+      if (entry?.isIntersecting && hasNextPage && !isFetchingNextPage && !hasError) {
+        fetchNextPage().catch((error) => {
+          setInfiniteScrollError(error.message || 'Failed to load more activity')
+        })
+      }
+    }, { rootMargin: '200px 0px' })
+
+    observer.observe(node)
+    return function unobserveInfiniteScrollSentinel() {
+      observer.disconnect()
+    }
+  }, [hasError, hasNextPage, isFetchingNextPage, fetchNextPage, sentinelRef, setInfiniteScrollError])
+}
+
 export default function EventMarketHistory({ market }: EventMarketHistoryProps) {
   const t = useExtracted()
   const locale = useLocale()
@@ -31,9 +82,10 @@ export default function EventMarketHistory({ market }: EventMarketHistoryProps) 
   const userAddress = getUserPublicAddress(user)
   const normalizeOutcomeLabel = useOutcomeLabel()
 
-  useEffect(() => {
-    queueMicrotask(() => setInfiniteScrollError(null))
-  }, [market.condition_id])
+  useClearInfiniteScrollErrorOnMarketChange({
+    conditionId: market.condition_id,
+    setInfiniteScrollError,
+  })
 
   const {
     status,
@@ -74,32 +126,14 @@ export default function EventMarketHistory({ market }: EventMarketHistoryProps) 
   const isLoadingInitial = status === 'pending'
   const hasInitialError = status === 'error'
 
-  useEffect(() => {
-    const node = loadMoreRef.current
-    if (!node) {
-      return
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0]
-        if (
-          entry?.isIntersecting
-          && hasNextPage
-          && !isFetchingNextPage
-          && !infiniteScrollError
-        ) {
-          fetchNextPage().catch((error) => {
-            setInfiniteScrollError(error.message || 'Failed to load more activity')
-          })
-        }
-      },
-      { rootMargin: '200px 0px' },
-    )
-
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [fetchNextPage, hasNextPage, infiniteScrollError, isFetchingNextPage])
+  useInfiniteScrollSentinel({
+    sentinelRef: loadMoreRef,
+    hasNextPage,
+    isFetchingNextPage,
+    hasError: Boolean(infiniteScrollError),
+    fetchNextPage,
+    setInfiniteScrollError,
+  })
 
   function retryInfiniteScroll() {
     setInfiniteScrollError(null)

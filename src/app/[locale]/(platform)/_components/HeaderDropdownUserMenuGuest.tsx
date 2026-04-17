@@ -19,39 +19,34 @@ import {
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { usePwaInstall } from '@/hooks/usePwaInstall'
 
-export default function HeaderDropdownUserMenuGuest() {
-  const t = useExtracted()
-  const isMobile = useIsMobile()
-  const { canShowInstallUi, isIos, isPrompting, requestInstall } = usePwaInstall()
-  const enableHoverOpen = !isMobile
+function relatedTargetIsWithin(ref: React.RefObject<HTMLElement | null>, relatedTarget: EventTarget | null) {
+  const current = ref.current
+  if (!current) {
+    return false
+  }
+
+  const nodeConstructor = current.ownerDocument?.defaultView?.Node ?? Node
+  if (!(relatedTarget instanceof nodeConstructor)) {
+    return false
+  }
+
+  return current.contains(relatedTarget)
+}
+
+function useHoverDropdownMenu(enableHoverOpen: boolean) {
   const [menuOpen, setMenuOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(function clearMenuCloseTimeoutOnUnmount() {
-    function cleanupMenuCloseTimeout() {
-      if (closeTimeoutRef.current) {
-        clearTimeout(closeTimeoutRef.current)
-        closeTimeoutRef.current = null
+    const timeoutRefSnapshot = closeTimeoutRef
+    return function cleanupMenuCloseTimeout() {
+      if (timeoutRefSnapshot.current) {
+        clearTimeout(timeoutRefSnapshot.current)
+        timeoutRefSnapshot.current = null
       }
     }
-
-    return cleanupMenuCloseTimeout
   }, [])
-
-  function relatedTargetIsWithin(ref: React.RefObject<HTMLElement | null>, relatedTarget: EventTarget | null) {
-    const current = ref.current
-    if (!current) {
-      return false
-    }
-
-    const nodeConstructor = current.ownerDocument?.defaultView?.Node ?? Node
-    if (!(relatedTarget instanceof nodeConstructor)) {
-      return false
-    }
-
-    return current.contains(relatedTarget)
-  }
 
   function clearCloseTimeout() {
     if (closeTimeoutRef.current) {
@@ -84,8 +79,41 @@ export default function HeaderDropdownUserMenuGuest() {
     }, 120)
   }
 
-  async function handleInstallAction() {
+  function handleOpenChange(nextOpen: boolean) {
+    clearCloseTimeout()
+    setMenuOpen(nextOpen)
+  }
+
+  function closeMenu() {
     setMenuOpen(false)
+  }
+
+  return {
+    menuOpen,
+    wrapperRef,
+    handleWrapperPointerEnter,
+    handleWrapperPointerLeave,
+    handleOpenChange,
+    closeMenu,
+  }
+}
+
+export default function HeaderDropdownUserMenuGuest() {
+  const t = useExtracted()
+  const isMobile = useIsMobile()
+  const { canShowInstallUi, isIos, isPrompting, requestInstall } = usePwaInstall()
+  const enableHoverOpen = !isMobile
+  const {
+    menuOpen,
+    wrapperRef,
+    handleWrapperPointerEnter,
+    handleWrapperPointerLeave,
+    handleOpenChange,
+    closeMenu,
+  } = useHoverDropdownMenu(enableHoverOpen)
+
+  async function handleInstallAction() {
+    closeMenu()
 
     if (isIos) {
       toast.info(t('Install app'), {
@@ -114,10 +142,7 @@ export default function HeaderDropdownUserMenuGuest() {
     >
       <DropdownMenu
         open={menuOpen}
-        onOpenChange={(nextOpen) => {
-          clearCloseTimeout()
-          setMenuOpen(nextOpen)
-        }}
+        onOpenChange={handleOpenChange}
         modal={false}
       >
         <DropdownMenuTrigger asChild>
@@ -135,8 +160,8 @@ export default function HeaderDropdownUserMenuGuest() {
           align="end"
           collisionPadding={16}
           portalled={false}
-          onInteractOutside={() => setMenuOpen(false)}
-          onEscapeKeyDown={() => setMenuOpen(false)}
+          onInteractOutside={closeMenu}
+          onEscapeKeyDown={closeMenu}
         >
           <DropdownMenuItem asChild className="py-2 text-sm font-semibold text-foreground">
             <AppLink intentPrefetch href="/leaderboard" className="flex w-full items-center gap-1.5">

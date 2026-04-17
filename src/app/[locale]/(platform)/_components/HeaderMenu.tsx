@@ -34,6 +34,14 @@ function getHydratedServerSnapshot() {
   return false
 }
 
+function useHasHydrated() {
+  return useSyncExternalStore(
+    subscribeToHydrationStore,
+    getHydratedClientSnapshot,
+    getHydratedServerSnapshot,
+  )
+}
+
 export default function HeaderMenu() {
   return <HeaderMenuClient />
 }
@@ -43,11 +51,7 @@ function HeaderMenuClient() {
   const { open } = useAppKit()
   const { isConnected } = useAppKitAccount()
   const { data: session, isPending: isSessionPending } = useSession()
-  const hasHydrated = useSyncExternalStore(
-    subscribeToHydrationStore,
-    getHydratedClientSnapshot,
-    getHydratedServerSnapshot,
-  )
+  const hasHydrated = useHasHydrated()
   const isMobile = useIsMobile()
   const tradingOnboarding = useOptionalTradingOnboarding()
   const user = useUser()

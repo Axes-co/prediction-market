@@ -103,14 +103,12 @@ function CursorIcon({ className }: BrandIconProps) {
   )
 }
 
-export function ViewOptions({ markdownUrl }: ViewOptionsProps) {
+function useMarkdownPreloader(markdownUrl: string) {
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(false)
   const [markdownCache, setMarkdownCache] = useState<Record<string, string>>({})
-  const absoluteMarkdownUrl = toAbsoluteUrl(markdownUrl)
-  const markdownContent = markdownCache[markdownUrl] ?? null
 
-  useEffect(() => {
+  useEffect(function preloadMarkdownEffect() {
     let cancelled = false
 
     async function preloadMarkdown() {
@@ -145,10 +143,18 @@ export function ViewOptions({ markdownUrl }: ViewOptionsProps) {
     }
 
     void preloadMarkdown()
-    return () => {
+    return function cleanupPreload() {
       cancelled = true
     }
   }, [markdownUrl])
+
+  return { copied, setCopied, loading, setLoading, markdownCache }
+}
+
+export function ViewOptions({ markdownUrl }: ViewOptionsProps) {
+  const { copied, setCopied, loading, setLoading, markdownCache } = useMarkdownPreloader(markdownUrl)
+  const absoluteMarkdownUrl = toAbsoluteUrl(markdownUrl)
+  const markdownContent = markdownCache[markdownUrl] ?? null
 
   async function onCopy() {
     if (loading) {

@@ -2,10 +2,11 @@
 
 import type { Route } from 'next'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import PortfolioOpenOrdersList from '@/app/[locale]/(platform)/portfolio/_components/PortfolioOpenOrdersList'
 import PublicActivityList from '@/app/[locale]/(platform)/profile/_components/PublicActivityList'
 import PublicPositionsList from '@/app/[locale]/(platform)/profile/_components/PublicPositionsList'
+import { useTabIndicatorPosition } from '@/hooks/useTabIndicatorPosition'
 import { cn } from '@/lib/utils'
 
 type TabType = 'positions' | 'openOrders' | 'history'
@@ -48,7 +49,7 @@ interface PortfolioTabsProps {
   userAddress: string
 }
 
-export default function PortfolioTabs({ userAddress }: PortfolioTabsProps) {
+function usePortfolioTabs() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -57,12 +58,10 @@ export default function PortfolioTabs({ userAddress }: PortfolioTabsProps) {
     [searchParams],
   )
   const [activeTab, setActiveTab] = useState<TabType>(activeTabFromQuery)
-  const tabRef = useRef<(HTMLButtonElement | null)[]>([])
-  const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0 })
-  const [isInitialized, setIsInitialized] = useState(false)
   const tabs = useMemo(() => baseTabs, [])
+  const { tabRef, indicatorStyle, isInitialized } = useTabIndicatorPosition({ tabs, activeTab })
 
-  useEffect(() => {
+  useEffect(function syncActiveTabFromQuery() {
     setActiveTab(activeTabFromQuery)
   }, [activeTabFromQuery])
 
@@ -77,24 +76,11 @@ export default function PortfolioTabs({ userAddress }: PortfolioTabsProps) {
     router.replace(nextUrl as Route, { scroll: false })
   }
 
-  useLayoutEffect(() => {
-    const activeTabIndex = tabs.findIndex(tab => tab.id === activeTab)
-    const activeTabElement = tabRef.current[activeTabIndex]
+  return { tabs, activeTab, tabRef, indicatorStyle, isInitialized, handleTabChange }
+}
 
-    if (activeTabElement) {
-      const { offsetLeft, offsetWidth } = activeTabElement
-
-      queueMicrotask(() => {
-        setIndicatorStyle(prev => ({
-          ...prev,
-          left: offsetLeft,
-          width: offsetWidth,
-        }))
-
-        setIsInitialized(prev => prev || true)
-      })
-    }
-  }, [activeTab, tabs])
+export default function PortfolioTabs({ userAddress }: PortfolioTabsProps) {
+  const { tabs, activeTab, tabRef, indicatorStyle, isInitialized, handleTabChange } = usePortfolioTabs()
 
   return (
     <div className="overflow-hidden rounded-lg border">

@@ -82,12 +82,11 @@ function resolvePositionCost(position: UserPosition) {
     return derivedCost
   }
 
-  const baseCostValue = toNumber(position.totalBought)
+  return toNumber(position.totalBought)
     ?? toNumber(position.initialValue)
     ?? (typeof position.total_position_cost === 'number'
       ? Number(fromMicro(String(position.total_position_cost), 2))
       : null)
-  return baseCostValue
 }
 
 function resolvePositionValue(position: UserPosition, marketPrice: number | null = null) {
@@ -192,6 +191,298 @@ async function fetchAllUserPositions({
   }
 
   return results
+}
+
+function useMarketPositionsQuery({
+  userAddress,
+  market,
+  eventSlug,
+  positionStatus,
+}: {
+  userAddress: string
+  market: Event['markets'][number]
+  eventSlug: string
+  positionStatus: 'active' | 'closed'
+}) {
+  const orderUserShares = useOrder(state => state.userShares)
+
+  const query = useQuery({
+    queryKey: ['user-market-positions', userAddress, market.condition_id, positionStatus],
+    queryFn: ({ signal }) =>
+      fetchUserPositionsForMarket({
+        pageParam: 0,
+        userAddress,
+        conditionId: market.condition_id,
+        status: positionStatus,
+        signal,
+      }),
+    enabled: Boolean(userAddress && market.condition_id),
+    staleTime: 1000 * 60 * 5,
+    refetchInterval: userAddress ? 10_000 : false,
+    refetchIntervalInBackground: true,
+    gcTime: 1000 * 60 * 10,
+  })
+
+  const rawPositions = useMemo(() => query.data ?? [], [query.data])
+  const positions = useMemo(() => {
+    const tokenShares = orderUserShares[market.condition_id]
+    if (!tokenShares) {
+      return rawPositions
+    }
+
+    const deltas = [OUTCOME_INDEX.YES, OUTCOME_INDEX.NO].flatMap((outcomeIndex) => {
+      const tokenBalance = tokenShares[outcomeIndex] ?? 0
+      const currentPositionShares = rawPositions.reduce((sum, positionItem) => {
+        if (resolvePositionOutcomeIndex(positionItem) !== outcomeIndex) {
+          return sum
+        }
+        return sum + resolvePositionShares(positionItem)
+      }, 0)
+      const missingShares = Number((tokenBalance - currentPositionShares).toFixed(6))
+
+      if (!(missingShares >= POSITION_VISIBILITY_THRESHOLD)) {
+        return []
+      }
+
+      return [{
+        conditionId: market.condition_id,
+        outcomeIndex,
+        sharesDelta: missingShares,
+        avgPrice: 0.5,
+        currentPrice: resolveMarketOutcomePrice(market, outcomeIndex),
+        title: market.short_title || market.title,
+        slug: market.slug,
+        eventSlug,
+        iconUrl: market.icon_url,
+        outcomeText: outcomeIndex === OUTCOME_INDEX.NO ? 'No' : 'Yes',
+        isActive: !market.is_resolved,
+        isResolved: market.is_resolved,
+      }]
+    })
+
+    return applyPositionDeltasToUserPositions(rawPositions, deltas) ?? rawPositions
+  }, [eventSlug, market, orderUserShares, rawPositions])
+
+  const visiblePositions = useMemo(
+    () => positions.filter(position => resolvePositionShares(position) >= POSITION_VISIBILITY_THRESHOLD),
+    [positions],
+  )
+
+  return {
+    status: query.status,
+    refetch: query.refetch,
+    visiblePositions,
+  }
+}
+
+function useEventWidePositionsQuery({
+  userAddress,
+  eventOutcomeIds,
+  positionStatus,
+}: {
+  userAddress: string
+  eventOutcomeIds: string[]
+  positionStatus: 'active' | 'closed'
+}) {
+  const shouldFetchEventPositions = Boolean(userAddress && eventOutcomeIds.length > 1)
+
+  return useQuery({
+    queryKey: ['user-event-positions', userAddress, positionStatus, eventOutcomeIds.join(',')],
+    queryFn: ({ signal }) =>
+      fetchAllUserPositions({
+        userAddress,
+        status: positionStatus,
+        signal,
+      }),
+    enabled: shouldFetchEventPositions,
+    staleTime: 1000 * 60 * 5,
+    refetchInterval: shouldFetchEventPositions ? 10_000 : false,
+    refetchIntervalInBackground: true,
+    gcTime: 1000 * 60 * 10,
+  })
+}
+
+function useResolvedEventOutcomes({
+  eventOutcomes,
+  market,
+}: {
+  eventOutcomes: EventMarketPositionsProps['eventOutcomes']
+  market: Event['markets'][number]
+}) {
+  const resolvedEventOutcomes = useMemo(() => {
+    if (eventOutcomes && eventOutcomes.length > 0) {
+      return eventOutcomes
+    }
+    return [{
+      conditionId: market.condition_id,
+      questionId: market.question_id,
+      label: market.short_title || market.title,
+    }]
+  }, [eventOutcomes, market.condition_id, market.question_id, market.short_title, market.title])
+
+  const eventOutcomeIds = useMemo(() => {
+    return resolvedEventOutcomes
+      .map(outcome => outcome.conditionId)
+      .filter(Boolean)
+  }, [resolvedEventOutcomes])
+
+  return { resolvedEventOutcomes, eventOutcomeIds }
+}
+
+function useResolvedConvertOptions({
+  isNegRiskEnabled,
+  eventConvertOptions,
+  market,
+  visiblePositions,
+}: {
+  isNegRiskEnabled?: boolean
+  eventConvertOptions: EventMarketPositionsProps['convertOptions']
+  market: Event['markets'][number]
+  visiblePositions: UserPosition[]
+}) {
+  return useMemo(() => {
+    if (!isNegRiskEnabled) {
+      return []
+    }
+    if (eventConvertOptions !== undefined) {
+      return eventConvertOptions
+    }
+
+    const label = market.short_title || market.title
+
+    return visiblePositions
+      .map((positionItem, index) => {
+        const explicitOutcomeIndex = typeof positionItem.outcome_index === 'number'
+          ? positionItem.outcome_index
+          : undefined
+        const resolvedOutcomeIndex = resolvePositionOutcomeIndex(positionItem)
+        const quantity = toNumber(positionItem.size)
+          ?? (typeof positionItem.total_shares === 'number' ? positionItem.total_shares : 0)
+
+        if (resolvedOutcomeIndex !== OUTCOME_INDEX.NO || quantity <= 0) {
+          return null
+        }
+
+        return {
+          id: `${explicitOutcomeIndex ?? positionItem.outcome_text ?? index}`,
+          conditionId: market.condition_id,
+          label,
+          shares: quantity,
+        }
+      })
+      .filter((option): option is { id: string, label: string, shares: number, conditionId: string } => Boolean(option))
+  }, [eventConvertOptions, isNegRiskEnabled, market.condition_id, market.short_title, market.title, visiblePositions])
+}
+
+function useNetPositionsRows({
+  market,
+  resolvedEventOutcomes,
+  eventOutcomeIds,
+  visiblePositions,
+  eventPositionsData,
+}: {
+  market: Event['markets'][number]
+  resolvedEventOutcomes: Array<{ conditionId: string, questionId?: string, label: string, iconUrl?: string | null }>
+  eventOutcomeIds: string[]
+  visiblePositions: UserPosition[]
+  eventPositionsData: UserPosition[] | undefined
+}) {
+  return useMemo(() => {
+    const outcomes = market.outcomes ?? []
+    const hasMultipleMarkets = resolvedEventOutcomes.length > 1
+    if (!hasMultipleMarkets && outcomes.length === 0) {
+      return []
+    }
+
+    if (hasMultipleMarkets && !eventPositionsData) {
+      return []
+    }
+
+    const outcomeIdSet = new Set(eventOutcomeIds)
+    const sourcePositions = hasMultipleMarkets ? eventPositionsData ?? [] : visiblePositions
+    const scopedPositions = hasMultipleMarkets
+      ? sourcePositions.filter(positionItem => outcomeIdSet.has(positionItem.market.condition_id))
+      : sourcePositions
+
+    if (hasMultipleMarkets && scopedPositions.length === 0) {
+      return []
+    }
+
+    const totalCost = scopedPositions.reduce((sum, positionItem) => {
+      const costValue = resolvePositionCost(positionItem)
+      if (costValue != null && Number.isFinite(costValue)) {
+        return sum + costValue
+      }
+      const shares = resolvePositionShares(positionItem)
+      const avgPrice = normalizePositionPrice(positionItem.avgPrice)
+        ?? normalizePositionPrice(Number(fromMicro(String(positionItem.average_position ?? 0), 6)))
+      if (typeof avgPrice !== 'number' || !Number.isFinite(avgPrice) || shares <= 0) {
+        return sum
+      }
+      return sum + shares * avgPrice
+    }, 0)
+
+    if (!hasMultipleMarkets) {
+      const totalValue = scopedPositions.reduce((sum, positionItem) => {
+        const outcomePrice = normalizePositionPrice(
+          market.outcomes.find(outcome => outcome.outcome_index === resolvePositionOutcomeIndex(positionItem))?.buy_price,
+        )
+        const value = resolvePositionValue(positionItem, outcomePrice)
+        if (Number.isFinite(value)) {
+          return sum + value
+        }
+        return sum
+      }, 0)
+
+      return [{
+        id: market.condition_id,
+        outcomeLabel: market.short_title || market.title,
+        payout: totalValue,
+        netValue: totalValue - totalCost,
+        iconUrl: market.icon_url,
+      }]
+    }
+
+    const sharesByCondition = scopedPositions.reduce<Record<string, { yes: number, no: number }>>((acc, positionItem) => {
+      const conditionId = positionItem.market.condition_id
+      if (!acc[conditionId]) {
+        acc[conditionId] = { yes: 0, no: 0 }
+      }
+      const resolvedOutcomeIndex = resolvePositionOutcomeIndex(positionItem)
+      const shares = resolvePositionShares(positionItem)
+      if (resolvedOutcomeIndex === OUTCOME_INDEX.NO) {
+        acc[conditionId].no += shares
+      }
+      else {
+        acc[conditionId].yes += shares
+      }
+      return acc
+    }, {})
+
+    const totalNoShares = Object.values(sharesByCondition).reduce((sum, entry) => sum + entry.no, 0)
+
+    return resolvedEventOutcomes.map((outcome) => {
+      const entry = sharesByCondition[outcome.conditionId] ?? { yes: 0, no: 0 }
+      const payout = entry.yes + (totalNoShares - entry.no)
+      return {
+        id: outcome.conditionId,
+        outcomeLabel: outcome.label,
+        payout,
+        netValue: payout - totalCost,
+        iconUrl: outcome.iconUrl ?? market.icon_url,
+      }
+    })
+  }, [
+    eventOutcomeIds,
+    eventPositionsData,
+    market.condition_id,
+    market.icon_url,
+    market.outcomes,
+    market.short_title,
+    market.title,
+    visiblePositions,
+    resolvedEventOutcomes,
+  ])
 }
 
 function buildShareCardPosition(position: UserPosition) {
@@ -484,7 +775,7 @@ function NetPositionsDialog({
                           src={row.iconUrl}
                           alt={row.outcomeLabel}
                           sizes="36px"
-                          containerClassName="size-9 rounded-md"
+                          containerClassName="size-9 shrink-0 rounded-md"
                         />
                       )
                     : (
@@ -554,74 +845,27 @@ export default function EventMarketPositions({
   const setOrderAmount = useOrder(state => state.setAmount)
   const setIsMobileOrderPanelOpen = useOrder(state => state.setIsMobileOrderPanelOpen)
   const orderInputRef = useOrder(state => state.inputRef)
-  const orderUserShares = useOrder(state => state.userShares)
 
   const positionStatus = market.is_active && !market.is_resolved ? 'active' : 'closed'
 
-  const {
-    status,
-    data,
-    refetch,
-  } = useQuery({
-    queryKey: ['user-market-positions', userAddress, market.condition_id, positionStatus],
-    queryFn: ({ signal }) =>
-      fetchUserPositionsForMarket({
-        pageParam: 0,
-        userAddress,
-        conditionId: market.condition_id,
-        status: positionStatus,
-        signal,
-      }),
-    enabled: Boolean(userAddress && market.condition_id),
-    staleTime: 1000 * 60 * 5,
-    refetchInterval: userAddress ? 10_000 : false,
-    refetchIntervalInBackground: true,
-    gcTime: 1000 * 60 * 10,
+  const { status, refetch, visiblePositions } = useMarketPositionsQuery({
+    userAddress,
+    market,
+    eventSlug,
+    positionStatus,
   })
 
-  const rawPositions = useMemo(() => data ?? [], [data])
-  const positions = useMemo(() => {
-    const tokenShares = orderUserShares[market.condition_id]
-    if (!tokenShares) {
-      return rawPositions
-    }
+  const { resolvedEventOutcomes, eventOutcomeIds } = useResolvedEventOutcomes({
+    eventOutcomes,
+    market,
+  })
 
-    const deltas = [OUTCOME_INDEX.YES, OUTCOME_INDEX.NO].flatMap((outcomeIndex) => {
-      const tokenBalance = tokenShares[outcomeIndex] ?? 0
-      const currentPositionShares = rawPositions.reduce((sum, positionItem) => {
-        if (resolvePositionOutcomeIndex(positionItem) !== outcomeIndex) {
-          return sum
-        }
-        return sum + resolvePositionShares(positionItem)
-      }, 0)
-      const missingShares = Number((tokenBalance - currentPositionShares).toFixed(6))
+  const eventPositionsQuery = useEventWidePositionsQuery({
+    userAddress,
+    eventOutcomeIds,
+    positionStatus,
+  })
 
-      if (!(missingShares >= POSITION_VISIBILITY_THRESHOLD)) {
-        return []
-      }
-
-      return [{
-        conditionId: market.condition_id,
-        outcomeIndex,
-        sharesDelta: missingShares,
-        avgPrice: 0.5,
-        currentPrice: resolveMarketOutcomePrice(market, outcomeIndex),
-        title: market.short_title || market.title,
-        slug: market.slug,
-        eventSlug,
-        iconUrl: market.icon_url,
-        outcomeText: outcomeIndex === OUTCOME_INDEX.NO ? 'No' : 'Yes',
-        isActive: !market.is_resolved,
-        isResolved: market.is_resolved,
-      }]
-    })
-
-    return applyPositionDeltasToUserPositions(rawPositions, deltas) ?? rawPositions
-  }, [eventSlug, market, orderUserShares, rawPositions])
-  const visiblePositions = useMemo(
-    () => positions.filter(position => resolvePositionShares(position) >= POSITION_VISIBILITY_THRESHOLD),
-    [positions],
-  )
   const loading = status === 'pending' && Boolean(user?.proxy_wallet_address)
   const hasInitialError = status === 'error' && Boolean(user?.proxy_wallet_address)
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false)
@@ -629,168 +873,20 @@ export default function EventMarketPositions({
   const [isConvertDialogOpen, setIsConvertDialogOpen] = useState(false)
   const [isNetPositionsOpen, setIsNetPositionsOpen] = useState(false)
 
-  const resolvedConvertOptions = useMemo(() => {
-    if (!isNegRiskEnabled) {
-      return []
-    }
-    if (eventConvertOptions !== undefined) {
-      return eventConvertOptions
-    }
-
-    const label = market.short_title || market.title
-
-    return visiblePositions
-      .map((positionItem, index) => {
-        const explicitOutcomeIndex = typeof positionItem.outcome_index === 'number'
-          ? positionItem.outcome_index
-          : undefined
-        const resolvedOutcomeIndex = resolvePositionOutcomeIndex(positionItem)
-        const quantity = toNumber(positionItem.size)
-          ?? (typeof positionItem.total_shares === 'number' ? positionItem.total_shares : 0)
-
-        if (resolvedOutcomeIndex !== OUTCOME_INDEX.NO || quantity <= 0) {
-          return null
-        }
-
-        return {
-          id: `${explicitOutcomeIndex ?? positionItem.outcome_text ?? index}`,
-          conditionId: market.condition_id,
-          label,
-          shares: quantity,
-        }
-      })
-      .filter((option): option is { id: string, label: string, shares: number, conditionId: string } => Boolean(option))
-  }, [eventConvertOptions, isNegRiskEnabled, market.condition_id, market.short_title, market.title, visiblePositions])
-
-  const resolvedEventOutcomes = useMemo(() => {
-    if (eventOutcomes && eventOutcomes.length > 0) {
-      return eventOutcomes
-    }
-    return [{
-      conditionId: market.condition_id,
-      questionId: market.question_id,
-      label: market.short_title || market.title,
-    }]
-  }, [eventOutcomes, market.condition_id, market.question_id, market.short_title, market.title])
-
-  const eventOutcomeIds = useMemo(() => {
-    return resolvedEventOutcomes
-      .map(outcome => outcome.conditionId)
-      .filter(Boolean)
-  }, [resolvedEventOutcomes])
-
-  const shouldFetchEventPositions = Boolean(userAddress && eventOutcomeIds.length > 1)
-  const eventPositionsQuery = useQuery({
-    queryKey: ['user-event-positions', userAddress, positionStatus, eventOutcomeIds.join(',')],
-    queryFn: ({ signal }) =>
-      fetchAllUserPositions({
-        userAddress,
-        status: positionStatus,
-        signal,
-      }),
-    enabled: shouldFetchEventPositions,
-    staleTime: 1000 * 60 * 5,
-    refetchInterval: shouldFetchEventPositions ? 10_000 : false,
-    refetchIntervalInBackground: true,
-    gcTime: 1000 * 60 * 10,
+  const resolvedConvertOptions = useResolvedConvertOptions({
+    isNegRiskEnabled,
+    eventConvertOptions,
+    market,
+    visiblePositions,
   })
 
-  const netPositionsRows = useMemo(() => {
-    const outcomes = market.outcomes ?? []
-    const hasMultipleMarkets = resolvedEventOutcomes.length > 1
-    if (!hasMultipleMarkets && outcomes.length === 0) {
-      return []
-    }
-
-    if (hasMultipleMarkets && !eventPositionsQuery.data) {
-      return []
-    }
-
-    const outcomeIdSet = new Set(eventOutcomeIds)
-    const sourcePositions = hasMultipleMarkets ? eventPositionsQuery.data ?? [] : visiblePositions
-    const scopedPositions = hasMultipleMarkets
-      ? sourcePositions.filter(positionItem => outcomeIdSet.has(positionItem.market.condition_id))
-      : sourcePositions
-
-    if (hasMultipleMarkets && scopedPositions.length === 0) {
-      return []
-    }
-
-    const totalCost = scopedPositions.reduce((sum, positionItem) => {
-      const costValue = resolvePositionCost(positionItem)
-      if (costValue != null && Number.isFinite(costValue)) {
-        return sum + costValue
-      }
-      const shares = resolvePositionShares(positionItem)
-      const avgPrice = normalizePositionPrice(positionItem.avgPrice)
-        ?? normalizePositionPrice(Number(fromMicro(String(positionItem.average_position ?? 0), 6)))
-      if (typeof avgPrice !== 'number' || !Number.isFinite(avgPrice) || shares <= 0) {
-        return sum
-      }
-      return sum + shares * avgPrice
-    }, 0)
-
-    if (!hasMultipleMarkets) {
-      const totalValue = scopedPositions.reduce((sum, positionItem) => {
-        const outcomePrice = normalizePositionPrice(
-          market.outcomes.find(outcome => outcome.outcome_index === resolvePositionOutcomeIndex(positionItem))?.buy_price,
-        )
-        const value = resolvePositionValue(positionItem, outcomePrice)
-        if (Number.isFinite(value)) {
-          return sum + value
-        }
-        return sum
-      }, 0)
-
-      return [{
-        id: market.condition_id,
-        outcomeLabel: market.short_title || market.title,
-        payout: totalValue,
-        netValue: totalValue - totalCost,
-        iconUrl: market.icon_url,
-      }]
-    }
-
-    const sharesByCondition = scopedPositions.reduce<Record<string, { yes: number, no: number }>>((acc, positionItem) => {
-      const conditionId = positionItem.market.condition_id
-      if (!acc[conditionId]) {
-        acc[conditionId] = { yes: 0, no: 0 }
-      }
-      const resolvedOutcomeIndex = resolvePositionOutcomeIndex(positionItem)
-      const shares = resolvePositionShares(positionItem)
-      if (resolvedOutcomeIndex === OUTCOME_INDEX.NO) {
-        acc[conditionId].no += shares
-      }
-      else {
-        acc[conditionId].yes += shares
-      }
-      return acc
-    }, {})
-
-    const totalNoShares = Object.values(sharesByCondition).reduce((sum, entry) => sum + entry.no, 0)
-
-    return resolvedEventOutcomes.map((outcome) => {
-      const entry = sharesByCondition[outcome.conditionId] ?? { yes: 0, no: 0 }
-      const payout = entry.yes + (totalNoShares - entry.no)
-      return {
-        id: outcome.conditionId,
-        outcomeLabel: outcome.label,
-        payout,
-        netValue: payout - totalCost,
-        iconUrl: outcome.iconUrl ?? market.icon_url,
-      }
-    })
-  }, [
-    eventOutcomeIds,
-    eventPositionsQuery.data,
-    market.condition_id,
-    market.icon_url,
-    market.outcomes,
-    market.short_title,
-    market.title,
-    visiblePositions,
+  const netPositionsRows = useNetPositionsRows({
+    market,
     resolvedEventOutcomes,
-  ])
+    eventOutcomeIds,
+    visiblePositions,
+    eventPositionsData: eventPositionsQuery.data,
+  })
 
   const handleSell = useCallback((positionItem: UserPosition) => {
     if (!market) {

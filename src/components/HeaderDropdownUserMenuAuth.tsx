@@ -28,35 +28,20 @@ import { getAvatarPlaceholderStyle, shouldUseAvatarPlaceholder } from '@/lib/ava
 import { signOutAndRedirect } from '@/lib/logout'
 import { useUser } from '@/stores/useUser'
 
-export default function HeaderDropdownUserMenuAuth() {
-  const t = useExtracted()
-  const { isReady } = useAppKit()
-  const { disconnect } = useDisconnect()
-  const user = useUser()
-  const { canShowInstallUi, isIos, isPrompting, requestInstall } = usePwaInstall()
-  const pathname = usePathname()
-  const isAdmin = pathname.startsWith('/admin')
-  const isMobile = useIsMobile()
-  const enableHoverOpen = !isMobile
+function useHoverMenu(enableHoverOpen: boolean) {
   const [menuOpen, setMenuOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const avatarUrl = user?.image?.trim() ?? ''
-  const avatarSeed = user?.proxy_wallet_address || user?.address || user?.username || 'user'
-  const showPlaceholder = shouldUseAvatarPlaceholder(avatarUrl)
-  const placeholderStyle = showPlaceholder
-    ? getAvatarPlaceholderStyle(avatarSeed)
-    : undefined
 
   useEffect(function clearMenuCloseTimeoutOnUnmount() {
-    function cleanupMenuCloseTimeout() {
-      if (closeTimeoutRef.current) {
-        clearTimeout(closeTimeoutRef.current)
-        closeTimeoutRef.current = null
+    const timeoutRef = closeTimeoutRef
+
+    return function cleanupMenuCloseTimeout() {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
       }
     }
-
-    return cleanupMenuCloseTimeout
   }, [])
 
   function relatedTargetIsWithin(ref: React.RefObject<HTMLElement | null>, relatedTarget: EventTarget | null) {
@@ -107,6 +92,27 @@ export default function HeaderDropdownUserMenuAuth() {
   function handleMenuClose() {
     setMenuOpen(false)
   }
+
+  return { menuOpen, setMenuOpen, wrapperRef, clearCloseTimeout, handleWrapperPointerEnter, handleWrapperPointerLeave, handleMenuClose }
+}
+
+export default function HeaderDropdownUserMenuAuth() {
+  const t = useExtracted()
+  const { isReady } = useAppKit()
+  const { disconnect } = useDisconnect()
+  const user = useUser()
+  const { canShowInstallUi, isIos, isPrompting, requestInstall } = usePwaInstall()
+  const pathname = usePathname()
+  const isAdmin = pathname.startsWith('/admin')
+  const isMobile = useIsMobile()
+  const enableHoverOpen = !isMobile
+  const { menuOpen, setMenuOpen, wrapperRef, clearCloseTimeout, handleWrapperPointerEnter, handleWrapperPointerLeave, handleMenuClose } = useHoverMenu(enableHoverOpen)
+  const avatarUrl = user?.image?.trim() ?? ''
+  const avatarSeed = user?.proxy_wallet_address || user?.address || user?.username || 'user'
+  const showPlaceholder = shouldUseAvatarPlaceholder(avatarUrl)
+  const placeholderStyle = showPlaceholder
+    ? getAvatarPlaceholderStyle(avatarSeed)
+    : undefined
 
   async function handleInstallAction() {
     handleMenuClose()

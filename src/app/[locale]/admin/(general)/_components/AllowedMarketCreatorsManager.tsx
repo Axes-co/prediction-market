@@ -69,9 +69,7 @@ async function fetchAllowedCreatorsApi(pathname: string, init?: RequestInit) {
   return fetch(`/${maybeLocale}/admin/api/event-creations/allowed-creators${pathname}`, init)
 }
 
-export default function AllowedMarketCreatorsManager({
-  disabled = false,
-}: AllowedMarketCreatorsManagerProps) {
+function useAllowedMarketCreatorsState(disabled: boolean) {
   const t = useExtracted()
   const [items, setItems] = useState<AllowedMarketCreatorItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -111,7 +109,7 @@ export default function AllowedMarketCreatorsManager({
     }
   }, [t])
 
-  useEffect(() => {
+  useEffect(function loadItemsOnMount() {
     void loadItems()
   }, [loadItems])
 
@@ -126,6 +124,57 @@ export default function AllowedMarketCreatorsManager({
 
     return walletName.trim().length === 0 || walletAddress.trim().length === 0
   }, [dialogMode, disabled, isSubmitting, siteUrl, walletAddress, walletName])
+
+  return {
+    items,
+    setItems,
+    isLoading,
+    dialogOpen,
+    setDialogOpen,
+    dialogMode,
+    setDialogMode,
+    siteUrl,
+    setSiteUrl,
+    walletAddress,
+    setWalletAddress,
+    walletName,
+    setWalletName,
+    isSubmitting,
+    setIsSubmitting,
+    itemPendingRemoval,
+    setItemPendingRemoval,
+    isRemoving,
+    setIsRemoving,
+    submitDisabled,
+  }
+}
+
+export default function AllowedMarketCreatorsManager({
+  disabled = false,
+}: AllowedMarketCreatorsManagerProps) {
+  const t = useExtracted()
+  const {
+    items,
+    setItems,
+    isLoading,
+    dialogOpen,
+    setDialogOpen,
+    dialogMode,
+    setDialogMode,
+    siteUrl,
+    setSiteUrl,
+    walletAddress,
+    setWalletAddress,
+    walletName,
+    setWalletName,
+    isSubmitting,
+    setIsSubmitting,
+    itemPendingRemoval,
+    setItemPendingRemoval,
+    isRemoving,
+    setIsRemoving,
+    submitDisabled,
+  } = useAllowedMarketCreatorsState(disabled)
 
   async function handleAddSource() {
     setIsSubmitting(true)

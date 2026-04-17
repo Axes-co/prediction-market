@@ -11,10 +11,15 @@ import { CLOB_ORDER_TYPE } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { useUser } from '@/stores/useUser'
 
-export default function SettingsTradingContent({ user }: { user: User }) {
-  const t = useExtracted()
+function useTradingFormState() {
   const [error, setError] = useState<string | null>(null)
   const formRef = useRef<HTMLFormElement>(null)
+  return { error, setError, formRef }
+}
+
+export default function SettingsTradingContent({ user }: { user: User }) {
+  const t = useExtracted()
+  const { error, setError, formRef } = useTradingFormState()
   const initialOrderType = (user.settings?.trading?.market_order_type as MarketOrderType) ?? CLOB_ORDER_TYPE.FAK
   const orderTypeOptions = [
     {

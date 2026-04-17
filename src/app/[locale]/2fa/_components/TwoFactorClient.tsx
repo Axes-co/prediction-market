@@ -27,14 +27,12 @@ function getSafeRedirect(value: string | null | undefined) {
   return value
 }
 
-export default function TwoFactorClient({ next }: { next?: string | null }) {
-  const t = useExtracted()
-  const router = useRouter()
+function useTwoFactorState(next: string | null | undefined, router: ReturnType<typeof useRouter>) {
   const [code, setCode] = useState('')
   const [isVerifying, setIsVerifying] = useState(false)
   const redirectTo = useMemo(() => getSafeRedirect(next), [next])
 
-  useEffect(() => {
+  useEffect(function checkSessionEffect() {
     let isActive = true
 
     authClient.getSession().then((session) => {
@@ -58,10 +56,18 @@ export default function TwoFactorClient({ next }: { next?: string | null }) {
       })
     }).catch(() => {})
 
-    return () => {
+    return function cleanupSessionCheck() {
       isActive = false
     }
   }, [router])
+
+  return { code, setCode, isVerifying, setIsVerifying, redirectTo }
+}
+
+export default function TwoFactorClient({ next }: { next?: string | null }) {
+  const t = useExtracted()
+  const router = useRouter()
+  const { code, setCode, isVerifying, setIsVerifying, redirectTo } = useTwoFactorState(next, router)
 
   async function handleVerify(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()

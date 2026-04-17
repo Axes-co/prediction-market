@@ -128,24 +128,28 @@ async function fetchEvents({
   })
 }
 
-export default function SportsEventsGrid({
+function useSportsQueryScopeKey({
   eventTag,
   filters,
-  initialEvents = EMPTY_EVENTS,
-  initialMode = 'all',
+  locale,
   mainTag,
-  sportsVertical = null,
-  sportsSportSlug = null,
-  sportsSection = null,
-}: SportsEventsGridProps) {
-  const locale = useLocale()
-  const parentRef = useRef<HTMLDivElement | null>(null)
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
-  const user = useUser()
-  const userCacheKey = user?.id ?? 'guest'
-  const sportsMode: SportsSidebarMode = initialMode
-  const normalizedSportsSportSlug = sportsSportSlug?.trim().toLowerCase() || null
-  const queryScopeKey = useMemo(
+  sportsVertical,
+  normalizedSportsSportSlug,
+  sportsSection,
+  sportsMode,
+  userCacheKey,
+}: {
+  eventTag: string
+  filters: FilterState
+  locale: string
+  mainTag: string
+  sportsVertical: SportsVertical | null
+  normalizedSportsSportSlug: string | null
+  sportsSection: 'games' | 'props' | null
+  sportsMode: SportsSidebarMode
+  userCacheKey: string
+}) {
+  return useMemo(
     () => [
       filters.bookmarked,
       filters.frequency,
@@ -181,6 +185,192 @@ export default function SportsEventsGrid({
       userCacheKey,
     ],
   )
+}
+
+function useRefetchEventsOnUserChange({
+  userCacheKey,
+  refetch,
+}: {
+  userCacheKey: string
+  refetch: () => Promise<unknown>
+}) {
+  const previousUserKeyRef = useRef(userCacheKey)
+
+  useEffect(function refetchSportsEventsOnUserChange() {
+    if (previousUserKeyRef.current === userCacheKey) {
+      return
+    }
+
+    previousUserKeyRef.current = userCacheKey
+    void refetch()
+  }, [refetch, userCacheKey])
+}
+
+function useSportsVisibleEvents({
+  data,
+  filters,
+  currentTimestamp,
+  sportsMode,
+}: {
+  data: { pages: Event[][] } | undefined
+  filters: FilterState
+  currentTimestamp: number | null
+  sportsMode: SportsSidebarMode
+}) {
+  const allEvents = useMemo(() => (data ? data.pages.flat() : []), [data])
+
+  const filteredEvents = useMemo(() => {
+    if (!allEvents || allEvents.length === 0) {
+      return EMPTY_EVENTS
+    }
+
+    return filterHomeEvents(allEvents, {
+      currentTimestamp,
+      hideSports: filters.hideSports,
+      hideCrypto: filters.hideCrypto,
+      hideEarnings: filters.hideEarnings,
+      status: filters.status,
+    })
+  }, [allEvents, currentTimestamp, filters.hideSports, filters.hideCrypto, filters.hideEarnings, filters.status])
+
+  const visibleEvents = useMemo(() => {
+    if (sportsMode === 'all') {
+      return filteredEvents
+    }
+
+    if (currentTimestamp == null) {
+      return filteredEvents
+    }
+
+    if (sportsMode === 'live') {
+      return filteredEvents.filter(event => isEventLiveNow(event, currentTimestamp))
+    }
+
+    return filteredEvents.filter(event => isEventFuture(event, currentTimestamp))
+  }, [currentTimestamp, filteredEvents, sportsMode])
+
+  return { allEvents, visibleEvents }
+}
+
+function useSportsLivePriceOverrides(visibleEvents: Event[]) {
+  const marketTargets = useMemo(
+    () => visibleEvents.flatMap(event => buildMarketTargets(resolveSportsCardMarkets(event))),
+    [visibleEvents],
+  )
+  const marketQuotesByMarket = useEventMarketQuotes(marketTargets)
+  const lastTradesByMarket = useEventLastTrades(marketTargets)
+
+  const priceOverridesByMarket = useMemo(() => {
+    const strictPriceByMarket: Record<string, number> = {}
+    Object.keys({ ...marketQuotesByMarket, ...lastTradesByMarket }).forEach((conditionId) => {
+      const quote = marketQuotesByMarket[conditionId]
+      const lastTrade = lastTradesByMarket[conditionId]
+      const displayPrice = resolveDisplayPrice({
+        bid: quote?.bid ?? null,
+        ask: quote?.ask ?? null,
+        midpoint: quote?.mid ?? null,
+        lastTrade,
+        strictFallbacks: true,
+      })
+
+      if (displayPrice != null) {
+        strictPriceByMarket[conditionId] = displayPrice
+      }
+    })
+
+    const nextOverrides: Record<string, number> = {}
+    visibleEvents.forEach((event) => {
+      const displayMarkets = resolveSportsCardMarkets(event)
+      if (displayMarkets.length === 0) {
+        return
+      }
+
+      displayMarkets.forEach((market) => {
+        const displayPrice = strictPriceByMarket[market.condition_id]
+        if (displayPrice != null) {
+          nextOverrides[market.condition_id] = displayPrice
+        }
+      })
+    })
+
+    return nextOverrides
+  }, [lastTradesByMarket, marketQuotesByMarket, visibleEvents])
+
+  const priceOverrideSignature = useMemo(
+    () => Object.entries(priceOverridesByMarket)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([marketId, price]) => `${marketId}:${price}`)
+      .join('|'),
+    [priceOverridesByMarket],
+  )
+
+  const [stablePriceOverrideState, setStablePriceOverrideState] = useState<{
+    signature: string
+    overrides: Record<string, number>
+  }>({
+    signature: '',
+    overrides: EMPTY_PRICE_OVERRIDES,
+  })
+  const pendingPriceOverrideSignatureRef = useRef<string>('')
+  const priceOverrideCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(function commitStableSportsPriceOverrides() {
+    if (priceOverrideCommitTimeoutRef.current) {
+      clearTimeout(priceOverrideCommitTimeoutRef.current)
+      priceOverrideCommitTimeoutRef.current = null
+    }
+
+    if (!priceOverrideSignature) {
+      pendingPriceOverrideSignatureRef.current = ''
+      return
+    }
+
+    pendingPriceOverrideSignatureRef.current = priceOverrideSignature
+    const nextOverrides = priceOverridesByMarket
+    priceOverrideCommitTimeoutRef.current = setTimeout(() => {
+      if (pendingPriceOverrideSignatureRef.current !== priceOverrideSignature) {
+        return
+      }
+
+      setStablePriceOverrideState((current) => {
+        if (current.signature === priceOverrideSignature) {
+          return current
+        }
+
+        return {
+          signature: priceOverrideSignature,
+          overrides: nextOverrides,
+        }
+      })
+    }, SPORTS_LIVE_OVERRIDE_SETTLE_DELAY_MS)
+
+    return function cancelStablePriceOverridesCommit() {
+      if (priceOverrideCommitTimeoutRef.current) {
+        clearTimeout(priceOverrideCommitTimeoutRef.current)
+        priceOverrideCommitTimeoutRef.current = null
+      }
+    }
+  }, [priceOverrideSignature, priceOverridesByMarket])
+
+  const stablePriceOverridesByMarket = stablePriceOverrideState.signature === priceOverrideSignature
+    ? stablePriceOverrideState.overrides
+    : EMPTY_PRICE_OVERRIDES
+
+  return { stablePriceOverridesByMarket }
+}
+
+function useSportsInfiniteScrollSentinel({
+  queryScopeKey,
+  hasNextPage,
+  isFetchingNextPage,
+  fetchNextPage,
+}: {
+  queryScopeKey: string
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  fetchNextPage: () => Promise<unknown>
+}) {
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
   const [infiniteScrollErrorState, setInfiniteScrollErrorState] = useState<{ key: string, error: string | null }>({
     key: queryScopeKey,
     error: null,
@@ -193,6 +383,82 @@ export default function SportsEventsGrid({
     ? infiniteScrollErrorState.error
     : null
   const canRetryLoadMore = canRetryState.key === queryScopeKey ? canRetryState.canRetry : true
+
+  useEffect(function observeSportsLoadMoreSentinel() {
+    if (!loadMoreRef.current || !hasNextPage) {
+      return
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry) {
+        return
+      }
+
+      if (!entry.isIntersecting) {
+        setCanRetryState({ key: queryScopeKey, canRetry: true })
+        return
+      }
+
+      if (isFetchingNextPage) {
+        return
+      }
+
+      if (infiniteScrollError) {
+        if (!canRetryLoadMore) {
+          return
+        }
+
+        setInfiniteScrollErrorState({ key: queryScopeKey, error: null })
+      }
+
+      fetchNextPage().catch((error: any) => {
+        if (error?.name === 'CanceledError' || error?.name === 'AbortError') {
+          return
+        }
+
+        setCanRetryState({ key: queryScopeKey, canRetry: false })
+        setInfiniteScrollErrorState({
+          key: queryScopeKey,
+          error: error?.message || 'Failed to load more events.',
+        })
+      })
+    }, { rootMargin: '200px 0px' })
+
+    observer.observe(loadMoreRef.current)
+    return function disconnectSportsLoadMoreObserver() {
+      observer.disconnect()
+    }
+  }, [canRetryLoadMore, fetchNextPage, hasNextPage, infiniteScrollError, isFetchingNextPage, queryScopeKey])
+
+  return { loadMoreRef, infiniteScrollError }
+}
+
+export default function SportsEventsGrid({
+  eventTag,
+  filters,
+  initialEvents = EMPTY_EVENTS,
+  initialMode = 'all',
+  mainTag,
+  sportsVertical = null,
+  sportsSportSlug = null,
+  sportsSection = null,
+}: SportsEventsGridProps) {
+  const locale = useLocale()
+  const user = useUser()
+  const userCacheKey = user?.id ?? 'guest'
+  const sportsMode: SportsSidebarMode = initialMode
+  const normalizedSportsSportSlug = sportsSportSlug?.trim().toLowerCase() || null
+  const queryScopeKey = useSportsQueryScopeKey({
+    eventTag,
+    filters,
+    locale,
+    mainTag,
+    sportsVertical,
+    normalizedSportsSportSlug,
+    sportsSection,
+    sportsMode,
+    userCacheKey,
+  })
   const currentTimestamp = useCurrentTimestamp({ intervalMs: 60_000 })
   const PAGE_SIZE = HOME_EVENTS_PAGE_SIZE
   const isDefaultState = filters.search === ''
@@ -251,112 +517,23 @@ export default function SportsEventsGrid({
     placeholderData: previousData => previousData,
   })
 
-  const previousUserKeyRef = useRef(userCacheKey)
-  const [stablePriceOverrideState, setStablePriceOverrideState] = useState<{
-    signature: string
-    overrides: Record<string, number>
-  }>({
-    signature: '',
-    overrides: EMPTY_PRICE_OVERRIDES,
+  useRefetchEventsOnUserChange({ userCacheKey, refetch })
+
+  const { allEvents, visibleEvents } = useSportsVisibleEvents({
+    data,
+    filters,
+    currentTimestamp,
+    sportsMode,
   })
-  const pendingPriceOverrideSignatureRef = useRef<string>('')
-  const priceOverrideCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useEffect(() => {
-    if (previousUserKeyRef.current === userCacheKey) {
-      return
-    }
+  const { stablePriceOverridesByMarket } = useSportsLivePriceOverrides(visibleEvents)
 
-    previousUserKeyRef.current = userCacheKey
-    void refetch()
-  }, [refetch, userCacheKey])
-
-  const allEvents = useMemo(() => (data ? data.pages.flat() : []), [data])
-
-  const filteredEvents = useMemo(() => {
-    if (!allEvents || allEvents.length === 0) {
-      return EMPTY_EVENTS
-    }
-
-    return filterHomeEvents(allEvents, {
-      currentTimestamp,
-      hideSports: filters.hideSports,
-      hideCrypto: filters.hideCrypto,
-      hideEarnings: filters.hideEarnings,
-      status: filters.status,
-    })
-  }, [allEvents, currentTimestamp, filters.hideSports, filters.hideCrypto, filters.hideEarnings, filters.status])
-
-  const sportsBaseEvents = useMemo(() => {
-    return filteredEvents
-  }, [filteredEvents])
-  const sportsModeEvents = useMemo(() => {
-    if (sportsMode === 'all') {
-      return sportsBaseEvents
-    }
-
-    if (currentTimestamp == null) {
-      return sportsBaseEvents
-    }
-
-    if (sportsMode === 'live') {
-      return sportsBaseEvents.filter(event => isEventLiveNow(event, currentTimestamp))
-    }
-
-    return sportsBaseEvents.filter(event => isEventFuture(event, currentTimestamp))
-  }, [currentTimestamp, sportsBaseEvents, sportsMode])
-  const visibleEvents = sportsModeEvents
-  const marketTargets = useMemo(
-    () => visibleEvents.flatMap(event => buildMarketTargets(resolveSportsCardMarkets(event))),
-    [visibleEvents],
-  )
-  const marketQuotesByMarket = useEventMarketQuotes(marketTargets)
-  const lastTradesByMarket = useEventLastTrades(marketTargets)
-  const priceOverridesByMarket = useMemo(() => {
-    const strictPriceByMarket: Record<string, number> = {}
-    Object.keys({ ...marketQuotesByMarket, ...lastTradesByMarket }).forEach((conditionId) => {
-      const quote = marketQuotesByMarket[conditionId]
-      const lastTrade = lastTradesByMarket[conditionId]
-      const displayPrice = resolveDisplayPrice({
-        bid: quote?.bid ?? null,
-        ask: quote?.ask ?? null,
-        midpoint: quote?.mid ?? null,
-        lastTrade,
-        strictFallbacks: true,
-      })
-
-      if (displayPrice != null) {
-        strictPriceByMarket[conditionId] = displayPrice
-      }
-    })
-
-    const nextOverrides: Record<string, number> = {}
-    visibleEvents.forEach((event) => {
-      const displayMarkets = resolveSportsCardMarkets(event)
-      if (displayMarkets.length === 0) {
-        return
-      }
-
-      displayMarkets.forEach((market) => {
-        const displayPrice = strictPriceByMarket[market.condition_id]
-        if (displayPrice != null) {
-          nextOverrides[market.condition_id] = displayPrice
-        }
-      })
-    })
-
-    return nextOverrides
-  }, [lastTradesByMarket, marketQuotesByMarket, visibleEvents])
-  const priceOverrideSignature = useMemo(
-    () => Object.entries(priceOverridesByMarket)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([marketId, price]) => `${marketId}:${price}`)
-      .join('|'),
-    [priceOverridesByMarket],
-  )
-  const stablePriceOverridesByMarket = stablePriceOverrideState.signature === priceOverrideSignature
-    ? stablePriceOverrideState.overrides
-    : EMPTY_PRICE_OVERRIDES
+  const { loadMoreRef, infiniteScrollError } = useSportsInfiniteScrollSentinel({
+    queryScopeKey,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  })
 
   const columns = useColumns()
   const activeColumns = columns >= 3 ? columns - 1 : columns
@@ -364,91 +541,9 @@ export default function SportsEventsGrid({
 
   const isLoadingNewData = isPending || (isFetching && !isFetchingNextPage && (!data || data.pages.length === 0))
 
-  useEffect(() => {
-    if (priceOverrideCommitTimeoutRef.current) {
-      clearTimeout(priceOverrideCommitTimeoutRef.current)
-      priceOverrideCommitTimeoutRef.current = null
-    }
-
-    if (!priceOverrideSignature) {
-      pendingPriceOverrideSignatureRef.current = ''
-      return
-    }
-
-    pendingPriceOverrideSignatureRef.current = priceOverrideSignature
-    const nextOverrides = priceOverridesByMarket
-    priceOverrideCommitTimeoutRef.current = setTimeout(() => {
-      if (pendingPriceOverrideSignatureRef.current !== priceOverrideSignature) {
-        return
-      }
-
-      setStablePriceOverrideState((current) => {
-        if (current.signature === priceOverrideSignature) {
-          return current
-        }
-
-        return {
-          signature: priceOverrideSignature,
-          overrides: nextOverrides,
-        }
-      })
-    }, SPORTS_LIVE_OVERRIDE_SETTLE_DELAY_MS)
-
-    return () => {
-      if (priceOverrideCommitTimeoutRef.current) {
-        clearTimeout(priceOverrideCommitTimeoutRef.current)
-        priceOverrideCommitTimeoutRef.current = null
-      }
-    }
-  }, [priceOverrideSignature, priceOverridesByMarket])
-
-  useEffect(() => {
-    if (!loadMoreRef.current || !hasNextPage) {
-      return
-    }
-
-    const observer = new IntersectionObserver(([entry]) => {
-      if (!entry) {
-        return
-      }
-
-      if (!entry.isIntersecting) {
-        setCanRetryState({ key: queryScopeKey, canRetry: true })
-        return
-      }
-
-      if (isFetchingNextPage) {
-        return
-      }
-
-      if (infiniteScrollError) {
-        if (!canRetryLoadMore) {
-          return
-        }
-
-        setInfiniteScrollErrorState({ key: queryScopeKey, error: null })
-      }
-
-      fetchNextPage().catch((error: any) => {
-        if (error?.name === 'CanceledError' || error?.name === 'AbortError') {
-          return
-        }
-
-        setCanRetryState({ key: queryScopeKey, canRetry: false })
-        setInfiniteScrollErrorState({
-          key: queryScopeKey,
-          error: error?.message || 'Failed to load more events.',
-        })
-      })
-    }, { rootMargin: '200px 0px' })
-
-    observer.observe(loadMoreRef.current)
-    return () => observer.disconnect()
-  }, [canRetryLoadMore, fetchNextPage, hasNextPage, infiniteScrollError, isFetchingNextPage, queryScopeKey])
-
   if (isLoadingNewData) {
     return (
-      <div ref={parentRef}>
+      <div>
         <EventsGridSkeleton />
       </div>
     )
@@ -464,17 +559,14 @@ export default function SportsEventsGrid({
 
   if (!visibleEvents || visibleEvents.length === 0) {
     return (
-      <div
-        ref={parentRef}
-        className="flex min-h-50 min-w-0 items-center justify-center text-sm text-muted-foreground"
-      >
+      <div className="flex min-h-50 min-w-0 items-center justify-center text-sm text-muted-foreground">
         No events match your filters.
       </div>
     )
   }
 
   return (
-    <div ref={parentRef} className="min-w-0 flex-1 space-y-3">
+    <div className="min-w-0 flex-1 space-y-3">
       <div
         className={cn('grid gap-3', { 'opacity-80': isFetching })}
         style={{

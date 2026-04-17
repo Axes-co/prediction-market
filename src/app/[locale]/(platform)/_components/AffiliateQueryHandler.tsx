@@ -2,8 +2,8 @@
 
 import { useEffect } from 'react'
 
-export default function AffiliateQueryHandler() {
-  useEffect(() => {
+function useAffiliateQueryRedirect() {
+  useEffect(function redirectAffiliateQuery() {
     const url = new URL(window.location.href)
     const affiliateCode = url.searchParams.get('r')?.trim()
 
@@ -17,6 +17,10 @@ export default function AffiliateQueryHandler() {
 
     window.location.replace(redirectUrl)
   }, [])
+}
+
+export default function AffiliateQueryHandler() {
+  useAffiliateQueryRedirect()
 
   return <></>
 }

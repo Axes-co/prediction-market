@@ -23,31 +23,42 @@ import {
 import { buildPublicProfilePath } from '@/lib/platform-routing'
 import { useUser } from '@/stores/useUser'
 
+function useProfileFormState() {
+  const [errors, setErrors] = useState<Record<string, string | undefined>>({})
+  const [formError, setFormError] = useState<string | null>(null)
+  const [isPending, setIsPending] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  return { errors, setErrors, formError, setFormError, isPending, setIsPending, fileInputRef }
+}
+
+function useAvatarPreview() {
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
+
+  useEffect(function revokePreviewUrlOnChange() {
+    return function cleanupRevokePreviewUrl() {
+      if (previewImage) {
+        URL.revokeObjectURL(previewImage)
+      }
+    }
+  }, [previewImage])
+
+  return { previewImage, setPreviewImage }
+}
+
 export default function SettingsProfileContent({ user }: { user: User }) {
   const t = useExtracted()
   const queryClient = useQueryClient()
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
   const communityApiUrl = process.env.COMMUNITY_URL!
-  const [errors, setErrors] = useState<Record<string, string | undefined>>({})
-  const [formError, setFormError] = useState<string | null>(null)
-  const [isPending, setIsPending] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const { errors, setErrors, formError, setFormError, isPending, setIsPending, fileInputRef } = useProfileFormState()
+  const { previewImage, setPreviewImage } = useAvatarPreview()
   const avatarUrl = user.image?.trim() ?? ''
   const avatarSeed = user.proxy_wallet_address || user.address || user.username || 'user'
   const showPlaceholder = !previewImage && shouldUseAvatarPlaceholder(avatarUrl)
   const placeholderStyle = showPlaceholder
     ? getAvatarPlaceholderStyle(avatarSeed)
     : undefined
-
-  useEffect(() => {
-    return () => {
-      if (previewImage) {
-        URL.revokeObjectURL(previewImage)
-      }
-    }
-  }, [previewImage])
 
   function generatePreviewUrl(file: File): string {
     return URL.createObjectURL(file)

@@ -13,13 +13,7 @@ interface EventTabSelectorProps {
   marketChannelStatus: 'connecting' | 'live' | 'offline'
 }
 
-export default function EventTabSelector({
-  activeTab,
-  setActiveTab,
-  commentsCount,
-  liveCommentsStatus,
-  marketChannelStatus,
-}: EventTabSelectorProps) {
+function useEventTabLabels(commentsCount: number | null) {
   const t = useExtracted()
   const locale = useLocale()
   const formattedCommentsCount = useMemo(
@@ -36,6 +30,18 @@ export default function EventTabSelector({
     { key: 'holders', label: t('Top Holders') },
     { key: 'activity', label: t('Activity') },
   ]), [formattedCommentsCount, t])
+
+  return { eventTabs }
+}
+
+export default function EventTabSelector({
+  activeTab,
+  setActiveTab,
+  commentsCount,
+  liveCommentsStatus,
+  marketChannelStatus,
+}: EventTabSelectorProps) {
+  const { eventTabs } = useEventTabLabels(commentsCount)
 
   return (
     <div className="mt-3 flex items-center gap-2 border-b border-border">

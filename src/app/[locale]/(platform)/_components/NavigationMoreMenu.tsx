@@ -8,8 +8,7 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
-export default function NavigationMoreMenu() {
-  const t = useExtracted()
+function useNavigationMoreMenuHover() {
   const [open, setOpen] = useState(false)
   const closeTimeoutRef = useRef<number | null>(null)
 
@@ -32,14 +31,22 @@ export default function NavigationMoreMenu() {
     }, 120)
   }, [clearCloseTimeout])
 
-  useEffect(() => {
-    return () => {
-      if (closeTimeoutRef.current != null) {
-        window.clearTimeout(closeTimeoutRef.current)
-        closeTimeoutRef.current = null
+  useEffect(function clearMenuCloseTimeoutOnUnmount() {
+    const timeoutRefSnapshot = closeTimeoutRef
+    return function cleanupMenuCloseTimeout() {
+      if (timeoutRefSnapshot.current != null) {
+        window.clearTimeout(timeoutRefSnapshot.current)
+        timeoutRefSnapshot.current = null
       }
     }
   }, [])
+
+  return { open, setOpen, handleEnter, handleLeave }
+}
+
+export default function NavigationMoreMenu() {
+  const t = useExtracted()
+  const { open, setOpen, handleEnter, handleLeave } = useNavigationMoreMenuHover()
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>

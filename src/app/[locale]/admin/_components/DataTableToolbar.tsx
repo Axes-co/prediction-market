@@ -23,29 +23,25 @@ interface DataTableToolbarProps<TData> {
   searchLeadingIcon?: ReactNode
 }
 
-function DataTableToolbarInner<TData>({
-  table,
-  search,
-  onSearchChange,
-  searchPlaceholder,
-  enableColumnVisibility = true,
-  enableSelection = false,
-  leftContent,
-  rightContent,
-  searchInputClassName,
-  searchLeadingIcon,
-}: DataTableToolbarProps<TData>) {
-  const t = useExtracted()
+function useDebouncedSearch(search: string, onSearchChange: (search: string) => void) {
   const [searchInput, setSearchInput] = useState(search)
   const [isDebouncePending, setIsDebouncePending] = useState(false)
   const [pendingBaseSearch, setPendingBaseSearch] = useState(search)
   const debounceTimeoutRef = useRef<number | null>(null)
-
   const latestSearchRef = useRef(search)
 
   useLayoutEffect(function syncLatestSearchRef() {
     latestSearchRef.current = search
   }, [search])
+
+  useEffect(function clearPendingSearchDebounceOnUnmount() {
+    return function cleanup() {
+      if (debounceTimeoutRef.current !== null) {
+        window.clearTimeout(debounceTimeoutRef.current)
+        debounceTimeoutRef.current = null
+      }
+    }
+  }, [])
 
   function clearPendingSearchDebounce() {
     if (debounceTimeoutRef.current !== null) {
@@ -54,10 +50,6 @@ function DataTableToolbarInner<TData>({
     }
     setIsDebouncePending(false)
   }
-
-  useEffect(function clearPendingSearchDebounceOnUnmount() {
-    return clearPendingSearchDebounce
-  }, [])
 
   function handleSearchInputChange(nextSearch: string) {
     setSearchInput(nextSearch)
@@ -86,11 +78,40 @@ function DataTableToolbarInner<TData>({
     }, 300)
   }
 
-  const resolvedSearchPlaceholder = searchPlaceholder ?? t('Search...')
   const showPendingSearchInput
     = isDebouncePending
       && search === pendingBaseSearch
   const resolvedSearchInput = showPendingSearchInput ? searchInput : search
+
+  return {
+    resolvedSearchInput,
+    handleSearchInputChange,
+    clearPendingSearchDebounce,
+    setSearchInput,
+  }
+}
+
+function DataTableToolbarInner<TData>({
+  table,
+  search,
+  onSearchChange,
+  searchPlaceholder,
+  enableColumnVisibility = true,
+  enableSelection = false,
+  leftContent,
+  rightContent,
+  searchInputClassName,
+  searchLeadingIcon,
+}: DataTableToolbarProps<TData>) {
+  const t = useExtracted()
+  const {
+    resolvedSearchInput,
+    handleSearchInputChange,
+    clearPendingSearchDebounce,
+    setSearchInput,
+  } = useDebouncedSearch(search, onSearchChange)
+
+  const resolvedSearchPlaceholder = searchPlaceholder ?? t('Search...')
   const isFiltered = resolvedSearchInput.length > 0
   const selectedRowsCount = table.getFilteredSelectedRowModel().rows.length
   const selectionSummary = enableSelection && selectedRowsCount > 0

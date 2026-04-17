@@ -33,14 +33,18 @@ function stripLocalePrefix(pathname: string | null, locale: string) {
   return pathname
 }
 
+function useLocalizedPathname(locale: string) {
+  const pathname = usePathname()
+  return useMemo(() => stripLocalePrefix(pathname, locale), [locale, pathname])
+}
+
 export default function GlobalAnnouncementBanner({
   locale,
   message,
   linkUrl,
   disabledOn,
 }: GlobalAnnouncementBannerProps) {
-  const pathname = usePathname()
-  const localizedPathname = useMemo(() => stripLocalePrefix(pathname, locale), [locale, pathname])
+  const localizedPathname = useLocalizedPathname(locale)
   const hasMessage = message.trim().length > 0
   const isEnabled = isCustomJavascriptCodeEnabledOnPathname({ disabledOn }, localizedPathname)
 

@@ -69,6 +69,57 @@ interface EventOrderPanelLimitControlsProps {
   onAmountUpdateFromLimit: (value: string) => void
 }
 
+function useLimitControlsDerived(limitPrice: string, limitShares: string, side: OrderSide) {
+  const limitPriceNumber = useMemo(
+    () => Number.parseFloat(limitPrice) || 0,
+    [limitPrice],
+  )
+
+  const limitSharesNumber = useMemo(
+    () => Number.parseFloat(limitShares) || 0,
+    [limitShares],
+  )
+
+  const totalValue = useMemo(() => {
+    const total = (limitPriceNumber * limitSharesNumber) / 100
+    return Number.isFinite(total) ? total : 0
+  }, [limitPriceNumber, limitSharesNumber])
+
+  const potentialWin = useMemo(() => {
+    if (limitSharesNumber <= 0) {
+      return 0
+    }
+
+    if (side === ORDER_SIDE.SELL) {
+      const total = (limitPriceNumber * limitSharesNumber) / 100
+      return Number.isFinite(total) ? total : 0
+    }
+
+    return Number.isFinite(limitSharesNumber) ? limitSharesNumber : 0
+  }, [limitPriceNumber, limitSharesNumber, side])
+
+  return { limitPriceNumber, limitSharesNumber, totalValue, potentialWin }
+}
+
+function useExpirationModal(limitExpirationTimestamp: number | null, locale: string) {
+  const [isExpirationModalOpen, setIsExpirationModalOpen] = useState(false)
+  const [draftExpiration, setDraftExpiration] = useState<Date | null>(null)
+  const customExpirationLabel = useMemo(() => {
+    if (!limitExpirationTimestamp) {
+      return null
+    }
+    const date = new Date(limitExpirationTimestamp * 1000)
+    return date.toLocaleString(locale, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }, [limitExpirationTimestamp, locale])
+
+  return { isExpirationModalOpen, setIsExpirationModalOpen, draftExpiration, setDraftExpiration, customExpirationLabel }
+}
+
 export default function EventOrderPanelLimitControls({
   side,
   limitPrice,
@@ -92,20 +143,7 @@ export default function EventOrderPanelLimitControls({
   const t = useExtracted()
   const { balance } = useBalance()
   const areValuesHidden = usePortfolioValueVisibility(state => state.isHidden)
-  const limitPriceNumber = useMemo(
-    () => Number.parseFloat(limitPrice) || 0,
-    [limitPrice],
-  )
-
-  const limitSharesNumber = useMemo(
-    () => Number.parseFloat(limitShares) || 0,
-    [limitShares],
-  )
-
-  const totalValue = useMemo(() => {
-    const total = (limitPriceNumber * limitSharesNumber) / 100
-    return Number.isFinite(total) ? total : 0
-  }, [limitPriceNumber, limitSharesNumber])
+  const { limitPriceNumber, limitSharesNumber, totalValue, potentialWin } = useLimitControlsDerived(limitPrice, limitShares, side)
 
   const effectivePriceDollars = Number.isFinite(limitPriceNumber) && limitPriceNumber > 0
     ? limitPriceNumber / 100
@@ -123,19 +161,6 @@ export default function EventOrderPanelLimitControls({
     }
     return -100 / (decimalOdds - 1)
   })()
-
-  const potentialWin = useMemo(() => {
-    if (limitSharesNumber <= 0) {
-      return 0
-    }
-
-    if (side === ORDER_SIDE.SELL) {
-      const total = (limitPriceNumber * limitSharesNumber) / 100
-      return Number.isFinite(total) ? total : 0
-    }
-
-    return Number.isFinite(limitSharesNumber) ? limitSharesNumber : 0
-  }, [limitPriceNumber, limitSharesNumber, side])
 
   const maxSharesForSide = MAX_AMOUNT_INPUT
 
@@ -155,20 +180,7 @@ export default function EventOrderPanelLimitControls({
   const matchingSharesLabel = matchingShares && matchingShares > 0
     ? formatSharesLabel(matchingShares)
     : null
-  const [isExpirationModalOpen, setIsExpirationModalOpen] = useState(false)
-  const [draftExpiration, setDraftExpiration] = useState<Date | null>(null)
-  const customExpirationLabel = useMemo(() => {
-    if (!limitExpirationTimestamp) {
-      return null
-    }
-    const date = new Date(limitExpirationTimestamp * 1000)
-    return date.toLocaleString(locale, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }, [limitExpirationTimestamp, locale])
+  const { isExpirationModalOpen, setIsExpirationModalOpen, draftExpiration, setDraftExpiration, customExpirationLabel } = useExpirationModal(limitExpirationTimestamp, locale)
 
   function syncAmount(priceValue: number, sharesValue: number) {
     if (!isLimitOrder) {

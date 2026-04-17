@@ -38,36 +38,41 @@ interface SellPositionModalProps {
   onSharesChange?: (shares: number) => void
 }
 
-export default function SellPositionModal({
-  open,
-  onOpenChange,
-  outcomeLabel,
-  outcomeShortLabel,
-  outcomeIconUrl,
-  fallbackIconUrl,
-  shares,
-  filledShares,
-  avgPriceCents,
-  receiveAmount,
-  sellBids = [],
-  onCashOut,
-  onEditOrder,
-  onSharesChange,
-}: SellPositionModalProps) {
-  const progressStops = [0, 25, 50, 75, 100]
-  const isMobile = useIsMobile()
-  const [sellPercent, setSellPercent] = useState(100)
+const PROGRESS_STOPS = [0, 25, 50, 75, 100]
 
-  const iconUrl = outcomeIconUrl || fallbackIconUrl || ''
-  const safeShares = Number.isFinite(shares) ? shares : 0
-  const safeFilledShares = Number.isFinite(filledShares) ? filledShares : null
+function useSellPercent({
+  safeShares,
+  onSharesChange,
+}: {
+  safeShares: number
+  onSharesChange?: (shares: number) => void
+}) {
+  const [sellPercent, setSellPercent] = useState(100)
   const selectedShares = useMemo(() => resolveSelectedShares(safeShares, sellPercent), [safeShares, sellPercent])
   const handleSellPercentChange = useCallback((nextSellPercent: number) => {
     setSellPercent(nextSellPercent)
     onSharesChange?.(resolveSelectedShares(safeShares, nextSellPercent))
   }, [onSharesChange, safeShares])
 
-  const sellPreview = useMemo(() => {
+  return { sellPercent, selectedShares, handleSellPercentChange }
+}
+
+function useSellPreview({
+  avgPriceCents,
+  receiveAmount,
+  safeFilledShares,
+  safeShares,
+  selectedShares,
+  sellBids,
+}: {
+  avgPriceCents: number | null
+  receiveAmount: number | null
+  safeFilledShares: number | null
+  safeShares: number
+  selectedShares: number
+  sellBids: NormalizedBookLevel[]
+}) {
+  return useMemo(() => {
     if (!(selectedShares > 0)) {
       return {
         filledShares: 0,
@@ -100,6 +105,39 @@ export default function SellPositionModal({
       receiveAmount: fallbackReceive,
     }
   }, [avgPriceCents, receiveAmount, safeFilledShares, safeShares, selectedShares, sellBids])
+}
+
+export default function SellPositionModal({
+  open,
+  onOpenChange,
+  outcomeLabel,
+  outcomeShortLabel,
+  outcomeIconUrl,
+  fallbackIconUrl,
+  shares,
+  filledShares,
+  avgPriceCents,
+  receiveAmount,
+  sellBids = [],
+  onCashOut,
+  onEditOrder,
+  onSharesChange,
+}: SellPositionModalProps) {
+  const isMobile = useIsMobile()
+
+  const iconUrl = outcomeIconUrl || fallbackIconUrl || ''
+  const safeShares = Number.isFinite(shares) ? shares : 0
+  const safeFilledShares = Number.isFinite(filledShares) ? filledShares : null
+  const { sellPercent, selectedShares, handleSellPercentChange } = useSellPercent({ safeShares, onSharesChange })
+
+  const sellPreview = useSellPreview({
+    avgPriceCents,
+    receiveAmount,
+    safeFilledShares,
+    safeShares,
+    selectedShares,
+    sellBids,
+  })
 
   const hasPartialFill = sellPreview.filledShares > 0 && sellPreview.filledShares + 1e-6 < selectedShares
   const sharesLabel = formatSharesLabel(selectedShares)
@@ -171,7 +209,7 @@ export default function SellPositionModal({
               className="absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-primary"
               style={{ width: `${sellPercent}%` }}
             />
-            {progressStops.map((stop) => {
+            {PROGRESS_STOPS.map((stop) => {
               const isFilled = sellPercent >= stop
               return (
                 <span
@@ -202,7 +240,7 @@ export default function SellPositionModal({
             />
           </div>
           <div className="relative h-4 text-xs font-semibold">
-            {progressStops.map(stop => (
+            {PROGRESS_STOPS.map(stop => (
               <span
                 key={`label-${stop}`}
                 className={cn(

@@ -92,20 +92,25 @@ function isLocalMergeNotification(notification: Notification) {
   return metadata?.action === 'merge'
 }
 
+function useLoadNotificationsOnMount() {
+  const setNotifications = useNotifications(state => state.setNotifications)
+
+  useEffect(function loadNotificationsOnMount() {
+    queueMicrotask(() => setNotifications())
+  }, [setNotifications])
+}
+
 export default function HeaderNotifications() {
   const router = useRouter()
   const notifications = useNotificationList()
   const currentTimestamp = useCurrentTimestamp({ intervalMs: 60_000 })
   const unreadCount = useUnreadNotificationCount()
-  const setNotifications = useNotifications(state => state.setNotifications)
   const removeNotification = useNotifications(state => state.removeNotification)
   const isLoading = useNotificationsLoading()
   const error = useNotificationsError()
   const hasNotifications = notifications.length > 0
 
-  useEffect(() => {
-    queueMicrotask(() => setNotifications())
-  }, [setNotifications])
+  useLoadNotificationsOnMount()
 
   function handleLocalOrderFillClick(notification: Notification) {
     if (!isLocalOrderFillNotification(notification)) {

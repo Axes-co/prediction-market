@@ -107,11 +107,7 @@ function getServerNowSnapshot() {
   return 0
 }
 
-export default function EventTweetMarketsPanel({
-  tweetCount,
-  countdownTargetMs,
-  isFinal = false,
-}: EventTweetMarketsPanelProps) {
+function useCountdown(countdownTargetMs: number | null, isFinal: boolean) {
   const subscribeToNowForCountdown = useCallback(
     (onStoreChange: () => void) => subscribeToNow(onStoreChange, countdownTargetMs, isFinal),
     [countdownTargetMs, isFinal],
@@ -122,6 +118,16 @@ export default function EventTweetMarketsPanel({
     () => buildCountdownUnits(countdownTargetMs, nowMs, isFinal),
     [countdownTargetMs, isFinal, nowMs],
   )
+
+  return { nowMs, countdownUnits }
+}
+
+export default function EventTweetMarketsPanel({
+  tweetCount,
+  countdownTargetMs,
+  isFinal = false,
+}: EventTweetMarketsPanelProps) {
+  const { nowMs, countdownUnits } = useCountdown(countdownTargetMs, isFinal)
   const hasReachedCountdownTarget = countdownTargetMs != null
     && Number.isFinite(countdownTargetMs)
     && nowMs >= countdownTargetMs

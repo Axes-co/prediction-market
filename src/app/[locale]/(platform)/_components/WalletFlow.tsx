@@ -22,6 +22,15 @@ import { formatAmountInputValue } from '@/lib/formatters'
 import { buildSendErc20Transaction, getSafeTxTypedData, packSafeSignature } from '@/lib/safe/transactions'
 import { isTradingAuthRequiredError } from '@/lib/trading-auth/errors'
 
+type DepositView = 'fund' | 'receive' | 'wallets' | 'amount' | 'confirm' | 'success'
+
+interface PendingWithdrawal {
+  id: string
+  amount: string
+  to: string
+  createdAt: number
+}
+
 interface WalletFlowProps {
   depositOpen: boolean
   onDepositOpenChange: (open: boolean) => void
@@ -36,58 +45,8 @@ interface WalletFlowProps {
   meldUrl: string | null
 }
 
-export function WalletFlow({
-  depositOpen,
-  onDepositOpenChange,
-  withdrawOpen,
-  onWithdrawOpenChange,
-  user,
-  meldUrl,
-}: WalletFlowProps) {
-  const isMobile = useIsMobile()
-  const { signMessageAsync } = useSignMessage()
-  const { runWithSignaturePrompt } = useSignaturePromptRunner()
-  const [depositView, setDepositView] = useState<'fund' | 'receive' | 'wallets' | 'amount' | 'confirm' | 'success'>('fund')
-  const [walletSendTo, setWalletSendTo] = useState('')
-  const [walletSendAmount, setWalletSendAmount] = useState('')
-  const [isWalletSending, setIsWalletSending] = useState(false)
-  const [pendingWithdrawals, setPendingWithdrawals] = useState<Array<{
-    id: string
-    amount: string
-    to: string
-    createdAt: number
-  }>>([])
-  const { balance, isLoadingBalance } = useBalance()
-  const {
-    formattedUsdBalance,
-    isLoadingUsdBalance,
-  } = useLiFiWalletUsdBalance(user?.address, { enabled: depositOpen })
-  const site = useSiteIdentity()
-  const connectedWalletAddress = user?.address ?? null
-  const { openTradeRequirements } = useTradingOnboarding()
-
-  const visiblePendingWithdrawals = useMemo(
-    () => pendingWithdrawals.filter(withdrawal => Date.now() - withdrawal.createdAt < 2 * 60 * 1000),
-    [pendingWithdrawals],
-  )
-
-  useEffect(() => {
-    if (pendingWithdrawals.length === 0) {
-      return undefined
-    }
-
-    const intervalId = window.setInterval(() => {
-      setPendingWithdrawals(current =>
-        current.filter(withdrawal => Date.now() - withdrawal.createdAt < 2 * 60 * 1000),
-      )
-    }, 15_000)
-
-    return () => window.clearInterval(intervalId)
-  }, [pendingWithdrawals.length])
-
-  const hasDeployedProxyWallet = useMemo(() => (
-    Boolean(user?.proxy_wallet_address && user?.proxy_wallet_status === 'deployed')
-  ), [user?.proxy_wallet_address, user?.proxy_wallet_status])
+function useDepositViewState(onDepositOpenChange: (open: boolean) => void) {
+  const [depositView, setDepositView] = useState<DepositView>('fund')
 
   const handleDepositModalChange = useCallback((next: boolean) => {
     onDepositOpenChange(next)
@@ -95,6 +54,14 @@ export function WalletFlow({
       setDepositView('fund')
     }
   }, [onDepositOpenChange])
+
+  return { depositView, setDepositView, handleDepositModalChange }
+}
+
+function useWithdrawFormState(onWithdrawOpenChange: (open: boolean) => void) {
+  const [walletSendTo, setWalletSendTo] = useState('')
+  const [walletSendAmount, setWalletSendAmount] = useState('')
+  const [isWalletSending, setIsWalletSending] = useState(false)
 
   const handleWithdrawModalChange = useCallback((next: boolean) => {
     onWithdrawOpenChange(next)
@@ -105,7 +72,78 @@ export function WalletFlow({
     }
   }, [onWithdrawOpenChange])
 
-  const handleWalletSend = useCallback(async (event?: React.FormEvent<HTMLFormElement>) => {
+  return {
+    walletSendTo,
+    setWalletSendTo,
+    walletSendAmount,
+    setWalletSendAmount,
+    isWalletSending,
+    setIsWalletSending,
+    handleWithdrawModalChange,
+  }
+}
+
+const PENDING_WITHDRAWAL_EXPIRY_MS = 2 * 60 * 1000
+
+function usePendingWithdrawals() {
+  const [pendingWithdrawals, setPendingWithdrawals] = useState<PendingWithdrawal[]>([])
+
+  const visiblePendingWithdrawals = useMemo(
+    () => pendingWithdrawals.filter(withdrawal => Date.now() - withdrawal.createdAt < PENDING_WITHDRAWAL_EXPIRY_MS),
+    [pendingWithdrawals],
+  )
+
+  useEffect(function pruneExpiredPendingWithdrawals() {
+    if (pendingWithdrawals.length === 0) {
+      return undefined
+    }
+
+    const intervalId = window.setInterval(() => {
+      setPendingWithdrawals(current =>
+        current.filter(withdrawal => Date.now() - withdrawal.createdAt < PENDING_WITHDRAWAL_EXPIRY_MS),
+      )
+    }, 15_000)
+
+    return function clearPendingWithdrawalInterval() {
+      window.clearInterval(intervalId)
+    }
+  }, [pendingWithdrawals.length])
+
+  return { pendingWithdrawals: visiblePendingWithdrawals, setPendingWithdrawals }
+}
+
+function useHasDeployedProxyWallet(user: WalletFlowProps['user']) {
+  return useMemo(() => (
+    Boolean(user?.proxy_wallet_address && user?.proxy_wallet_status === 'deployed')
+  ), [user?.proxy_wallet_address, user?.proxy_wallet_status])
+}
+
+function useWalletSendHandler({
+  user,
+  walletSendTo,
+  walletSendAmount,
+  setIsWalletSending,
+  setWalletSendTo,
+  setWalletSendAmount,
+  setPendingWithdrawals,
+  handleWithdrawModalChange,
+  openTradeRequirements,
+  runWithSignaturePrompt,
+  signMessageAsync,
+}: {
+  user: WalletFlowProps['user']
+  walletSendTo: string
+  walletSendAmount: string
+  setIsWalletSending: (value: boolean) => void
+  setWalletSendTo: (value: string) => void
+  setWalletSendAmount: (value: string) => void
+  setPendingWithdrawals: (updater: (current: PendingWithdrawal[]) => PendingWithdrawal[]) => void
+  handleWithdrawModalChange: (next: boolean) => void
+  openTradeRequirements: ReturnType<typeof useTradingOnboarding>['openTradeRequirements']
+  runWithSignaturePrompt: ReturnType<typeof useSignaturePromptRunner>['runWithSignaturePrompt']
+  signMessageAsync: ReturnType<typeof useSignMessage>['signMessageAsync']
+}) {
+  return useCallback(async (event?: React.FormEvent<HTMLFormElement>) => {
     event?.preventDefault()
     if (!user?.proxy_wallet_address) {
       toast.error('Deploy your proxy wallet first.')
@@ -213,14 +251,26 @@ export function WalletFlow({
     handleWithdrawModalChange,
     openTradeRequirements,
     runWithSignaturePrompt,
+    setIsWalletSending,
+    setPendingWithdrawals,
+    setWalletSendAmount,
+    setWalletSendTo,
     signMessageAsync,
     user?.address,
     user?.proxy_wallet_address,
     walletSendAmount,
     walletSendTo,
   ])
+}
 
-  const handleBuy = useCallback((url?: string | null) => {
+function useBuyHandler({
+  meldUrl,
+  handleDepositModalChange,
+}: {
+  meldUrl: string | null
+  handleDepositModalChange: (next: boolean) => void
+}) {
+  return useCallback((url?: string | null) => {
     const targetUrl = url ?? meldUrl
     if (!targetUrl) {
       return
@@ -239,19 +289,87 @@ export function WalletFlow({
       handleDepositModalChange(false)
     }
   }, [handleDepositModalChange, meldUrl])
+}
 
-  const handleUseConnectedWallet = useCallback(() => {
+function useUseConnectedWalletHandler({
+  connectedWalletAddress,
+  setWalletSendTo,
+}: {
+  connectedWalletAddress: string | null
+  setWalletSendTo: (value: string) => void
+}) {
+  return useCallback(() => {
     if (!connectedWalletAddress) {
       return
     }
     setWalletSendTo(connectedWalletAddress)
-  }, [connectedWalletAddress])
+  }, [connectedWalletAddress, setWalletSendTo])
+}
 
-  const handleSetMaxAmount = useCallback(() => {
-    const amount = Number.isFinite(balance.raw) ? balance.raw : 0
+function useSetMaxAmountHandler({
+  balanceRaw,
+  setWalletSendAmount,
+}: {
+  balanceRaw: number
+  setWalletSendAmount: (value: string) => void
+}) {
+  return useCallback(() => {
+    const amount = Number.isFinite(balanceRaw) ? balanceRaw : 0
     const limitedAmount = Math.min(amount, MAX_AMOUNT_INPUT)
     setWalletSendAmount(formatAmountInputValue(limitedAmount, { roundingMode: 'floor' }))
-  }, [balance.raw])
+  }, [balanceRaw, setWalletSendAmount])
+}
+
+export function WalletFlow({
+  depositOpen,
+  onDepositOpenChange,
+  withdrawOpen,
+  onWithdrawOpenChange,
+  user,
+  meldUrl,
+}: WalletFlowProps) {
+  const isMobile = useIsMobile()
+  const { signMessageAsync } = useSignMessage()
+  const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const { depositView, setDepositView, handleDepositModalChange } = useDepositViewState(onDepositOpenChange)
+  const {
+    walletSendTo,
+    setWalletSendTo,
+    walletSendAmount,
+    setWalletSendAmount,
+    isWalletSending,
+    setIsWalletSending,
+    handleWithdrawModalChange,
+  } = useWithdrawFormState(onWithdrawOpenChange)
+  const { pendingWithdrawals: visiblePendingWithdrawals, setPendingWithdrawals } = usePendingWithdrawals()
+  const { balance, isLoadingBalance } = useBalance()
+  const {
+    formattedUsdBalance,
+    isLoadingUsdBalance,
+  } = useLiFiWalletUsdBalance(user?.address, { enabled: depositOpen })
+  const site = useSiteIdentity()
+  const connectedWalletAddress = user?.address ?? null
+  const { openTradeRequirements } = useTradingOnboarding()
+
+  const hasDeployedProxyWallet = useHasDeployedProxyWallet(user)
+
+  const handleWalletSend = useWalletSendHandler({
+    user,
+    walletSendTo,
+    walletSendAmount,
+    setIsWalletSending,
+    setWalletSendTo,
+    setWalletSendAmount,
+    setPendingWithdrawals,
+    handleWithdrawModalChange,
+    openTradeRequirements,
+    runWithSignaturePrompt,
+    signMessageAsync,
+  })
+
+  const handleBuy = useBuyHandler({ meldUrl, handleDepositModalChange })
+  const handleUseConnectedWallet = useUseConnectedWalletHandler({ connectedWalletAddress, setWalletSendTo })
+  const handleSetMaxAmount = useSetMaxAmountHandler({ balanceRaw: balance.raw, setWalletSendAmount })
 
   return (
     <>

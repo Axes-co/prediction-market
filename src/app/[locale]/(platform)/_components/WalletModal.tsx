@@ -142,6 +142,82 @@ interface WalletWithdrawModalProps {
   pendingWithdrawals?: PendingWithdrawalItem[]
 }
 
+function useWithdrawFormSelections() {
+  const [receiveToken, setReceiveToken] = useState<string>('USDC.e')
+  const [receiveChain, setReceiveChain] = useState<string>('Polygon')
+  const [isBreakdownOpen, setIsBreakdownOpen] = useState(false)
+  return { receiveToken, setReceiveToken, receiveChain, setReceiveChain, isBreakdownOpen, setIsBreakdownOpen }
+}
+
+function useCountdownTimer(seconds: number, onReset?: () => void) {
+  const [remaining, setRemaining] = useState(seconds)
+  const endTimeRef = useRef(0)
+  const hasTriggeredResetRef = useRef(false)
+  const onResetRef = useRef(onReset)
+
+  useEffect(function syncOnResetRef() {
+    onResetRef.current = onReset
+  }, [onReset])
+
+  useEffect(function runCountdownInterval() {
+    endTimeRef.current = Date.now() + seconds * 1000
+    hasTriggeredResetRef.current = false
+    const cleanupOnResetRef = onResetRef
+    const interval = setInterval(() => {
+      const now = Date.now()
+      let diff = endTimeRef.current - now
+      if (diff <= 0) {
+        if (!hasTriggeredResetRef.current) {
+          hasTriggeredResetRef.current = true
+          cleanupOnResetRef.current?.()
+        }
+        endTimeRef.current = Date.now() + seconds * 1000
+        diff = endTimeRef.current - now
+        hasTriggeredResetRef.current = false
+      }
+      const next = Math.max(0, Math.ceil(diff / 1000))
+      setRemaining(next)
+    }, 250)
+
+    return function cleanupCountdownInterval() {
+      clearInterval(interval)
+    }
+  }, [seconds])
+
+  return { remaining }
+}
+
+function useConfirmStepLocalState() {
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isBreakdownOpen, setIsBreakdownOpen] = useState(false)
+  return { isSubmitting, setIsSubmitting, isBreakdownOpen, setIsBreakdownOpen }
+}
+
+function useDepositModalState(
+  walletEoaAddress: string | null | undefined,
+  open: boolean,
+  view: WalletDepositView,
+) {
+  const [copied, setCopied] = useState(false)
+  const tokensQueryEnabled = open && (view === 'wallets' || view === 'amount' || view === 'confirm')
+  const { items: walletTokenItems, isLoadingTokens } = useLiFiWalletTokens(walletEoaAddress, { enabled: tokensQueryEnabled })
+  const [preferredSelectedTokenId, setPreferredSelectedTokenId] = useState('')
+  const [amountValue, setAmountValue] = useState('')
+  const [confirmRefreshIndex, setConfirmRefreshIndex] = useState(0)
+  return {
+    copied,
+    setCopied,
+    walletTokenItems,
+    isLoadingTokens,
+    preferredSelectedTokenId,
+    setPreferredSelectedTokenId,
+    amountValue,
+    setAmountValue,
+    confirmRefreshIndex,
+    setConfirmRefreshIndex,
+  }
+}
+
 function WalletAddressCard({
   walletAddress,
   onCopy,
@@ -283,9 +359,7 @@ function WalletSendForm({
   const trimmedRecipient = sendTo.trim()
   const isRecipientAddress = /^0x[a-fA-F0-9]{40}$/.test(trimmedRecipient)
   const parsedAmount = Number(sendAmount)
-  const [receiveToken, setReceiveToken] = useState<string>('USDC.e')
-  const [receiveChain, setReceiveChain] = useState<string>('Polygon')
-  const [isBreakdownOpen, setIsBreakdownOpen] = useState(false)
+  const { receiveToken, setReceiveToken, receiveChain, setReceiveChain, isBreakdownOpen, setIsBreakdownOpen } = useWithdrawFormSelections()
   const inputValue = formatDisplayAmount(sendAmount)
   const isSubmitDisabled = (
     isSending
@@ -1257,36 +1331,7 @@ function CountdownBadgeContent({
   seconds,
   onReset,
 }: CountdownBadgeContentProps) {
-  const [remaining, setRemaining] = useState(seconds)
-  const endTimeRef = useRef(0)
-  const hasTriggeredResetRef = useRef(false)
-  const onResetRef = useRef(onReset)
-
-  useEffect(() => {
-    onResetRef.current = onReset
-  }, [onReset])
-
-  useEffect(() => {
-    endTimeRef.current = Date.now() + seconds * 1000
-    hasTriggeredResetRef.current = false
-    const interval = setInterval(() => {
-      const now = Date.now()
-      let diff = endTimeRef.current - now
-      if (diff <= 0) {
-        if (!hasTriggeredResetRef.current) {
-          hasTriggeredResetRef.current = true
-          onResetRef.current?.()
-        }
-        endTimeRef.current = Date.now() + seconds * 1000
-        diff = endTimeRef.current - now
-        hasTriggeredResetRef.current = false
-      }
-      const next = Math.max(0, Math.ceil(diff / 1000))
-      setRemaining(next)
-    }, 250)
-
-    return () => clearInterval(interval)
-  }, [seconds])
+  const { remaining } = useCountdownTimer(seconds, onReset)
 
   const size = 36
   const strokeWidth = 3
@@ -1358,9 +1403,8 @@ function WalletConfirmStep({
   quote?: { toAmountDisplay: string | null, gasUsdDisplay: string | null } | null
   refreshIndex: number
 }) {
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { isSubmitting, setIsSubmitting, isBreakdownOpen, setIsBreakdownOpen } = useConfirmStepLocalState()
   const eoaSuffix = walletEoaAddress?.slice(-4) ?? '542d'
-  const [isBreakdownOpen, setIsBreakdownOpen] = useState(false)
   const site = useSiteIdentity()
   const formattedAmount = formatDisplayAmount(amountValue)
   const displayAmount = formattedAmount && formattedAmount.trim() !== '' ? formattedAmount : '0.00'
@@ -1823,14 +1867,20 @@ export function WalletDepositModal(props: WalletDepositModalProps) {
     isBalanceLoading = false,
   } = props
 
-  const [copied, setCopied] = useState(false)
+  const {
+    copied,
+    setCopied,
+    walletTokenItems,
+    isLoadingTokens,
+    preferredSelectedTokenId,
+    setPreferredSelectedTokenId,
+    amountValue,
+    setAmountValue,
+    confirmRefreshIndex,
+    setConfirmRefreshIndex,
+  } = useDepositModalState(walletEoaAddress, open, view)
   const site = useSiteIdentity()
   const siteLabel = siteName ?? site.name
-  const tokensQueryEnabled = open && (view === 'wallets' || view === 'amount' || view === 'confirm')
-  const { items: walletTokenItems, isLoadingTokens } = useLiFiWalletTokens(walletEoaAddress, { enabled: tokensQueryEnabled })
-  const [preferredSelectedTokenId, setPreferredSelectedTokenId] = useState('')
-  const [amountValue, setAmountValue] = useState('')
-  const [confirmRefreshIndex, setConfirmRefreshIndex] = useState(0)
   const formattedBalance = walletBalance && walletBalance !== ''
     ? walletBalance
     : '0.00'

@@ -14,9 +14,7 @@ interface EventMetaInformationProps {
   event: Event
 }
 
-export default function EventMetaInformation({ event, currentTimestamp }: EventMetaInformationProps) {
-  const t = useExtracted()
-
+function useEventVolume(event: Event) {
   const volumeRequestPayload = useMemo(() => {
     const conditions = event.markets
       .map((market) => {
@@ -73,12 +71,17 @@ export default function EventMetaInformation({ event, currentTimestamp }: EventM
     },
   })
 
-  const resolvedVolume = useMemo(() => {
+  return useMemo(() => {
     if (typeof volumeFromApi === 'number' && Number.isFinite(volumeFromApi)) {
       return volumeFromApi
     }
     return event.volume
   }, [event.volume, volumeFromApi])
+}
+
+export default function EventMetaInformation({ event, currentTimestamp }: EventMetaInformationProps) {
+  const t = useExtracted()
+  const resolvedVolume = useEventVolume(event)
 
   const isNegRiskEnabled = Boolean(event.enable_neg_risk || event.neg_risk)
   const isNegRiskAugmented = Boolean(event.neg_risk_augmented)

@@ -11,8 +11,13 @@ interface CommentMenuProps {
   isDeleting?: boolean
 }
 
-export default function EventCommentMenu({ comment, onDelete, isDeleting }: CommentMenuProps) {
+function useDeleteDialog() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+  return { isDeleteOpen, setIsDeleteOpen }
+}
+
+export default function EventCommentMenu({ comment, onDelete, isDeleting }: CommentMenuProps) {
+  const { isDeleteOpen, setIsDeleteOpen } = useDeleteDialog()
   const t = useExtracted()
 
   return (

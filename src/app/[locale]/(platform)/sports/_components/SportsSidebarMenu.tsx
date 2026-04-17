@@ -621,15 +621,13 @@ function SportsMenuLink({
   )
 }
 
-export default function SportsSidebarMenu({
+function useSidebarEntryDerivations({
   entries,
   vertical,
-  mode,
-  activeTagSlug,
-  countByTagSlug,
-  independentScroll = false,
-}: SportsSidebarMenuProps) {
-  const verticalConfig = getSportsVerticalConfig(vertical)
+}: {
+  entries: SportsMenuEntry[]
+  vertical: SportsVertical
+}) {
   const visibleEntries = useMemo(
     () => entries.filter((entry) => {
       return !(
@@ -639,23 +637,6 @@ export default function SportsSidebarMenu({
       )
     }),
     [entries, vertical],
-  )
-  const mobileQuickMenuContainerRef = useRef<HTMLDivElement | null>(null)
-  const [isMobileMoreMenuOpen, setIsMobileMoreMenuOpen] = useState(false)
-  const [mobileVisiblePrimaryLinkCount, setMobileVisiblePrimaryLinkCount] = useState(() => {
-    if (typeof window === 'undefined') {
-      return MOBILE_MENU_DEFAULT_VISIBLE_LINKS
-    }
-    return resolveMobileVisiblePrimaryLinkCount(window.innerWidth)
-  })
-  const [groupExpansionOverride, setGroupExpansionOverride] = useState<GroupExpansionOverride>(null)
-  const activeGroupId = useMemo(
-    () => findActiveGroupId(visibleEntries, activeTagSlug),
-    [activeTagSlug, visibleEntries],
-  )
-  const expandedGroupId = useMemo(
-    () => resolveExpandedGroupId(groupExpansionOverride, activeGroupId, visibleEntries),
-    [activeGroupId, groupExpansionOverride, visibleEntries],
   )
   const primaryTopLevelLinks = useMemo(
     () => visibleEntries.filter(isLinkEntry),
@@ -675,27 +656,54 @@ export default function SportsSidebarMenu({
     }),
     [visibleEntries],
   )
-  const mobileVisiblePrimaryLinks = useMemo(
-    () => primaryTopLevelLinks.slice(0, mobileVisiblePrimaryLinkCount),
-    [primaryTopLevelLinks, mobileVisiblePrimaryLinkCount],
+  return { visibleEntries, primaryTopLevelLinks, allMenuEntries }
+}
+
+function useSidebarGroupExpansion({
+  visibleEntries,
+  activeTagSlug,
+}: {
+  visibleEntries: SportsMenuEntry[]
+  activeTagSlug: string | null
+}) {
+  const [groupExpansionOverride, setGroupExpansionOverride] = useState<GroupExpansionOverride>(null)
+  const activeGroupId = useMemo(
+    () => findActiveGroupId(visibleEntries, activeTagSlug),
+    [activeTagSlug, visibleEntries],
   )
-  const mobileQuickNavColumnCount = Math.max(1, mobileVisiblePrimaryLinks.length + 1)
-  const hasVisibleActiveMobilePrimaryLink = mobileVisiblePrimaryLinks.some(entry => isMenuLinkActive({
-    entry,
-    vertical,
-    mode,
-    activeTagSlug,
-  }))
-  const isMobileMoreButtonActive = !hasVisibleActiveMobilePrimaryLink && allMenuEntries.some(entry =>
-    isMenuEntryActive({
-      entry,
-      vertical,
-      mode,
-      activeTagSlug,
-    }),
+  const expandedGroupId = useMemo(
+    () => resolveExpandedGroupId(groupExpansionOverride, activeGroupId, visibleEntries),
+    [activeGroupId, groupExpansionOverride, visibleEntries],
   )
 
-  useEffect(() => {
+  function toggleExpandedGroup(groupId: string) {
+    setGroupExpansionOverride((current) => {
+      const currentExpandedGroupId = resolveExpandedGroupId(current, activeGroupId, visibleEntries)
+      if (currentExpandedGroupId === groupId) {
+        return { type: 'none' }
+      }
+      return { type: 'group', groupId }
+    })
+  }
+
+  return { expandedGroupId, toggleExpandedGroup, setGroupExpansionOverride }
+}
+
+function useMobileQuickMenuSizing({
+  primaryTopLevelLinks,
+}: {
+  primaryTopLevelLinks: SportsMenuLinkEntry[]
+}) {
+  const mobileQuickMenuContainerRef = useRef<HTMLDivElement | null>(null)
+  const [isMobileMoreMenuOpen, setIsMobileMoreMenuOpen] = useState(false)
+  const [mobileVisiblePrimaryLinkCount, setMobileVisiblePrimaryLinkCount] = useState(() => {
+    if (typeof window === 'undefined') {
+      return MOBILE_MENU_DEFAULT_VISIBLE_LINKS
+    }
+    return resolveMobileVisiblePrimaryLinkCount(window.innerWidth)
+  })
+
+  useEffect(function observeMobileQuickMenuContainerWidth() {
     const container = mobileQuickMenuContainerRef.current
     if (!container) {
       return
@@ -718,7 +726,7 @@ export default function SportsSidebarMenu({
 
     if (typeof ResizeObserver === 'undefined') {
       window.addEventListener('resize', updateVisibleLinkCount)
-      return () => {
+      return function removeMobileQuickMenuResizeListener() {
         window.removeEventListener('resize', updateVisibleLinkCount)
       }
     }
@@ -726,20 +734,62 @@ export default function SportsSidebarMenu({
     const resizeObserver = new ResizeObserver(updateVisibleLinkCount)
     resizeObserver.observe(container)
 
-    return () => {
+    return function disconnectMobileQuickMenuResizeObserver() {
       resizeObserver.disconnect()
     }
   }, [])
 
-  function toggleExpandedGroup(groupId: string) {
-    setGroupExpansionOverride((current) => {
-      const currentExpandedGroupId = resolveExpandedGroupId(current, activeGroupId, visibleEntries)
-      if (currentExpandedGroupId === groupId) {
-        return { type: 'none' }
-      }
-      return { type: 'group', groupId }
-    })
+  const mobileVisiblePrimaryLinks = useMemo(
+    () => primaryTopLevelLinks.slice(0, mobileVisiblePrimaryLinkCount),
+    [primaryTopLevelLinks, mobileVisiblePrimaryLinkCount],
+  )
+
+  return {
+    mobileQuickMenuContainerRef,
+    mobileVisiblePrimaryLinks,
+    isMobileMoreMenuOpen,
+    setIsMobileMoreMenuOpen,
   }
+}
+
+export default function SportsSidebarMenu({
+  entries,
+  vertical,
+  mode,
+  activeTagSlug,
+  countByTagSlug,
+  independentScroll = false,
+}: SportsSidebarMenuProps) {
+  const verticalConfig = getSportsVerticalConfig(vertical)
+  const { visibleEntries, primaryTopLevelLinks, allMenuEntries } = useSidebarEntryDerivations({
+    entries,
+    vertical,
+  })
+  const { expandedGroupId, toggleExpandedGroup, setGroupExpansionOverride } = useSidebarGroupExpansion({
+    visibleEntries,
+    activeTagSlug,
+  })
+  const {
+    mobileQuickMenuContainerRef,
+    mobileVisiblePrimaryLinks,
+    isMobileMoreMenuOpen,
+    setIsMobileMoreMenuOpen,
+  } = useMobileQuickMenuSizing({ primaryTopLevelLinks })
+  const mobileQuickNavColumnCount = Math.max(1, mobileVisiblePrimaryLinks.length + 1)
+  const hasVisibleActiveMobilePrimaryLink = mobileVisiblePrimaryLinks.some(entry => isMenuLinkActive({
+    entry,
+    vertical,
+    mode,
+    activeTagSlug,
+  }))
+  const isMobileMoreButtonActive = !hasVisibleActiveMobilePrimaryLink && allMenuEntries.some(entry =>
+    isMenuEntryActive({
+      entry,
+      vertical,
+      mode,
+      activeTagSlug,
+    }),
+  )
 
   function renderDesktopMenuEntries(onActionComplete?: () => void) {
     return visibleEntries.map((entry) => {

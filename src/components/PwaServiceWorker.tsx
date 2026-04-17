@@ -10,8 +10,8 @@ function isLocalhostHost(hostname: string) {
     || hostname === '0.0.0.0'
 }
 
-export default function PwaServiceWorker() {
-  useEffect(() => {
+function useServiceWorkerRegistration() {
+  useEffect(function manageServiceWorker() {
     if (!('serviceWorker' in navigator)) {
       return
     }
@@ -41,6 +41,10 @@ export default function PwaServiceWorker() {
         console.error('Failed to register service worker', error)
       })
   }, [])
+}
+
+export default function PwaServiceWorker() {
+  useServiceWorkerRegistration()
 
   return null
 }

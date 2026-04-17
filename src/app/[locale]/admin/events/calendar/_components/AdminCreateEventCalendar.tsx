@@ -129,7 +129,7 @@ function getDraftModeLabel(mode: CreationMode) {
   return mode === 'recurring' ? 'Recurring' : 'Single'
 }
 
-export default function AdminCreateEventCalendar() {
+function useCreateEventCalendarState() {
   const router = useRouter()
   const [backendDrafts, setBackendDrafts] = useState<BackendDraftSummary[]>([])
   const [isLoadingDrafts, setIsLoadingDrafts] = useState(true)
@@ -146,7 +146,7 @@ export default function AdminCreateEventCalendar() {
   const [selectedStartAt, setSelectedStartAt] = useState(() => buildDefaultStartAt(readCurrentTimeMs()))
   const [serverSignerAvailability, setServerSignerAvailability] = useState<'loading' | 'available' | 'missing' | 'error'>('loading')
 
-  useEffect(() => {
+  useEffect(function loadDraftsOnMount() {
     async function loadDrafts() {
       try {
         setIsLoadingDrafts(true)
@@ -174,7 +174,7 @@ export default function AdminCreateEventCalendar() {
     void loadDrafts()
   }, [])
 
-  useEffect(() => {
+  useEffect(function loadServerSignersOnMount() {
     let isActive = true
 
     void (async () => {
@@ -207,12 +207,12 @@ export default function AdminCreateEventCalendar() {
       }
     })()
 
-    return () => {
+    return function cancelSignersFetch() {
       isActive = false
     }
   }, [])
 
-  useEffect(() => {
+  useEffect(function searchCopyEventsOnChange() {
     latestCopySearchRequestIdRef.current += 1
     const requestId = latestCopySearchRequestIdRef.current
     const controller = new AbortController()
@@ -272,11 +272,65 @@ export default function AdminCreateEventCalendar() {
       })()
     }, 250)
 
-    return () => {
+    return function cancelCopySearch() {
       controller.abort()
       window.clearTimeout(timeoutId)
     }
   }, [copyDialogOpen, copySearch])
+
+  return {
+    router,
+    backendDrafts,
+    setBackendDrafts,
+    isLoadingDrafts,
+    isCreatingDraft,
+    setIsCreatingDraft,
+    draftsDialogOpen,
+    setDraftsDialogOpen,
+    copyDialogOpen,
+    setCopyDialogOpen,
+    copySearch,
+    setCopySearch,
+    copyResults,
+    isSearchingCopy,
+    deletingDraftId,
+    setDeletingDraftId,
+    newEventDialogOpen,
+    setNewEventDialogOpen,
+    recurringWalletSetupDialogOpen,
+    setRecurringWalletSetupDialogOpen,
+    selectedStartAt,
+    setSelectedStartAt,
+    serverSignerAvailability,
+  }
+}
+
+export default function AdminCreateEventCalendar() {
+  const {
+    router,
+    backendDrafts,
+    setBackendDrafts,
+    isLoadingDrafts,
+    isCreatingDraft,
+    setIsCreatingDraft,
+    draftsDialogOpen,
+    setDraftsDialogOpen,
+    copyDialogOpen,
+    setCopyDialogOpen,
+    copySearch,
+    setCopySearch,
+    copyResults,
+    isSearchingCopy,
+    deletingDraftId,
+    setDeletingDraftId,
+    newEventDialogOpen,
+    setNewEventDialogOpen,
+    recurringWalletSetupDialogOpen,
+    setRecurringWalletSetupDialogOpen,
+    selectedStartAt,
+    setSelectedStartAt,
+    serverSignerAvailability,
+  } = useCreateEventCalendarState()
 
   const events: EventInput[] = backendDrafts.flatMap((draft) => {
     const displayTitle = getDraftDisplayTitle(draft)

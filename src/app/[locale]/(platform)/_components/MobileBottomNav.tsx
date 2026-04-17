@@ -66,6 +66,24 @@ interface MobileBottomNavContentProps {
   pathname: string
 }
 
+function useMobileBottomNavState() {
+  const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const [searchFocusTrigger, setSearchFocusTrigger] = useState(0)
+  const [isGuestMenuOpen, setIsGuestMenuOpen] = useState(false)
+  const [isHowItWorksOpen, setIsHowItWorksOpen] = useState(false)
+
+  return {
+    isSearchOpen,
+    setIsSearchOpen,
+    searchFocusTrigger,
+    setSearchFocusTrigger,
+    isGuestMenuOpen,
+    setIsGuestMenuOpen,
+    isHowItWorksOpen,
+    setIsHowItWorksOpen,
+  }
+}
+
 function MobileBottomNavContent({ pathname }: MobileBottomNavContentProps) {
   const t = useExtracted()
   const router = useRouter()
@@ -74,10 +92,16 @@ function MobileBottomNavContent({ pathname }: MobileBottomNavContentProps) {
   const { data: session } = useSession()
   const user = useUser()
   const { canShowInstallUi, isIos, isPrompting, requestInstall } = usePwaInstall()
-  const [isSearchOpen, setIsSearchOpen] = useState(false)
-  const [searchFocusTrigger, setSearchFocusTrigger] = useState(0)
-  const [isGuestMenuOpen, setIsGuestMenuOpen] = useState(false)
-  const [isHowItWorksOpen, setIsHowItWorksOpen] = useState(false)
+  const {
+    isSearchOpen,
+    setIsSearchOpen,
+    searchFocusTrigger,
+    setSearchFocusTrigger,
+    isGuestMenuOpen,
+    setIsGuestMenuOpen,
+    isHowItWorksOpen,
+    setIsHowItWorksOpen,
+  } = useMobileBottomNavState()
 
   const isAuthenticated = Boolean(session?.user) || Boolean(user) || isConnected
 
@@ -462,12 +486,10 @@ interface MobileLocaleSwitcherProps {
   onLocaleChange?: () => void
 }
 
-function MobileLocaleSwitcher({ onLocaleChange }: MobileLocaleSwitcherProps) {
-  const locale = useLocale() as SupportedLocale
-  const [isPending, setIsPending] = useState(false)
+function useEnabledLocalesFetch() {
   const [enabledLocales, setEnabledLocales] = useState<SupportedLocale[]>([...SUPPORTED_LOCALES])
 
-  useEffect(() => {
+  useEffect(function fetchEnabledLocalesOnMount() {
     let isActive = true
 
     async function loadEnabledLocales() {
@@ -494,10 +516,22 @@ function MobileLocaleSwitcher({ onLocaleChange }: MobileLocaleSwitcherProps) {
 
     void loadEnabledLocales()
 
-    return () => {
+    return function cancelEnabledLocalesFetch() {
       isActive = false
     }
   }, [])
+
+  return enabledLocales
+}
+
+function useLocaleChangeHandler({
+  locale,
+  onLocaleChange,
+}: {
+  locale: SupportedLocale
+  onLocaleChange: (() => void) | undefined
+}) {
+  const [isPending, setIsPending] = useState(false)
 
   function handleLocaleChange(nextLocale: SupportedLocale) {
     if (nextLocale === locale || typeof window === 'undefined') {
@@ -512,6 +546,14 @@ function MobileLocaleSwitcher({ onLocaleChange }: MobileLocaleSwitcherProps) {
     setIsPending(true)
     window.location.replace(targetUrl)
   }
+
+  return { isPending, handleLocaleChange }
+}
+
+function MobileLocaleSwitcher({ onLocaleChange }: MobileLocaleSwitcherProps) {
+  const locale = useLocale() as SupportedLocale
+  const enabledLocales = useEnabledLocalesFetch()
+  const { isPending, handleLocaleChange } = useLocaleChangeHandler({ locale, onLocaleChange })
 
   return (
     <div className="rounded-2xl border border-border/70 px-4 py-3">

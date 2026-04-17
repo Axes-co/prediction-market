@@ -137,24 +137,17 @@ function markConditionsAsClaimedInPositions<T extends {
   return hasChanges ? next : positions
 }
 
-export default function SportsRedeemModal({
-  open,
-  onOpenChange,
-  title,
-  subtitle,
+function useRedeemSelectionState({
   sections,
-  defaultSelectedSectionKey = null,
-  defaultSelectedConditionId = null,
-  onClaimSuccess,
-}: SportsRedeemModalProps) {
-  const isMobile = useIsMobile()
-  const user = useUser()
-  const queryClient = useQueryClient()
-  const { signMessageAsync } = useSignMessage()
-  const { runWithSignaturePrompt } = useSignaturePromptRunner()
-  const { ensureTradingReady, openTradeRequirements } = useTradingOnboarding()
-  const [isSubmitting, setIsSubmitting] = useState(false)
-
+  defaultSelectedConditionId,
+  defaultSelectedSectionKey,
+  open,
+}: {
+  sections: SportsRedeemModalSection[]
+  defaultSelectedConditionId: string | null
+  defaultSelectedSectionKey: string | null
+  open: boolean
+}) {
   const normalizedSections = useMemo(() => {
     return sections
       .map(section => ({
@@ -220,11 +213,6 @@ export default function SportsRedeemModal({
     return selectedGroups.reduce((sum, group) => sum + resolveGroupAmount(group), 0)
   }, [selectedGroups])
 
-  const submitLabel = useMemo(
-    () => `Cash out ${formatCurrency(selectedAmount, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-    [selectedAmount],
-  )
-
   function toggleConditionSelection(conditionId: string) {
     setSelectionState((current) => {
       const baseSelected = current.key === selectionStateKey
@@ -267,7 +255,35 @@ export default function SportsRedeemModal({
     })
   }
 
-  async function handleSubmit() {
+  return {
+    normalizedSections,
+    normalizedGroups,
+    selectedConditionIds,
+    expandedConditionIds,
+    selectedGroups,
+    selectedAmount,
+    toggleConditionSelection,
+    toggleConditionExpansion,
+  }
+}
+
+function useRedeemClaimSubmission({
+  selectedGroups,
+  onClaimSuccess,
+  onOpenChange,
+}: {
+  selectedGroups: SportsRedeemModalGroup[]
+  onClaimSuccess?: (conditionIds: string[]) => void
+  onOpenChange: (open: boolean) => void
+}) {
+  const user = useUser()
+  const queryClient = useQueryClient()
+  const { signMessageAsync } = useSignMessage()
+  const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const { ensureTradingReady, openTradeRequirements } = useTradingOnboarding()
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  async function submitClaim() {
     if (isSubmitting) {
       return
     }
@@ -398,6 +414,41 @@ export default function SportsRedeemModal({
     }
   }
 
+  return { isSubmitting, submitClaim }
+}
+
+export default function SportsRedeemModal({
+  open,
+  onOpenChange,
+  title,
+  subtitle,
+  sections,
+  defaultSelectedSectionKey = null,
+  defaultSelectedConditionId = null,
+  onClaimSuccess,
+}: SportsRedeemModalProps) {
+  const isMobile = useIsMobile()
+  const {
+    normalizedSections,
+    selectedConditionIds,
+    expandedConditionIds,
+    selectedGroups,
+    selectedAmount,
+    toggleConditionSelection,
+    toggleConditionExpansion,
+  } = useRedeemSelectionState({
+    sections,
+    defaultSelectedConditionId,
+    defaultSelectedSectionKey,
+    open,
+  })
+  const { isSubmitting, submitClaim } = useRedeemClaimSubmission({
+    selectedGroups,
+    onClaimSuccess,
+    onOpenChange,
+  })
+  const submitLabel = `Cash out ${formatCurrency(selectedAmount, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
   const content = (
     <div className="grid gap-4">
       <header className="grid gap-1 text-left">
@@ -508,7 +559,7 @@ export default function SportsRedeemModal({
       <Button
         type="button"
         className="h-10 w-full"
-        onClick={() => void handleSubmit()}
+        onClick={() => void submitClaim()}
         disabled={isSubmitting || selectedAmount <= 0 || selectedGroups.length === 0}
       >
         {isSubmitting ? 'Submitting...' : submitLabel}

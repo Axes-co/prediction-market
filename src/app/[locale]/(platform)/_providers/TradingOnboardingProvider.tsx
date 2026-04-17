@@ -71,65 +71,85 @@ interface TradingOnboardingProviderContentProps {
   user: User | null
 }
 
-function TradingOnboardingProviderContent({
-  children,
-  user,
-}: TradingOnboardingProviderContentProps) {
-  const { open } = useAppKit()
-  const { signTypedDataAsync } = useSignTypedData()
-  const { signMessageAsync } = useSignMessage()
-  const { runWithSignaturePrompt } = useSignaturePromptRunner()
-  const affiliateMetadata = useAffiliateOrderMetadata()
-  const proxyWalletStatus = user?.proxy_wallet_status ?? null
-  const hasProxyWalletAddress = Boolean(user?.proxy_wallet_address)
-  const hasDeployedProxyWallet = Boolean(user?.proxy_wallet_address && proxyWalletStatus === 'deployed')
-  const isProxyWalletDeploying = Boolean(
-    user?.proxy_wallet_address
-    && (proxyWalletStatus === 'deploying' || proxyWalletStatus === 'signed'),
-  )
-  const tradingAuthSettings = user?.settings?.tradingAuth ?? null
-  const hasTradingAuth = Boolean(
-    tradingAuthSettings?.relayer?.enabled
-    && tradingAuthSettings?.clob?.enabled,
-  )
-  const approvalsSettings = tradingAuthSettings?.approvals ?? null
-  const hasTokenApprovals = Boolean(approvalsSettings?.enabled)
+type ProxyStep = 'idle' | 'signing' | 'deploying' | 'completed'
+type TradingAuthStep = 'idle' | 'signing' | 'completed'
+type ApprovalsStep = 'idle' | 'signing' | 'completed'
+
+function useOnboardingDialogsState() {
   const [enableModalOpen, setEnableModalOpen] = useState(false)
   const [fundModalOpen, setFundModalOpen] = useState(false)
   const [tradeModalOpen, setTradeModalOpen] = useState(false)
   const [shouldShowFundAfterProxy, setShouldShowFundAfterProxy] = useState(false)
-  const [proxyWalletError, setProxyWalletError] = useState<string | null>(null)
-  const [tradingAuthError, setTradingAuthError] = useState<string | null>(null)
-  const [tokenApprovalError, setTokenApprovalError] = useState<string | null>(null)
-  const [proxyStep, setProxyStep] = useState<'idle' | 'signing' | 'deploying' | 'completed'>(
-    hasDeployedProxyWallet ? 'completed' : isProxyWalletDeploying ? 'deploying' : 'idle',
-  )
-  const [tradingAuthStep, setTradingAuthStep] = useState<'idle' | 'signing' | 'completed'>(
-    hasTradingAuth ? 'completed' : 'idle',
-  )
-  const [approvalsStep, setApprovalsStep] = useState<'idle' | 'signing' | 'completed'>(
-    hasTokenApprovals ? 'completed' : 'idle',
-  )
-  const [requiresTradingAuthRefresh, setRequiresTradingAuthRefresh] = useState(false)
   const [depositModalOpen, setDepositModalOpen] = useState(false)
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false)
 
-  const hasEffectiveTradingAuth = hasTradingAuth && !requiresTradingAuthRefresh
-  const effectiveProxyStep
-    = hasDeployedProxyWallet
-      ? 'completed'
-      : isProxyWalletDeploying
-        ? 'deploying'
-        : proxyStep
-  const effectiveTradingAuthStep = hasEffectiveTradingAuth ? 'completed' : tradingAuthStep
-  const effectiveApprovalsStep = hasTokenApprovals ? 'completed' : approvalsStep
-  const tradingAuthSatisfied = effectiveTradingAuthStep === 'completed'
-  const tradingReady
-    = effectiveProxyStep === 'completed'
-      && effectiveTradingAuthStep === 'completed'
-      && effectiveApprovalsStep === 'completed'
+  return {
+    enableModalOpen,
+    setEnableModalOpen,
+    fundModalOpen,
+    setFundModalOpen,
+    tradeModalOpen,
+    setTradeModalOpen,
+    shouldShowFundAfterProxy,
+    setShouldShowFundAfterProxy,
+    depositModalOpen,
+    setDepositModalOpen,
+    withdrawModalOpen,
+    setWithdrawModalOpen,
+  }
+}
 
-  const refreshSessionUserState = useCallback(async () => {
+function useOnboardingErrorsState() {
+  const [proxyWalletError, setProxyWalletError] = useState<string | null>(null)
+  const [tradingAuthError, setTradingAuthError] = useState<string | null>(null)
+  const [tokenApprovalError, setTokenApprovalError] = useState<string | null>(null)
+
+  return {
+    proxyWalletError,
+    setProxyWalletError,
+    tradingAuthError,
+    setTradingAuthError,
+    tokenApprovalError,
+    setTokenApprovalError,
+  }
+}
+
+function useOnboardingStepsState({
+  hasDeployedProxyWallet,
+  isProxyWalletDeploying,
+  hasTradingAuth,
+  hasTokenApprovals,
+}: {
+  hasDeployedProxyWallet: boolean
+  isProxyWalletDeploying: boolean
+  hasTradingAuth: boolean
+  hasTokenApprovals: boolean
+}) {
+  const [proxyStep, setProxyStep] = useState<ProxyStep>(
+    hasDeployedProxyWallet ? 'completed' : isProxyWalletDeploying ? 'deploying' : 'idle',
+  )
+  const [tradingAuthStep, setTradingAuthStep] = useState<TradingAuthStep>(
+    hasTradingAuth ? 'completed' : 'idle',
+  )
+  const [approvalsStep, setApprovalsStep] = useState<ApprovalsStep>(
+    hasTokenApprovals ? 'completed' : 'idle',
+  )
+  const [requiresTradingAuthRefresh, setRequiresTradingAuthRefresh] = useState(false)
+
+  return {
+    proxyStep,
+    setProxyStep,
+    tradingAuthStep,
+    setTradingAuthStep,
+    approvalsStep,
+    setApprovalsStep,
+    requiresTradingAuthRefresh,
+    setRequiresTradingAuthRefresh,
+  }
+}
+
+function useSessionRefresher() {
+  return useCallback(async () => {
     try {
       const session = await authClient.getSession({
         query: {
@@ -147,20 +167,44 @@ function TradingOnboardingProviderContent({
       console.error('Failed to refresh user session', error)
     }
   }, [])
+}
 
-  useProxyWalletPolling({
-    userId: user?.id,
-    proxyWalletAddress: user?.proxy_wallet_address,
-    proxyWalletStatus: user?.proxy_wallet_status,
-    hasDeployedProxyWallet,
-    hasProxyWalletAddress,
-  })
-
-  const resetPendingFundState = useCallback(() => {
+function usePendingFundStateReset(setShouldShowFundAfterProxy: (value: boolean) => void) {
+  return useCallback(() => {
     setShouldShowFundAfterProxy(false)
-  }, [])
+  }, [setShouldShowFundAfterProxy])
+}
 
-  const resetEnableFlowState = useCallback(() => {
+function useEnableFlowReset({
+  hasTokenApprovals,
+  hasTradingAuth,
+  proxyStep,
+  requiresTradingAuthRefresh,
+  setProxyWalletError,
+  setTradingAuthError,
+  setTokenApprovalError,
+  setShouldShowFundAfterProxy,
+  setDepositModalOpen,
+  setWithdrawModalOpen,
+  setProxyStep,
+  setTradingAuthStep,
+  setApprovalsStep,
+}: {
+  hasTokenApprovals: boolean
+  hasTradingAuth: boolean
+  proxyStep: ProxyStep
+  requiresTradingAuthRefresh: boolean
+  setProxyWalletError: (value: string | null) => void
+  setTradingAuthError: (value: string | null) => void
+  setTokenApprovalError: (value: string | null) => void
+  setShouldShowFundAfterProxy: (value: boolean) => void
+  setDepositModalOpen: (value: boolean) => void
+  setWithdrawModalOpen: (value: boolean) => void
+  setProxyStep: (value: ProxyStep) => void
+  setTradingAuthStep: (value: TradingAuthStep) => void
+  setApprovalsStep: (value: ApprovalsStep) => void
+}) {
+  return useCallback(() => {
     setProxyWalletError(null)
     setTradingAuthError(null)
     setTokenApprovalError(null)
@@ -176,9 +220,54 @@ function TradingOnboardingProviderContent({
     if (!hasTokenApprovals) {
       setApprovalsStep('idle')
     }
-  }, [hasTokenApprovals, hasTradingAuth, proxyStep, requiresTradingAuthRefresh])
+  }, [
+    hasTokenApprovals,
+    hasTradingAuth,
+    proxyStep,
+    requiresTradingAuthRefresh,
+    setApprovalsStep,
+    setDepositModalOpen,
+    setProxyStep,
+    setProxyWalletError,
+    setShouldShowFundAfterProxy,
+    setTokenApprovalError,
+    setTradingAuthError,
+    setTradingAuthStep,
+    setWithdrawModalOpen,
+  ])
+}
 
-  const handleProxyWalletSignature = useCallback(async () => {
+function useProxyWalletSignatureFlow({
+  shouldShowFundAfterProxy,
+  refreshSessionUserState,
+  resetEnableFlowState,
+  resetPendingFundState,
+  setProxyStep,
+  setProxyWalletError,
+  setTradingAuthStep,
+  setTradingAuthError,
+  setRequiresTradingAuthRefresh,
+  setTradeModalOpen,
+  setEnableModalOpen,
+  setFundModalOpen,
+}: {
+  shouldShowFundAfterProxy: boolean
+  refreshSessionUserState: () => Promise<void>
+  resetEnableFlowState: () => void
+  resetPendingFundState: () => void
+  setProxyStep: (value: ProxyStep) => void
+  setProxyWalletError: (value: string | null) => void
+  setTradingAuthStep: (value: TradingAuthStep) => void
+  setTradingAuthError: (value: string | null) => void
+  setRequiresTradingAuthRefresh: (value: boolean) => void
+  setTradeModalOpen: (value: boolean) => void
+  setEnableModalOpen: (value: boolean) => void
+  setFundModalOpen: (value: boolean) => void
+}) {
+  const { signTypedDataAsync } = useSignTypedData()
+  const { runWithSignaturePrompt } = useSignaturePromptRunner()
+
+  return useCallback(async () => {
     setProxyWalletError(null)
 
     try {
@@ -261,9 +350,34 @@ function TradingOnboardingProviderContent({
     resetEnableFlowState,
     resetPendingFundState,
     runWithSignaturePrompt,
+    setEnableModalOpen,
+    setFundModalOpen,
+    setProxyStep,
+    setProxyWalletError,
+    setRequiresTradingAuthRefresh,
+    setTradeModalOpen,
+    setTradingAuthError,
+    setTradingAuthStep,
     shouldShowFundAfterProxy,
     signTypedDataAsync,
   ])
+}
+
+function useTradingAuthSignatureFlow({
+  user,
+  refreshSessionUserState,
+  setTradingAuthError,
+  setTradingAuthStep,
+  setRequiresTradingAuthRefresh,
+}: {
+  user: User | null
+  refreshSessionUserState: () => Promise<void>
+  setTradingAuthError: (value: string | null) => void
+  setTradingAuthStep: (value: TradingAuthStep) => void
+  setRequiresTradingAuthRefresh: (value: boolean) => void
+}) {
+  const { signTypedDataAsync } = useSignTypedData()
+  const { runWithSignaturePrompt } = useSignaturePromptRunner()
 
   const handleTradingAuthSignature = useCallback(async () => {
     if (!user?.address) {
@@ -336,7 +450,15 @@ function TradingOnboardingProviderContent({
         setTradingAuthStep('idle')
       }
     }
-  }, [refreshSessionUserState, runWithSignaturePrompt, signTypedDataAsync, user])
+  }, [
+    refreshSessionUserState,
+    runWithSignaturePrompt,
+    setRequiresTradingAuthRefresh,
+    setTradingAuthError,
+    setTradingAuthStep,
+    signTypedDataAsync,
+    user,
+  ])
 
   const resolveReferralExchanges = useCallback(async (safeAddress: `0x${string}`) => {
     const exchanges = [
@@ -352,7 +474,29 @@ function TradingOnboardingProviderContent({
     return exchanges.filter((_, index) => results[index] === false)
   }, [])
 
-  const handleApproveTokens = useCallback(async () => {
+  return { handleTradingAuthSignature, resolveReferralExchanges }
+}
+
+function useTokenApprovalsFlow({
+  user,
+  tradingAuthSatisfied,
+  resolveReferralExchanges,
+  refreshSessionUserState,
+  setApprovalsStep,
+  setTokenApprovalError,
+}: {
+  user: User | null
+  tradingAuthSatisfied: boolean
+  resolveReferralExchanges: (safeAddress: `0x${string}`) => Promise<`0x${string}`[]>
+  refreshSessionUserState: () => Promise<void>
+  setApprovalsStep: (value: ApprovalsStep) => void
+  setTokenApprovalError: (value: string | null) => void
+}) {
+  const { signMessageAsync } = useSignMessage()
+  const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const affiliateMetadata = useAffiliateOrderMetadata()
+
+  return useCallback(async () => {
     if (!user?.proxy_wallet_address) {
       setTokenApprovalError('Deploy your proxy wallet first.')
       return
@@ -472,10 +616,34 @@ function TradingOnboardingProviderContent({
     refreshSessionUserState,
     resolveReferralExchanges,
     runWithSignaturePrompt,
+    setApprovalsStep,
+    setTokenApprovalError,
     signMessageAsync,
     tradingAuthSatisfied,
     user,
   ])
+}
+
+function useTradingReadyGate({
+  user,
+  tradingReady,
+  refreshSessionUserState,
+  resetEnableFlowState,
+  setTradeModalOpen,
+  setRequiresTradingAuthRefresh,
+  setTradingAuthStep,
+  setTradingAuthError,
+}: {
+  user: User | null
+  tradingReady: boolean
+  refreshSessionUserState: () => Promise<void>
+  resetEnableFlowState: () => void
+  setTradeModalOpen: (value: boolean) => void
+  setRequiresTradingAuthRefresh: (value: boolean) => void
+  setTradingAuthStep: (value: TradingAuthStep) => void
+  setTradingAuthError: (value: string | null) => void
+}) {
+  const { open } = useAppKit()
 
   const ensureTradingReady = useCallback(() => {
     if (!user) {
@@ -493,7 +661,7 @@ function TradingOnboardingProviderContent({
     void refreshSessionUserState()
     setTradeModalOpen(true)
     return false
-  }, [open, refreshSessionUserState, resetEnableFlowState, tradingReady, user])
+  }, [open, refreshSessionUserState, resetEnableFlowState, setTradeModalOpen, tradingReady, user])
 
   const openTradeRequirements = useCallback((options?: { forceTradingAuth?: boolean }) => {
     if (!user) {
@@ -511,11 +679,50 @@ function TradingOnboardingProviderContent({
     }
     void refreshSessionUserState()
     setTradeModalOpen(true)
-  }, [open, refreshSessionUserState, resetEnableFlowState, user])
+  }, [
+    open,
+    refreshSessionUserState,
+    resetEnableFlowState,
+    setRequiresTradingAuthRefresh,
+    setTradeModalOpen,
+    setTradingAuthError,
+    setTradingAuthStep,
+    user,
+  ])
 
+  return { ensureTradingReady, openTradeRequirements, openAppKit: open }
+}
+
+function useWalletFlowControls({
+  user,
+  hasDeployedProxyWallet,
+  openAppKit,
+  openTradeRequirements,
+  refreshSessionUserState,
+  resetEnableFlowState,
+  resetPendingFundState,
+  setDepositModalOpen,
+  setWithdrawModalOpen,
+  setEnableModalOpen,
+  setFundModalOpen,
+  setShouldShowFundAfterProxy,
+}: {
+  user: User | null
+  hasDeployedProxyWallet: boolean
+  openAppKit: () => Promise<void>
+  openTradeRequirements: (options?: { forceTradingAuth?: boolean }) => void
+  refreshSessionUserState: () => Promise<void>
+  resetEnableFlowState: () => void
+  resetPendingFundState: () => void
+  setDepositModalOpen: (value: boolean) => void
+  setWithdrawModalOpen: (value: boolean) => void
+  setEnableModalOpen: (value: boolean) => void
+  setFundModalOpen: (value: boolean) => void
+  setShouldShowFundAfterProxy: (value: boolean) => void
+}) {
   const openWalletModal = useCallback(() => {
     if (!user) {
-      queueMicrotask(() => void open())
+      queueMicrotask(() => void openAppKit())
       return
     }
     if (!hasDeployedProxyWallet) {
@@ -523,12 +730,12 @@ function TradingOnboardingProviderContent({
       return
     }
     setDepositModalOpen(true)
-  }, [hasDeployedProxyWallet, open, openTradeRequirements, user])
+  }, [hasDeployedProxyWallet, openAppKit, openTradeRequirements, setDepositModalOpen, user])
 
   const startDepositFlow = useCallback(() => {
     if (!user) {
       queueMicrotask(() => {
-        void open()
+        void openAppKit()
       })
       return
     }
@@ -542,12 +749,21 @@ function TradingOnboardingProviderContent({
     setShouldShowFundAfterProxy(true)
     void refreshSessionUserState()
     setEnableModalOpen(true)
-  }, [hasDeployedProxyWallet, open, refreshSessionUserState, resetEnableFlowState, user])
+  }, [
+    hasDeployedProxyWallet,
+    openAppKit,
+    refreshSessionUserState,
+    resetEnableFlowState,
+    setDepositModalOpen,
+    setEnableModalOpen,
+    setShouldShowFundAfterProxy,
+    user,
+  ])
 
   const startWithdrawFlow = useCallback(() => {
     if (!user) {
       queueMicrotask(() => {
-        void open()
+        void openAppKit()
       })
       return
     }
@@ -558,25 +774,26 @@ function TradingOnboardingProviderContent({
     }
 
     setWithdrawModalOpen(true)
-  }, [hasDeployedProxyWallet, open, openTradeRequirements, user])
+  }, [hasDeployedProxyWallet, openAppKit, openTradeRequirements, setWithdrawModalOpen, user])
 
   const closeFundModal = useCallback((nextOpen: boolean) => {
     setFundModalOpen(nextOpen)
     if (!nextOpen) {
       resetPendingFundState()
     }
-  }, [resetPendingFundState])
+  }, [resetPendingFundState, setFundModalOpen])
 
-  const contextValue = useMemo<TradingOnboardingContextValue>(() => ({
-    startDepositFlow,
-    startWithdrawFlow,
-    ensureTradingReady,
-    openTradeRequirements,
-    hasProxyWallet: hasDeployedProxyWallet,
-    openWalletModal,
-  }), [ensureTradingReady, hasDeployedProxyWallet, openTradeRequirements, openWalletModal, startDepositFlow, startWithdrawFlow])
+  return { openWalletModal, startDepositFlow, startWithdrawFlow, closeFundModal }
+}
 
-  const meldUrl = useMemo(() => {
+function useMeldUrl({
+  hasDeployedProxyWallet,
+  user,
+}: {
+  hasDeployedProxyWallet: boolean
+  user: User | null
+}) {
+  return useMemo(() => {
     if (!hasDeployedProxyWallet || !user?.proxy_wallet_address) {
       return null
     }
@@ -586,6 +803,203 @@ function TradingOnboardingProviderContent({
     })
     return `https://meldcrypto.com/?${params.toString()}`
   }, [hasDeployedProxyWallet, user])
+}
+
+function useTradingOnboardingContextValue({
+  startDepositFlow,
+  startWithdrawFlow,
+  ensureTradingReady,
+  openTradeRequirements,
+  hasDeployedProxyWallet,
+  openWalletModal,
+}: {
+  startDepositFlow: () => void
+  startWithdrawFlow: () => void
+  ensureTradingReady: () => boolean
+  openTradeRequirements: (options?: { forceTradingAuth?: boolean }) => void
+  hasDeployedProxyWallet: boolean
+  openWalletModal: () => void
+}): TradingOnboardingContextValue {
+  return useMemo(() => ({
+    startDepositFlow,
+    startWithdrawFlow,
+    ensureTradingReady,
+    openTradeRequirements,
+    hasProxyWallet: hasDeployedProxyWallet,
+    openWalletModal,
+  }), [ensureTradingReady, hasDeployedProxyWallet, openTradeRequirements, openWalletModal, startDepositFlow, startWithdrawFlow])
+}
+
+function TradingOnboardingProviderContent({
+  children,
+  user,
+}: TradingOnboardingProviderContentProps) {
+  const proxyWalletStatus = user?.proxy_wallet_status ?? null
+  const hasProxyWalletAddress = Boolean(user?.proxy_wallet_address)
+  const hasDeployedProxyWallet = Boolean(user?.proxy_wallet_address && proxyWalletStatus === 'deployed')
+  const isProxyWalletDeploying = Boolean(
+    user?.proxy_wallet_address
+    && (proxyWalletStatus === 'deploying' || proxyWalletStatus === 'signed'),
+  )
+  const tradingAuthSettings = user?.settings?.tradingAuth ?? null
+  const hasTradingAuth = Boolean(
+    tradingAuthSettings?.relayer?.enabled
+    && tradingAuthSettings?.clob?.enabled,
+  )
+  const approvalsSettings = tradingAuthSettings?.approvals ?? null
+  const hasTokenApprovals = Boolean(approvalsSettings?.enabled)
+
+  const {
+    enableModalOpen,
+    setEnableModalOpen,
+    fundModalOpen,
+    setFundModalOpen,
+    tradeModalOpen,
+    setTradeModalOpen,
+    shouldShowFundAfterProxy,
+    setShouldShowFundAfterProxy,
+    depositModalOpen,
+    setDepositModalOpen,
+    withdrawModalOpen,
+    setWithdrawModalOpen,
+  } = useOnboardingDialogsState()
+
+  const {
+    proxyWalletError,
+    setProxyWalletError,
+    tradingAuthError,
+    setTradingAuthError,
+    tokenApprovalError,
+    setTokenApprovalError,
+  } = useOnboardingErrorsState()
+
+  const {
+    proxyStep,
+    setProxyStep,
+    tradingAuthStep,
+    setTradingAuthStep,
+    approvalsStep,
+    setApprovalsStep,
+    requiresTradingAuthRefresh,
+    setRequiresTradingAuthRefresh,
+  } = useOnboardingStepsState({
+    hasDeployedProxyWallet,
+    isProxyWalletDeploying,
+    hasTradingAuth,
+    hasTokenApprovals,
+  })
+
+  const hasEffectiveTradingAuth = hasTradingAuth && !requiresTradingAuthRefresh
+  const effectiveProxyStep
+    = hasDeployedProxyWallet
+      ? 'completed'
+      : isProxyWalletDeploying
+        ? 'deploying'
+        : proxyStep
+  const effectiveTradingAuthStep = hasEffectiveTradingAuth ? 'completed' : tradingAuthStep
+  const effectiveApprovalsStep = hasTokenApprovals ? 'completed' : approvalsStep
+  const tradingAuthSatisfied = effectiveTradingAuthStep === 'completed'
+  const tradingReady
+    = effectiveProxyStep === 'completed'
+      && effectiveTradingAuthStep === 'completed'
+      && effectiveApprovalsStep === 'completed'
+
+  const refreshSessionUserState = useSessionRefresher()
+
+  useProxyWalletPolling({
+    userId: user?.id,
+    proxyWalletAddress: user?.proxy_wallet_address,
+    proxyWalletStatus: user?.proxy_wallet_status,
+    hasDeployedProxyWallet,
+    hasProxyWalletAddress,
+  })
+
+  const resetPendingFundState = usePendingFundStateReset(setShouldShowFundAfterProxy)
+
+  const resetEnableFlowState = useEnableFlowReset({
+    hasTokenApprovals,
+    hasTradingAuth,
+    proxyStep,
+    requiresTradingAuthRefresh,
+    setProxyWalletError,
+    setTradingAuthError,
+    setTokenApprovalError,
+    setShouldShowFundAfterProxy,
+    setDepositModalOpen,
+    setWithdrawModalOpen,
+    setProxyStep,
+    setTradingAuthStep,
+    setApprovalsStep,
+  })
+
+  const handleProxyWalletSignature = useProxyWalletSignatureFlow({
+    shouldShowFundAfterProxy,
+    refreshSessionUserState,
+    resetEnableFlowState,
+    resetPendingFundState,
+    setProxyStep,
+    setProxyWalletError,
+    setTradingAuthStep,
+    setTradingAuthError,
+    setRequiresTradingAuthRefresh,
+    setTradeModalOpen,
+    setEnableModalOpen,
+    setFundModalOpen,
+  })
+
+  const { handleTradingAuthSignature, resolveReferralExchanges } = useTradingAuthSignatureFlow({
+    user,
+    refreshSessionUserState,
+    setTradingAuthError,
+    setTradingAuthStep,
+    setRequiresTradingAuthRefresh,
+  })
+
+  const handleApproveTokens = useTokenApprovalsFlow({
+    user,
+    tradingAuthSatisfied,
+    resolveReferralExchanges,
+    refreshSessionUserState,
+    setApprovalsStep,
+    setTokenApprovalError,
+  })
+
+  const { ensureTradingReady, openTradeRequirements, openAppKit } = useTradingReadyGate({
+    user,
+    tradingReady,
+    refreshSessionUserState,
+    resetEnableFlowState,
+    setTradeModalOpen,
+    setRequiresTradingAuthRefresh,
+    setTradingAuthStep,
+    setTradingAuthError,
+  })
+
+  const { openWalletModal, startDepositFlow, startWithdrawFlow, closeFundModal } = useWalletFlowControls({
+    user,
+    hasDeployedProxyWallet,
+    openAppKit,
+    openTradeRequirements,
+    refreshSessionUserState,
+    resetEnableFlowState,
+    resetPendingFundState,
+    setDepositModalOpen,
+    setWithdrawModalOpen,
+    setEnableModalOpen,
+    setFundModalOpen,
+    setShouldShowFundAfterProxy,
+  })
+
+  const contextValue = useTradingOnboardingContextValue({
+    startDepositFlow,
+    startWithdrawFlow,
+    ensureTradingReady,
+    openTradeRequirements,
+    hasDeployedProxyWallet,
+    openWalletModal,
+  })
+
+  const meldUrl = useMeldUrl({ hasDeployedProxyWallet, user })
 
   return (
     <TradingOnboardingContext value={contextValue}>

@@ -24,20 +24,10 @@ interface EventSingleMarketOrderBookProps {
 
 type OutcomeToggleIndex = typeof OUTCOME_INDEX.YES | typeof OUTCOME_INDEX.NO
 
-export default function EventSingleMarketOrderBook({
-  market,
-  eventSlug,
-  showCompactVolume = false,
-}: EventSingleMarketOrderBookProps) {
-  const t = useExtracted()
-  const normalizeOutcomeLabel = useOutcomeLabel()
-  const isMobile = useIsMobile()
-  const marketChannelStatus = useMarketChannelStatus()
+function useOrderBookState(market: Market) {
   const [isExpanded, setIsExpanded] = useState(true)
   const orderMarket = useOrder(state => state.market)
   const orderOutcome = useOrder(state => state.outcome)
-  const setOrderMarket = useOrder(state => state.setMarket)
-  const setOrderOutcome = useOrder(state => state.setOutcome)
 
   const selectedOutcomeIndex: OutcomeToggleIndex = useMemo(() => {
     if (orderMarket?.condition_id === market.condition_id && orderOutcome) {
@@ -53,6 +43,34 @@ export default function EventSingleMarketOrderBook({
     [market.outcomes],
   )
 
+  const compactVolumeLabelResult = useMemo(() => {
+    const resolvedVolume = Number.isFinite(market.volume) ? market.volume : 0
+    if (resolvedVolume <= 0) {
+      return null
+    }
+
+    return `$${resolvedVolume.toLocaleString('en-US', {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    })} Vol.`
+  }, [market.volume])
+
+  return { isExpanded, setIsExpanded, selectedOutcomeIndex, tokenIds, compactVolumeLabel: compactVolumeLabelResult }
+}
+
+export default function EventSingleMarketOrderBook({
+  market,
+  eventSlug,
+  showCompactVolume = false,
+}: EventSingleMarketOrderBookProps) {
+  const t = useExtracted()
+  const normalizeOutcomeLabel = useOutcomeLabel()
+  const isMobile = useIsMobile()
+  const marketChannelStatus = useMarketChannelStatus()
+  const setOrderMarket = useOrder(state => state.setMarket)
+  const setOrderOutcome = useOrder(state => state.setOutcome)
+  const { isExpanded, setIsExpanded, selectedOutcomeIndex, tokenIds, compactVolumeLabel: rawCompactVolumeLabel } = useOrderBookState(market)
+
   const {
     data: orderBookSummaries,
     isLoading: isOrderBookLoading,
@@ -66,21 +84,7 @@ export default function EventSingleMarketOrderBook({
   const yesOutcomeLabel = (yesOutcomeText ? normalizeOutcomeLabel(yesOutcomeText) : '') || yesOutcomeText || t('Yes')
   const noOutcomeLabel = (noOutcomeText ? normalizeOutcomeLabel(noOutcomeText) : '') || noOutcomeText || t('No')
   const isLoadingSummaries = isExpanded && isOrderBookLoading && !orderBookSummaries
-  const compactVolumeLabel = useMemo(() => {
-    if (!showCompactVolume) {
-      return null
-    }
-
-    const resolvedVolume = Number.isFinite(market.volume) ? market.volume : 0
-    if (resolvedVolume <= 0) {
-      return null
-    }
-
-    return `$${resolvedVolume.toLocaleString('en-US', {
-      notation: 'compact',
-      maximumFractionDigits: 1,
-    })} Vol.`
-  }, [market.volume, showCompactVolume])
+  const compactVolumeLabel = showCompactVolume ? rawCompactVolumeLabel : null
 
   function handleOutcomeSelection(outcomeIndex: OutcomeToggleIndex) {
     const outcome = market.outcomes[outcomeIndex]

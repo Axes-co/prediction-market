@@ -96,15 +96,21 @@ export function SignaturePrompt() {
   )
 }
 
-function SignatureWalletIcon() {
+function useWalletIcon() {
   const { walletInfo } = useWalletInfo()
   const [walletIconLoadFailed, setWalletIconLoadFailed] = useState(false)
   const walletName = typeof walletInfo?.name === 'string' ? walletInfo.name : undefined
   const walletIconUrl = typeof walletInfo?.icon === 'string' ? walletInfo.icon.trim() : ''
 
-  useEffect(() => {
+  useEffect(function resetIconLoadFailedOnUrlChange() {
     setWalletIconLoadFailed(false)
   }, [walletIconUrl])
+
+  return { walletName, walletIconUrl, walletIconLoadFailed, setWalletIconLoadFailed }
+}
+
+function SignatureWalletIcon() {
+  const { walletName, walletIconUrl, walletIconLoadFailed, setWalletIconLoadFailed } = useWalletIcon()
 
   if (!walletIconUrl || walletIconLoadFailed) {
     return <WalletIcon className="size-16 text-primary" strokeWidth={1.8} />

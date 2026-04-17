@@ -11,15 +11,22 @@ interface PlatformNavigationContextValue {
 
 const PlatformNavigationContext = createContext<PlatformNavigationContextValue | null>(null)
 
+function usePlatformNavigationContextValue({
+  childParentMap,
+  tags,
+}: PlatformNavigationContextValue) {
+  return useMemo(() => ({
+    childParentMap,
+    tags,
+  }), [childParentMap, tags])
+}
+
 export default function PlatformNavigationProvider({
   tags,
   childParentMap,
   children,
 }: PlatformNavigationContextValue & { children: ReactNode }) {
-  const value = useMemo(() => ({
-    childParentMap,
-    tags,
-  }), [childParentMap, tags])
+  const value = usePlatformNavigationContextValue({ childParentMap, tags })
 
   return (
     <PlatformNavigationContext value={value}>

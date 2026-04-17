@@ -22,11 +22,16 @@ interface SettingsAffiliateContentProps {
   mainCategories: AffiliateMainCategory[]
 }
 
+function useWidgetDialogToggle() {
+  const [isWidgetDialogOpen, setIsWidgetDialogOpen] = useState(false)
+  return { isWidgetDialogOpen, setIsWidgetDialogOpen }
+}
+
 export default function SettingsAffiliateContent({ affiliateData, mainCategories }: SettingsAffiliateContentProps) {
   const t = useExtracted()
   const locale = useLocale()
   const { copied, copy } = useClipboard()
-  const [isWidgetDialogOpen, setIsWidgetDialogOpen] = useState(false)
+  const { isWidgetDialogOpen, setIsWidgetDialogOpen } = useWidgetDialogToggle()
 
   if (!affiliateData) {
     return (

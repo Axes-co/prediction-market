@@ -41,6 +41,67 @@ interface ProfileLinkProps {
   joinedAt?: string | null
 }
 
+function useAvatarFallbackStyle(showPlaceholder: boolean, avatarSeed: string) {
+  return useMemo<CSSProperties | undefined>(() => {
+    if (!showPlaceholder) {
+      return undefined
+    }
+
+    return getAvatarPlaceholderStyle(avatarSeed)
+  }, [avatarSeed, showPlaceholder])
+}
+
+function useProfileTooltipStats(user: ProfileLinkProps['user']) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [stats, setStats] = useState<Awaited<ReturnType<typeof fetchProfileLinkStats>>>(null)
+  const [loadedStatsAddress, setLoadedStatsAddress] = useState<string | null>(null)
+  const statsAddress = useMemo(
+    () => user.proxy_wallet_address ?? user.address,
+    [user.address, user.proxy_wallet_address],
+  )
+  const normalizedStatsAddress = statsAddress ?? null
+  const hasLoaded = normalizedStatsAddress === null || loadedStatsAddress === normalizedStatsAddress
+  const tooltipStats = loadedStatsAddress === normalizedStatsAddress ? stats : null
+
+  useEffect(function fetchStatsOnTooltipOpen() {
+    if (!isOpen || hasLoaded) {
+      return
+    }
+
+    if (!normalizedStatsAddress) {
+      return
+    }
+
+    const controller = new AbortController()
+    let isActive = true
+
+    fetchProfileLinkStats(normalizedStatsAddress, controller.signal)
+      .then((result) => {
+        if (!isActive || controller.signal.aborted) {
+          return
+        }
+        setStats(result)
+        setLoadedStatsAddress(normalizedStatsAddress)
+      })
+      .catch((error) => {
+        if (!isActive || controller.signal.aborted || error?.name === 'AbortError') {
+          return
+        }
+        setStats(null)
+        setLoadedStatsAddress(normalizedStatsAddress)
+      })
+
+    return function cleanupStatsFetch() {
+      isActive = false
+      controller.abort()
+    }
+  }, [hasLoaded, isOpen, normalizedStatsAddress])
+
+  const isTooltipLoading = isOpen && !hasLoaded
+
+  return { isOpen, setIsOpen, tooltipStats, isTooltipLoading }
+}
+
 export default function ProfileLink({
   user,
   layout = 'default',
@@ -60,9 +121,7 @@ export default function ProfileLink({
   avatarBadge,
   tooltipTrigger = 'all',
 }: ProfileLinkProps) {
-  const [isOpen, setIsOpen] = useState(false)
-  const [stats, setStats] = useState<Awaited<ReturnType<typeof fetchProfileLinkStats>>>(null)
-  const [loadedStatsAddress, setLoadedStatsAddress] = useState<string | null>(null)
+  const { setIsOpen, tooltipStats, isTooltipLoading } = useProfileTooltipStats(user)
   const isInline = layout === 'inline'
   const isStacked = layout === 'stacked'
   const inlineBody = inlineContent ?? children
@@ -100,56 +159,7 @@ export default function ProfileLink({
   const tooltipAvatarUrl = showPlaceholder
     ? null
     : rawAvatarUrl
-  const fallbackStyle = useMemo<CSSProperties | undefined>(() => {
-    if (!showPlaceholder) {
-      return undefined
-    }
-
-    return getAvatarPlaceholderStyle(avatarSeed)
-  }, [avatarSeed, showPlaceholder])
-  const statsAddress = useMemo(
-    () => user.proxy_wallet_address ?? user.address,
-    [user.address, user.proxy_wallet_address],
-  )
-  const normalizedStatsAddress = statsAddress ?? null
-  const hasLoaded = normalizedStatsAddress === null || loadedStatsAddress === normalizedStatsAddress
-  const tooltipStats = loadedStatsAddress === normalizedStatsAddress ? stats : null
-
-  useEffect(() => {
-    if (!isOpen || hasLoaded) {
-      return
-    }
-
-    if (!normalizedStatsAddress) {
-      return
-    }
-
-    const controller = new AbortController()
-    let isActive = true
-
-    fetchProfileLinkStats(normalizedStatsAddress, controller.signal)
-      .then((result) => {
-        if (!isActive || controller.signal.aborted) {
-          return
-        }
-        setStats(result)
-        setLoadedStatsAddress(normalizedStatsAddress)
-      })
-      .catch((error) => {
-        if (!isActive || controller.signal.aborted || error?.name === 'AbortError') {
-          return
-        }
-        setStats(null)
-        setLoadedStatsAddress(normalizedStatsAddress)
-      })
-
-    return () => {
-      isActive = false
-      controller.abort()
-    }
-  }, [hasLoaded, isOpen, normalizedStatsAddress])
-
-  const isTooltipLoading = isOpen && !hasLoaded
+  const fallbackStyle = useAvatarFallbackStyle(showPlaceholder, avatarSeed)
 
   const dateLabel = date
     ? (

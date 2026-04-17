@@ -1,10 +1,10 @@
 'use client'
 
 import type { Route } from 'next'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { SearchIcon, XIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import SearchDiscoveryContent from '@/app/[locale]/(platform)/_components/SearchDiscoveryContent'
 import { SearchResults } from '@/app/[locale]/(platform)/_components/SearchResults'
 import { Input } from '@/components/ui/input'
@@ -23,6 +23,141 @@ interface HeaderSearchProps {
   showDesktopDiscovery?: boolean
 }
 
+function useHeaderSearchRefs() {
+  const searchRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const blurFrameRef = useRef<number | null>(null)
+  const pointerDownInsideRef = useRef(false)
+
+  return { searchRef, inputRef, blurFrameRef, pointerDownInsideRef }
+}
+
+function useHeaderSearchFocusState() {
+  const [hasFocusWithin, setHasFocusWithin] = useState(false)
+  const [isResultsDismissed, setIsResultsDismissed] = useState(false)
+
+  return { hasFocusWithin, setHasFocusWithin, isResultsDismissed, setIsResultsDismissed }
+}
+
+function useSlashFocusShortcut(inputRef: RefObject<HTMLInputElement | null>) {
+  useEffect(function bindSlashFocusShortcut() {
+    function handleSlashShortcut(event: KeyboardEvent) {
+      if (event.key !== '/') {
+        return
+      }
+
+      const target = event.target as HTMLElement | null
+      const tagName = target?.tagName?.toLowerCase()
+      const isEditable = tagName === 'input' || tagName === 'textarea' || target?.isContentEditable
+
+      if (event.metaKey || event.ctrlKey || event.altKey || isEditable) {
+        return
+      }
+
+      event.preventDefault()
+      inputRef.current?.focus()
+    }
+
+    window.addEventListener('keydown', handleSlashShortcut)
+    return function unbindSlashFocusShortcut() {
+      window.removeEventListener('keydown', handleSlashShortcut)
+    }
+  }, [inputRef])
+}
+
+function useExternalFocusTrigger(
+  focusTrigger: number | undefined,
+  inputRef: RefObject<HTMLInputElement | null>,
+) {
+  useEffect(function focusInputOnExternalTrigger() {
+    if (!focusTrigger) {
+      return
+    }
+
+    if (document.activeElement === inputRef.current) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      inputRef.current?.focus({ preventScroll: true })
+    }, 40)
+
+    return function cancelFocusTimeout() {
+      window.clearTimeout(timeoutId)
+    }
+  }, [focusTrigger, inputRef])
+}
+
+function useDismissSearchOnOutsidePointerDown({
+  showAttachedDropdown,
+  isManagedSearchSurface,
+  hideResults,
+  clearPendingBlurFrame,
+  setHasFocusWithin,
+  setIsResultsDismissed,
+  searchRef,
+  inputRef,
+  pointerDownInsideRef,
+}: {
+  showAttachedDropdown: boolean
+  isManagedSearchSurface: boolean
+  hideResults: () => void
+  clearPendingBlurFrame: () => void
+  setHasFocusWithin: (value: boolean) => void
+  setIsResultsDismissed: (value: boolean) => void
+  searchRef: RefObject<HTMLDivElement | null>
+  inputRef: RefObject<HTMLInputElement | null>
+  pointerDownInsideRef: RefObject<boolean>
+}) {
+  useEffect(function bindOutsidePointerDownDismiss() {
+    function handlePointerDown(event: PointerEvent) {
+      if (!showAttachedDropdown) {
+        return
+      }
+
+      const isInsideSearch = searchRef.current?.contains(event.target as Node) ?? false
+      pointerDownInsideRef.current = isInsideSearch
+
+      if (isInsideSearch) {
+        return
+      }
+
+      clearPendingBlurFrame()
+      setHasFocusWithin(false)
+      setIsResultsDismissed(true)
+      hideResults()
+      inputRef.current?.blur()
+    }
+
+    if (isManagedSearchSurface) {
+      return
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    return function unbindOutsidePointerDownDismiss() {
+      document.removeEventListener('pointerdown', handlePointerDown)
+    }
+  }, [
+    hideResults,
+    isManagedSearchSurface,
+    showAttachedDropdown,
+    clearPendingBlurFrame,
+    setHasFocusWithin,
+    setIsResultsDismissed,
+    searchRef,
+    inputRef,
+    pointerDownInsideRef,
+  ])
+}
+
+function useCancelPendingBlurOnUnmount(clearPendingBlurFrame: () => void) {
+  useEffect(function cancelPendingBlurFrameOnUnmount() {
+    return function runClearPendingBlurFrame() {
+      clearPendingBlurFrame()
+    }
+  }, [clearPendingBlurFrame])
+}
+
 export default function HeaderSearch({
   autoFocus = false,
   emptyState,
@@ -31,10 +166,7 @@ export default function HeaderSearch({
   onPredictionResultsNavigate,
   showDesktopDiscovery = true,
 }: HeaderSearchProps) {
-  const searchRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const blurFrameRef = useRef<number | null>(null)
-  const pointerDownInsideRef = useRef(false)
+  const { searchRef, inputRef, blurFrameRef, pointerDownInsideRef } = useHeaderSearchRefs()
   const router = useRouter()
   const {
     query,
@@ -48,8 +180,12 @@ export default function HeaderSearch({
     activeTab,
     setActiveTab,
   } = useSearch()
-  const [hasFocusWithin, setHasFocusWithin] = useState(false)
-  const [isResultsDismissed, setIsResultsDismissed] = useState(false)
+  const {
+    hasFocusWithin,
+    setHasFocusWithin,
+    isResultsDismissed,
+    setIsResultsDismissed,
+  } = useHeaderSearchFocusState()
   const isManagedSearchSurface = Boolean(onPredictionResultsNavigate)
   const hasActiveQuery = query.trim().length >= 2
   const showDropdown = hasActiveQuery
@@ -100,86 +236,27 @@ export default function HeaderSearch({
     navigateToRoute(href)
   }
 
-  function clearPendingBlurFrame() {
+  const clearPendingBlurFrame = useCallback(() => {
     if (blurFrameRef.current !== null) {
       window.cancelAnimationFrame(blurFrameRef.current)
       blurFrameRef.current = null
     }
-  }
-
-  useEffect(() => {
-    function handleSlashShortcut(event: KeyboardEvent) {
-      if (event.key !== '/') {
-        return
-      }
-
-      const target = event.target as HTMLElement | null
-      const tagName = target?.tagName?.toLowerCase()
-      const isEditable = tagName === 'input' || tagName === 'textarea' || target?.isContentEditable
-
-      if (event.metaKey || event.ctrlKey || event.altKey || isEditable) {
-        return
-      }
-
-      event.preventDefault()
-      inputRef.current?.focus()
-    }
-
-    window.addEventListener('keydown', handleSlashShortcut)
-    return () => {
-      window.removeEventListener('keydown', handleSlashShortcut)
-    }
   }, [])
 
-  useEffect(() => {
-    if (!focusTrigger) {
-      return
-    }
-
-    if (document.activeElement === inputRef.current) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      inputRef.current?.focus({ preventScroll: true })
-    }, 40)
-
-    return () => {
-      window.clearTimeout(timeoutId)
-    }
-  }, [focusTrigger])
-
-  useEffect(() => {
-    function handlePointerDown(event: PointerEvent) {
-      if (!showAttachedDropdown) {
-        return
-      }
-
-      const isInsideSearch = searchRef.current?.contains(event.target as Node) ?? false
-      pointerDownInsideRef.current = isInsideSearch
-
-      if (isInsideSearch) {
-        return
-      }
-
-      clearPendingBlurFrame()
-      setHasFocusWithin(false)
-      setIsResultsDismissed(true)
-      hideResults()
-      inputRef.current?.blur()
-    }
-
-    if (isManagedSearchSurface) {
-      return
-    }
-
-    document.addEventListener('pointerdown', handlePointerDown)
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown)
-    }
-  }, [hideResults, isManagedSearchSurface, showAttachedDropdown])
-
-  useEffect(() => () => clearPendingBlurFrame(), [])
+  useSlashFocusShortcut(inputRef)
+  useExternalFocusTrigger(focusTrigger, inputRef)
+  useDismissSearchOnOutsidePointerDown({
+    showAttachedDropdown,
+    isManagedSearchSurface,
+    hideResults,
+    clearPendingBlurFrame,
+    setHasFocusWithin,
+    setIsResultsDismissed,
+    searchRef,
+    inputRef,
+    pointerDownInsideRef,
+  })
+  useCancelPendingBlurOnUnmount(clearPendingBlurFrame)
 
   return (
     <div className="w-full lg:max-w-[600px] lg:min-w-[400px]">

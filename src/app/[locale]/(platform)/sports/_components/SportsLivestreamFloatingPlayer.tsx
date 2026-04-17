@@ -1,5 +1,6 @@
 'use client'
 
+import type { MutableRefObject } from 'react'
 import { ExternalLinkIcon, GripVerticalIcon, RadioIcon, XIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { resolveLivestreamEmbedTarget } from '@/lib/livestream-embed'
@@ -33,10 +34,13 @@ function getViewportWidthServerSnapshot() {
   return 0
 }
 
-export default function SportsLivestreamFloatingPlayer() {
-  const streamUrl = useSportsLivestream(state => state.streamUrl)
-  const streamTitle = useSportsLivestream(state => state.streamTitle)
-  const closeStream = useSportsLivestream(state => state.closeStream)
+function useResizablePlayerWidth(): {
+  effectiveWidth: number
+  minWidth: number
+  maxWidth: number
+  setRequestedWidth: (value: number) => void
+  dragCleanupRef: MutableRefObject<(() => void) | null>
+} {
   const viewportWidth = useSyncExternalStore(
     subscribeToViewportWidth,
     getViewportWidthSnapshot,
@@ -67,20 +71,32 @@ export default function SportsLivestreamFloatingPlayer() {
 
   const effectiveWidth = useMemo(() => clamp(requestedWidth, minWidth, maxWidth), [maxWidth, minWidth, requestedWidth])
 
-  useEffect(() => {
-    function cleanupDragListenersOnUnmount() {
-      dragCleanupRef.current?.()
+  useEffect(function cleanupDragListenersOnUnmount() {
+    const cleanupRef = dragCleanupRef
+    return function runDragCleanupOnUnmount() {
+      cleanupRef.current?.()
     }
-    return cleanupDragListenersOnUnmount
   }, [])
 
-  const embedTarget = useMemo(() => {
+  return { effectiveWidth, minWidth, maxWidth, setRequestedWidth, dragCleanupRef }
+}
+
+function useLivestreamEmbedTarget(streamUrl: string | null) {
+  return useMemo(() => {
     if (!streamUrl) {
       return null
     }
     const parentDomain = typeof window !== 'undefined' ? window.location.hostname : null
     return resolveLivestreamEmbedTarget(streamUrl, { parentDomain })
   }, [streamUrl])
+}
+
+export default function SportsLivestreamFloatingPlayer() {
+  const streamUrl = useSportsLivestream(state => state.streamUrl)
+  const streamTitle = useSportsLivestream(state => state.streamTitle)
+  const closeStream = useSportsLivestream(state => state.closeStream)
+  const { effectiveWidth, minWidth, maxWidth, setRequestedWidth, dragCleanupRef } = useResizablePlayerWidth()
+  const embedTarget = useLivestreamEmbedTarget(streamUrl)
 
   if (!streamUrl || !embedTarget) {
     return null

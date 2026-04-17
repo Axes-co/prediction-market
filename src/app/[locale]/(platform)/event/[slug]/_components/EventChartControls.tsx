@@ -48,6 +48,11 @@ interface EventChartControlsProps {
   onEmbed?: () => void
 }
 
+function useSettingsMenu() {
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  return { settingsOpen, setSettingsOpen }
+}
+
 export default function EventChartControls({
   timeRanges,
   activeTimeRange,
@@ -67,7 +72,7 @@ export default function EventChartControls({
 }: EventChartControlsProps) {
   const t = useExtracted()
   const normalizeOutcomeLabel = useOutcomeLabel()
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const { settingsOpen, setSettingsOpen } = useSettingsMenu()
   const selectedSet = new Set(selectedMarketIds)
   const selectedOptions = marketOptions.filter(option => selectedSet.has(option.key))
   const unselectedOptions = marketOptions.filter(option => !selectedSet.has(option.key))

@@ -2,7 +2,7 @@ import type { PointerEvent } from 'react'
 import type { OrderSide, OrderType } from '@/types'
 import { ChevronDownIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import EventMergeSharesDialog from '@/app/[locale]/(platform)/event/[slug]/_components/EventMergeSharesDialog'
 import EventSplitSharesDialog from '@/app/[locale]/(platform)/event/[slug]/_components/EventSplitSharesDialog'
 import {
@@ -22,6 +22,7 @@ import { ORDER_SIDE, ORDER_TYPE } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 
 const ORDER_TYPE_STORAGE_KEY = 'kuest:order-panel-type'
+const HOVER_MENU_CLOSE_DELAY_MS = 120
 
 interface EventOrderPanelBuySellTabsProps {
   side: OrderSide
@@ -40,6 +41,59 @@ interface EventOrderPanelBuySellTabsProps {
   onTypeChange: (type: OrderType) => void
   onAmountReset: () => void
   onFocusInput: () => void
+}
+
+function useOrderTypePersistence(type: OrderType) {
+  useEffect(function persistOrderTypeToStorage() {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    try {
+      window.localStorage.setItem(ORDER_TYPE_STORAGE_KEY, type)
+    }
+    catch {}
+  }, [type])
+}
+
+function useHoverCloseMenu() {
+  const [typeMenuOpen, setTypeMenuOpen] = useState(false)
+  const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearCloseTimeout = useCallback(function clearCloseTimeout() {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current)
+      closeTimeoutRef.current = null
+    }
+  }, [])
+
+  const handleTypeMenuEnter = useCallback(function handleTypeMenuEnter(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType !== 'mouse') {
+      return
+    }
+
+    clearCloseTimeout()
+    setTypeMenuOpen(true)
+  }, [clearCloseTimeout])
+
+  const handleTypeMenuLeave = useCallback(function handleTypeMenuLeave(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType !== 'mouse') {
+      return
+    }
+
+    clearCloseTimeout()
+    closeTimeoutRef.current = setTimeout(() => {
+      setTypeMenuOpen(false)
+    }, HOVER_MENU_CLOSE_DELAY_MS)
+  }, [clearCloseTimeout])
+
+  useEffect(function cleanupHoverCloseTimeoutOnUnmount() {
+    return function clearHoverCloseTimeout() {
+      clearCloseTimeout()
+    }
+  }, [clearCloseTimeout])
+
+  return { typeMenuOpen, setTypeMenuOpen, handleTypeMenuEnter, handleTypeMenuLeave }
 }
 
 export default function EventOrderPanelBuySellTabs({
@@ -61,56 +115,17 @@ export default function EventOrderPanelBuySellTabs({
   onFocusInput,
 }: EventOrderPanelBuySellTabsProps) {
   const t = useExtracted()
-  const [typeMenuOpen, setTypeMenuOpen] = useState(false)
   const [isMergeDialogOpen, setIsMergeDialogOpen] = useState(false)
   const [isSplitDialogOpen, setIsSplitDialogOpen] = useState(false)
-  const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { typeMenuOpen, setTypeMenuOpen, handleTypeMenuEnter, handleTypeMenuLeave } = useHoverCloseMenu()
 
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    try {
-      window.localStorage.setItem(ORDER_TYPE_STORAGE_KEY, type)
-    }
-    catch {}
-  }, [type])
+  useOrderTypePersistence(type)
 
   function handleSideChange(nextSide: OrderSide) {
     onSideChange(nextSide)
     onAmountReset()
     onFocusInput()
   }
-
-  function clearCloseTimeout() {
-    if (closeTimeoutRef.current) {
-      clearTimeout(closeTimeoutRef.current)
-      closeTimeoutRef.current = null
-    }
-  }
-
-  function handleTypeMenuEnter(event: PointerEvent<HTMLDivElement>) {
-    if (event.pointerType !== 'mouse') {
-      return
-    }
-
-    clearCloseTimeout()
-    setTypeMenuOpen(true)
-  }
-
-  function handleTypeMenuLeave(event: PointerEvent<HTMLDivElement>) {
-    if (event.pointerType !== 'mouse') {
-      return
-    }
-
-    clearCloseTimeout()
-    closeTimeoutRef.current = setTimeout(() => {
-      setTypeMenuOpen(false)
-    }, 120)
-  }
-
-  useEffect(() => () => clearCloseTimeout(), [])
 
   const orderTypeLabel = type === ORDER_TYPE.MARKET ? t('Market') : t('Limit')
 

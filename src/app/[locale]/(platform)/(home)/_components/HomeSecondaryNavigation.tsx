@@ -14,23 +14,20 @@ interface HomeSecondaryNavigationProps {
   tag: Pick<PlatformNavigationTag, 'childs' | 'name' | 'sidebarItems' | 'slug'>
 }
 
-export default function HomeSecondaryNavigation({
-  tag,
-  activeSubtagSlug,
-  onSelectTag,
-  showCategoryTitle = false,
-  hideOnDesktop = false,
-}: HomeSecondaryNavigationProps) {
-  const t = useExtracted()
-  const [showLeftShadow, setShowLeftShadow] = useState(false)
-  const [showRightShadow, setShowRightShadow] = useState(false)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const buttonRef = useRef<(HTMLButtonElement | null)[]>([])
-  const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0 })
-  const [indicatorReady, setIndicatorReady] = useState(false)
-  const indicatorRetryRef = useRef<number | null>(null)
+interface TagItem {
+  href: string | undefined
+  slug: string
+  label: string
+}
 
-  const tagItems = useMemo(() => {
+interface UseResolvedTagItemsParams {
+  tag: Pick<PlatformNavigationTag, 'childs' | 'sidebarItems' | 'slug'>
+  activeSubtagSlug: string
+}
+
+function useResolvedTagItems({ tag, activeSubtagSlug }: UseResolvedTagItemsParams) {
+  const t = useExtracted()
+  const tagItems = useMemo<TagItem[]>(() => {
     if (tag.sidebarItems) {
       return tag.sidebarItems
         .filter(item => item.type === 'link')
@@ -51,6 +48,23 @@ export default function HomeSecondaryNavigation({
     () => (tagItems.some(item => item.slug === activeSubtagSlug) ? activeSubtagSlug : tag.slug),
     [activeSubtagSlug, tag.slug, tagItems],
   )
+
+  return { tagItems, resolvedActiveSubtagSlug }
+}
+
+interface UseTagNavigationParams {
+  tagItems: TagItem[]
+  resolvedActiveSubtagSlug: string
+}
+
+function useTagNavigation({ tagItems, resolvedActiveSubtagSlug }: UseTagNavigationParams) {
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<(HTMLButtonElement | null)[]>([])
+  const indicatorRetryRef = useRef<number | null>(null)
+  const [showLeftShadow, setShowLeftShadow] = useState(false)
+  const [showRightShadow, setShowRightShadow] = useState(false)
+  const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0 })
+  const [indicatorReady, setIndicatorReady] = useState(false)
 
   const cancelIndicatorRetry = useCallback(() => {
     if (indicatorRetryRef.current !== null) {
@@ -101,25 +115,27 @@ export default function HomeSecondaryNavigation({
     applyIndicatorPosition()
   }, [cancelIndicatorRetry, resolvedActiveSubtagSlug, tagItems])
 
-  useEffect(() => {
+  useEffect(function syncButtonRefArrayLength() {
     buttonRef.current = Array.from({ length: tagItems.length }).map((_, index) => buttonRef.current[index] ?? null)
   }, [tagItems.length])
 
-  useLayoutEffect(() => {
+  useLayoutEffect(function repaintNavigationOnLayout() {
     const rafId = requestAnimationFrame(() => {
       updateScrollShadows()
       updateIndicator()
     })
 
-    return () => {
+    return function cleanupNavigationLayoutPaint() {
       cancelAnimationFrame(rafId)
       cancelIndicatorRetry()
     }
   }, [cancelIndicatorRetry, updateIndicator, updateScrollShadows])
 
-  useEffect(() => cancelIndicatorRetry, [cancelIndicatorRetry])
+  useEffect(function cancelPendingIndicatorRetryOnUnmount() {
+    return cancelIndicatorRetry
+  }, [cancelIndicatorRetry])
 
-  useEffect(() => {
+  useEffect(function reactNavigationToScrollAndResize() {
     const container = scrollContainerRef.current
     if (!container) {
       return
@@ -142,14 +158,14 @@ export default function HomeSecondaryNavigation({
     container.addEventListener('scroll', handleScroll)
     window.addEventListener('resize', handleResize)
 
-    return () => {
+    return function detachNavigationScrollResizeListeners() {
       container.removeEventListener('scroll', handleScroll)
       window.removeEventListener('resize', handleResize)
       clearTimeout(resizeTimeout)
     }
   }, [updateIndicator, updateScrollShadows])
 
-  useEffect(() => {
+  useEffect(function scrollActiveTagIntoView() {
     const activeIndex = tagItems.findIndex(item => item.slug === resolvedActiveSubtagSlug)
     if (activeIndex < 0) {
       return
@@ -176,8 +192,37 @@ export default function HomeSecondaryNavigation({
       container.scrollTo({ left: clampedLeft, behavior: 'smooth' })
     }, 100)
 
-    return () => clearTimeout(timeoutId)
+    return function cancelScrollActiveTagIntoView() {
+      clearTimeout(timeoutId)
+    }
   }, [resolvedActiveSubtagSlug, tagItems])
+
+  return {
+    scrollContainerRef,
+    buttonRef,
+    showLeftShadow,
+    showRightShadow,
+    indicatorStyle,
+    indicatorReady,
+  }
+}
+
+export default function HomeSecondaryNavigation({
+  tag,
+  activeSubtagSlug,
+  onSelectTag,
+  showCategoryTitle = false,
+  hideOnDesktop = false,
+}: HomeSecondaryNavigationProps) {
+  const { tagItems, resolvedActiveSubtagSlug } = useResolvedTagItems({ tag, activeSubtagSlug })
+  const {
+    scrollContainerRef,
+    buttonRef,
+    showLeftShadow,
+    showRightShadow,
+    indicatorStyle,
+    indicatorReady,
+  } = useTagNavigation({ tagItems, resolvedActiveSubtagSlug })
 
   return (
     <div className="flex w-full max-w-full min-w-0 items-center gap-2">

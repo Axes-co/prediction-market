@@ -163,143 +163,498 @@ function areSeriesKeyListsEqual(left: string[], right: string[]) {
   return true
 }
 
-export function PredictionChart({
-  data: providedData,
-  series: providedSeries,
-  width = 800,
-  height = 400,
-  margin = defaultMargin,
-  dataSignature,
-  onCursorDataChange,
-  cursorStepMs,
-  xAxisTickCount = DEFAULT_X_AXIS_TICKS,
-  xAxisTickValues,
-  xAxisTickFormatter,
-  xDomain,
-  xAxisTickFontSize = 11,
-  yAxisTickFontSize = 11,
-  showXAxisTopRule = false,
-  cursorGuideTop,
-  autoscale = true,
-  showXAxis = true,
-  showYAxis = true,
-  showHorizontalGrid = true,
-  showVerticalGrid = false,
-  gridLineStyle = 'dashed',
-  gridLineOpacity: gridLineOpacityOverride,
-  showAnnotations = true,
-  annotationMarkers = [],
-  leadingGapStart = null,
-  legendContent,
-  showLegend = true,
-  yAxis,
-  disableCursorSplit = false,
-  disableResetAnimation = false,
-  markerOuterRadius = 6,
-  markerInnerRadius = 2.8,
-  markerPulseStyle = 'filled',
-  markerOffsetX = 0,
-  lineEndOffsetX = 0,
-  lineStrokeWidth = 1.6,
-  lineCurve = 'catmullRom',
-  plotClipPadding,
-  showAreaFill = false,
-  areaFillTopOpacity = 0.16,
-  areaFillBottomOpacity = 0,
-  tooltipValueFormatter,
-  tooltipDateFormatter,
-  showTooltipSeriesLabels = true,
-  clampCursorToDataExtent = false,
-  tooltipHeader,
-  watermark,
-  showEndOfLineLabels = false,
-  endOfLineLabelConfig,
-}: PredictionChartProps): ReactElement {
-  const [data, setData] = useState<DataPoint[]>([])
-  const series = useMemo(() => providedSeries ?? [], [providedSeries])
+function useClientDetection() {
   const [isClient, setIsClient] = useState(false)
+
+  useLayoutEffect(function detectClientEnvironment() {
+    queueMicrotask(() => {
+      setIsClient(true)
+    })
+  }, [])
+
+  return isClient
+}
+
+function useDarkMode() {
   const [isDarkMode, setIsDarkMode] = useState(
     () => typeof document !== 'undefined'
       && document.documentElement.classList.contains('dark'),
   )
-  const [hoveredAnnotationClusterId, setHoveredAnnotationClusterId] = useState<string | null>(null)
+
+  useLayoutEffect(function observeDarkModeChanges() {
+    if (typeof document === 'undefined') {
+      return
+    }
+
+    const root = document.documentElement
+
+    function updateTheme() {
+      setIsDarkMode(root.classList.contains('dark'))
+    }
+
+    const observer = new MutationObserver(updateTheme)
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] })
+
+    return function disconnectDarkModeObserver() {
+      observer.disconnect()
+    }
+  }, [])
+
+  return isDarkMode
+}
+
+function usePredictionChartData({
+  isClient,
+  normalizedSignature,
+  providedData,
+}: {
+  isClient: boolean
+  normalizedSignature: string | number
+  providedData: DataPoint[] | undefined
+}) {
+  const [data, setData] = useState<DataPoint[]>([])
+  const previousSeriesKeysRef = useRef<string[]>([])
+  const dataSignatureRef = useRef<string | number | null>(null)
+  const lastDataUpdateTypeRef = useRef<'reset' | 'append' | 'none'>('reset')
+  const previousDataRef = useRef<DataPoint[] | null>(null)
+
+  useLayoutEffect(function syncProvidedDataToState() {
+    if (!isClient) {
+      return
+    }
+
+    if (!providedData || providedData.length === 0) {
+      dataSignatureRef.current = normalizedSignature
+      queueMicrotask(() => {
+        setData([])
+      })
+      lastDataUpdateTypeRef.current = 'reset'
+      return
+    }
+
+    setData((previousData) => {
+      const signatureChanged = dataSignatureRef.current !== normalizedSignature
+      if (signatureChanged) {
+        dataSignatureRef.current = normalizedSignature
+        lastDataUpdateTypeRef.current = 'reset'
+        return providedData
+      }
+
+      if (previousData.length === 0) {
+        lastDataUpdateTypeRef.current = 'reset'
+        return providedData
+      }
+
+      const previousFirst = previousData[0]?.date?.getTime?.()
+      const previousLast = previousData.at(-1)?.date?.getTime?.()
+      const incomingFirst = providedData[0]?.date?.getTime?.()
+      const incomingLast = providedData.at(-1)?.date?.getTime?.()
+
+      const timelineValues = [previousFirst, previousLast, incomingFirst, incomingLast]
+      const hasInvalidTimeline = timelineValues.some(
+        value => typeof value !== 'number' || !Number.isFinite(value),
+      )
+
+      if (hasInvalidTimeline) {
+        lastDataUpdateTypeRef.current = 'reset'
+        return providedData
+      }
+
+      if (
+        typeof incomingLast === 'number'
+        && typeof previousLast === 'number'
+        && incomingLast < previousLast
+      ) {
+        lastDataUpdateTypeRef.current = 'reset'
+        return providedData
+      }
+
+      if (
+        typeof incomingFirst === 'number'
+        && typeof previousFirst === 'number'
+        && incomingFirst < previousFirst
+      ) {
+        lastDataUpdateTypeRef.current = 'reset'
+        return providedData
+      }
+
+      let nextData = previousData
+      let didTrim = false
+
+      if (
+        typeof incomingFirst === 'number'
+        && typeof previousFirst === 'number'
+        && incomingFirst > previousFirst
+      ) {
+        const firstIndexToKeep = previousData.findIndex(point => point.date.getTime() >= incomingFirst)
+        if (firstIndexToKeep === -1) {
+          nextData = []
+          didTrim = previousData.length > 0
+        }
+        else if (firstIndexToKeep > 0) {
+          nextData = previousData.slice(firstIndexToKeep)
+          didTrim = true
+        }
+      }
+
+      const latestNextPoint = nextData.length > 0 ? (nextData.at(-1) ?? null) : null
+      const lastTimestamp = latestNextPoint
+        ? latestNextPoint.date.getTime()
+        : null
+
+      const appendedPoints = providedData.filter((point) => {
+        const timestamp = point.date.getTime()
+        if (!Number.isFinite(timestamp)) {
+          return false
+        }
+
+        if (lastTimestamp === null) {
+          return true
+        }
+
+        return timestamp > lastTimestamp
+      })
+
+      if (appendedPoints.length > 0) {
+        lastDataUpdateTypeRef.current = 'append'
+        return [...nextData, ...appendedPoints]
+      }
+
+      if (didTrim) {
+        lastDataUpdateTypeRef.current = 'append'
+        return nextData
+      }
+
+      if (lastTimestamp !== null && nextData.length > 0) {
+        const latestPoint = nextData.at(-1)
+        const incomingLatestPoint = providedData.at(-1)
+        if (
+          latestPoint
+          && incomingLatestPoint
+          && incomingLatestPoint.date.getTime() === lastTimestamp
+          && !arePointsEqual(latestPoint, incomingLatestPoint)
+        ) {
+          lastDataUpdateTypeRef.current = 'append'
+          return [...nextData.slice(0, -1), incomingLatestPoint]
+        }
+      }
+
+      lastDataUpdateTypeRef.current = 'none'
+      return previousData
+    })
+  }, [providedData, normalizedSignature, isClient])
+
+  return {
+    data,
+    lastDataUpdateTypeRef,
+    previousDataRef,
+    previousSeriesKeysRef,
+  }
+}
+
+function useRevealAndCrossFade({
+  crossFadeFrameRef,
+  data,
+  disableCursorSplit,
+  disableResetAnimation,
+  emitCursorDataChange,
+  hasPointerInteractionRef,
+  hideTooltip,
+  isDarkMode,
+  lastCursorProgressRef,
+  lastDataUpdateTypeRef,
+  previousDataRef,
+  previousSeriesKeysRef,
+  revealAnimationFrameRef,
+  series,
+  seriesPathRef,
+  tooltipActive,
+}: {
+  crossFadeFrameRef: React.RefObject<number | null>
+  data: DataPoint[]
+  disableCursorSplit: boolean
+  disableResetAnimation: boolean
+  emitCursorDataChange: (point: DataPoint | null) => void
+  hasPointerInteractionRef: React.MutableRefObject<boolean>
+  hideTooltip: () => void
+  isDarkMode: boolean
+  lastCursorProgressRef: React.MutableRefObject<number>
+  lastDataUpdateTypeRef: React.RefObject<'reset' | 'append' | 'none'>
+  previousDataRef: React.MutableRefObject<DataPoint[] | null>
+  previousSeriesKeysRef: React.MutableRefObject<string[]>
+  revealAnimationFrameRef: React.RefObject<number | null>
+  series: SeriesConfig[]
+  seriesPathRef: React.RefObject<Record<string, SVGPathElement | null>>
+  tooltipActive: boolean
+}) {
   const [revealProgress, setRevealProgress] = useState(0)
   const [crossFadeProgress, setCrossFadeProgress] = useState(1)
   const [crossFadeData, setCrossFadeData] = useState<DataPoint[] | null>(null)
   const [surgeActive, setSurgeActive] = useState(false)
   const [surgeLengths, setSurgeLengths] = useState<Record<string, number>>({})
   const [revealSeriesKeys, setRevealSeriesKeys] = useState<string[]>([])
-  const revealAnimationFrameRef = useRef<number | null>(null)
-  const crossFadeFrameRef = useRef<number | null>(null)
   const surgeTimeoutRef = useRef<number | null>(null)
   const surgePendingRef = useRef(false)
-  const seriesPathRef = useRef<Record<string, SVGPathElement | null>>({})
-  const previousSeriesKeysRef = useRef<string[]>([])
-  const dataSignatureRef = useRef<string | number | null>(null)
-  const lastDataUpdateTypeRef = useRef<'reset' | 'append' | 'none'>('reset')
-  const hasPointerInteractionRef = useRef(false)
-  const lastCursorProgressRef = useRef(0)
-  const previousDataRef = useRef<DataPoint[] | null>(null)
-  const normalizedSignature = dataSignature ?? '__default__'
-  const clipId = useId().replace(/:/g, '')
-  const plotAreaClipId = `${clipId}-plot`
-  const leftClipId = `${clipId}-left`
-  const rightClipId = `${clipId}-right`
-  const shouldRenderLegend = showLegend && Boolean(legendContent)
-  const shouldRenderWatermark = Boolean(
-    watermark && (watermark.iconSvg || watermark.label),
-  )
-  const resolvedLineStrokeWidth = Number.isFinite(lineStrokeWidth) && lineStrokeWidth > 0
-    ? lineStrokeWidth
-    : 1.6
-  const resolvedAreaFillTopOpacity = Number.isFinite(areaFillTopOpacity)
-    ? clamp01(areaFillTopOpacity)
-    : 0.16
-  const resolvedAreaFillBottomOpacity = Number.isFinite(areaFillBottomOpacity)
-    ? clamp01(areaFillBottomOpacity)
-    : 0
-  const resolvedSurgeStrokeWidth = Math.max(resolvedLineStrokeWidth + 1.2, 2.8)
-  const emitCursorDataChange = useCallback(
-    (point: DataPoint | null) => {
-      if (!onCursorDataChange) {
-        return
+
+  useLayoutEffect(
+    function cleanupRevealAnimation() {
+      return function disposeRevealFrame() {
+        stopRevealAnimation(revealAnimationFrameRef)
       }
-
-      if (!point) {
-        onCursorDataChange(null)
-        return
-      }
-
-      const values: Record<string, number> = {}
-
-      series.forEach((seriesItem) => {
-        const value = point[seriesItem.key]
-        if (typeof value === 'number' && Number.isFinite(value)) {
-          values[seriesItem.key] = value
-        }
-      })
-
-      onCursorDataChange({
-        date: point.date,
-        values,
-      })
     },
-    [onCursorDataChange, series],
+    [revealAnimationFrameRef],
   )
-  const resolvedLineCurve = lineCurve === 'monotoneX'
-    ? curveMonotoneX
-    : lineCurve === 'basis'
-      ? curveBasis
-      : curveCatmullRom
 
-  const {
-    tooltipData,
-    tooltipLeft,
-    tooltipOpen,
-    showTooltip,
-    hideTooltip,
-  } = useTooltip<DataPoint>()
-  const tooltipActive = Boolean(tooltipOpen && tooltipData && tooltipLeft !== undefined)
+  useLayoutEffect(
+    function cleanupCrossFadeAnimation() {
+      return function disposeCrossFadeFrame() {
+        stopRevealAnimation(crossFadeFrameRef)
+      }
+    },
+    [crossFadeFrameRef],
+  )
+
+  useLayoutEffect(function cleanupSurgeTimeout() {
+    const timeoutRef = surgeTimeoutRef
+    return function disposeSurgeTimeout() {
+      if (timeoutRef.current) {
+        window.clearTimeout(timeoutRef.current)
+      }
+    }
+  }, [])
+
+  useLayoutEffect(function orchestrateRevealAndCrossFade() {
+    if (data.length === 0) {
+      stopRevealAnimation(revealAnimationFrameRef)
+      stopRevealAnimation(crossFadeFrameRef)
+      surgePendingRef.current = false
+      queueMicrotask(() => {
+        setRevealProgress(0)
+        setCrossFadeProgress(1)
+        setCrossFadeData(null)
+        setSurgeActive(false)
+        setSurgeLengths({})
+        setRevealSeriesKeys((previousKeys) => {
+          if (previousKeys.length === 0) {
+            return previousKeys
+          }
+
+          return []
+        })
+      })
+      previousSeriesKeysRef.current = series.map(item => item.key)
+      lastDataUpdateTypeRef.current = 'reset'
+      previousDataRef.current = data
+      return
+    }
+
+    const updateType = lastDataUpdateTypeRef.current
+    const previousData = previousDataRef.current
+    const currentSeriesKeys = series.map(item => item.key)
+    const previousSeriesKeys = previousSeriesKeysRef.current
+    const addedSeries = currentSeriesKeys.filter(key => !previousSeriesKeys.includes(key))
+    const removedSeries = previousSeriesKeys.filter(key => !currentSeriesKeys.includes(key))
+    const seriesChanged = addedSeries.length > 0 || removedSeries.length > 0
+    const hasPreviousSeries = previousSeriesKeys.length > 0
+    const shouldPartialReveal = seriesChanged && addedSeries.length > 0 && hasPreviousSeries
+    const nextRevealSeries = currentSeriesKeys
+
+    queueMicrotask(() => {
+      setRevealSeriesKeys((previousKeys) => {
+        if (areSeriesKeyListsEqual(previousKeys, nextRevealSeries)) {
+          return previousKeys
+        }
+
+        return nextRevealSeries
+      })
+    })
+    previousSeriesKeysRef.current = currentSeriesKeys
+    const shouldRunSurge = updateType === 'reset' && !disableResetAnimation
+    surgePendingRef.current = shouldRunSurge
+
+    const canUseCrossFade = updateType === 'reset'
+      && !disableResetAnimation
+      && previousData
+      && previousData.length > 0
+      && !shouldPartialReveal
+      && currentSeriesKeys.length <= 1
+
+    if (canUseCrossFade) {
+      hasPointerInteractionRef.current = false
+      lastCursorProgressRef.current = 0
+      stopRevealAnimation(revealAnimationFrameRef)
+      queueMicrotask(() => {
+        setRevealProgress(1)
+        setCrossFadeData(previousData)
+      })
+      runRevealAnimation({
+        from: 0,
+        to: 1,
+        duration: CROSS_FADE_DURATION,
+        frameRef: crossFadeFrameRef,
+        setProgress: setCrossFadeProgress,
+      })
+    }
+    else {
+      stopRevealAnimation(crossFadeFrameRef)
+      queueMicrotask(() => {
+        setCrossFadeProgress(1)
+        setCrossFadeData(null)
+      })
+
+      if (updateType === 'reset' && !disableResetAnimation) {
+        hasPointerInteractionRef.current = false
+        lastCursorProgressRef.current = 0
+        runRevealAnimation({
+          from: 0,
+          to: 1,
+          duration: INITIAL_REVEAL_DURATION,
+          frameRef: revealAnimationFrameRef,
+          setProgress: setRevealProgress,
+        })
+      }
+      else {
+        stopRevealAnimation(revealAnimationFrameRef)
+        queueMicrotask(() => {
+          setRevealProgress(1)
+        })
+      }
+    }
+
+    lastDataUpdateTypeRef.current = 'none'
+    previousDataRef.current = data
+  }, [data, series, revealAnimationFrameRef, crossFadeFrameRef, disableResetAnimation, lastDataUpdateTypeRef, previousDataRef, previousSeriesKeysRef, hasPointerInteractionRef, lastCursorProgressRef])
+
+  useLayoutEffect(function clearCompletedCrossFade() {
+    if (crossFadeData && crossFadeProgress >= 0.999) {
+      queueMicrotask(() => {
+        setCrossFadeData(null)
+      })
+    }
+  }, [crossFadeData, crossFadeProgress])
+
+  const crossFadeAnimating = Boolean(crossFadeData && crossFadeProgress < 0.999)
+  const revealSeriesSet = useMemo(() => new Set(revealSeriesKeys), [revealSeriesKeys])
+
+  const resolveSurgeColor = useCallback((_color: string) => {
+    if (isDarkMode) {
+      return 'rgba(255, 255, 255, 0.82)'
+    }
+    return 'rgba(15, 23, 42, 0.55)'
+  }, [isDarkMode])
+
+  useLayoutEffect(function triggerSurgeAfterReveal() {
+    if (!surgePendingRef.current) {
+      return
+    }
+
+    if (revealProgress < 0.999) {
+      return
+    }
+
+    if (crossFadeAnimating || tooltipActive || data.length < 2 || series.length === 0 || revealSeriesKeys.length === 0) {
+      return
+    }
+
+    surgePendingRef.current = false
+
+    const nextLengths: Record<string, number> = {}
+    revealSeriesKeys.forEach((seriesKey) => {
+      const node = seriesPathRef.current[seriesKey]
+      if (node) {
+        nextLengths[seriesKey] = node.getTotalLength()
+      }
+    })
+
+    if (Object.keys(nextLengths).length === 0) {
+      return
+    }
+
+    queueMicrotask(() => {
+      setSurgeLengths(nextLengths)
+      setSurgeActive(true)
+    })
+
+    if (surgeTimeoutRef.current) {
+      window.clearTimeout(surgeTimeoutRef.current)
+    }
+
+    surgeTimeoutRef.current = window.setTimeout(() => {
+      setSurgeActive(false)
+    }, SURGE_DURATION)
+  }, [revealProgress, crossFadeAnimating, tooltipActive, data.length, series, revealSeriesKeys, seriesPathRef])
+
+  const dataLength = data.length
+  const handleInteractionEnd = useCallback(() => {
+    hideTooltip()
+    emitCursorDataChange(null)
+
+    if (!dataLength) {
+      return
+    }
+
+    if (disableCursorSplit) {
+      return
+    }
+
+    if (!hasPointerInteractionRef.current) {
+      return
+    }
+
+    hasPointerInteractionRef.current = false
+
+    const startProgress = clamp01(lastCursorProgressRef.current)
+    const distance = Math.abs(1 - startProgress)
+    const duration = Math.max(400, distance * INTERACTION_BASE_REVEAL_DURATION)
+
+    runRevealAnimation({
+      from: startProgress,
+      to: 1,
+      duration,
+      frameRef: revealAnimationFrameRef,
+      setProgress: setRevealProgress,
+    })
+  }, [hideTooltip, emitCursorDataChange, dataLength, revealAnimationFrameRef, disableCursorSplit, hasPointerInteractionRef, lastCursorProgressRef])
+
+  return {
+    crossFadeAnimating,
+    crossFadeData,
+    crossFadeProgress,
+    handleInteractionEnd,
+    resolveSurgeColor,
+    revealProgress,
+    revealSeriesKeys,
+    revealSeriesSet,
+    surgeActive,
+    surgeLengths,
+  }
+}
+
+function usePredictionChartScales({
+  autoscale,
+  data,
+  height,
+  leadingGapStart,
+  margin,
+  series,
+  showXAxis,
+  showYAxis,
+  xAxisTickValues,
+  xDomain,
+  yAxis,
+}: {
+  autoscale: boolean
+  data: DataPoint[]
+  height: number
+  leadingGapStart: Date | null
+  margin: { top: number, right: number, bottom: number, left: number }
+  series: SeriesConfig[]
+  showXAxis: boolean
+  showYAxis: boolean
+  xAxisTickValues: Date[] | undefined
+  xDomain: { start?: Date | number, end?: Date | number } | undefined
+  yAxis: PredictionChartProps['yAxis']
+}) {
   const resolvedMargin = useMemo(() => {
     const axisPadding = 12
     return {
@@ -309,11 +664,13 @@ export function PredictionChart({
       bottom: showXAxis ? margin.bottom : Math.min(margin.bottom, axisPadding),
     }
   }, [margin.top, margin.left, margin.right, margin.bottom, showXAxis, showYAxis])
+
   const plotHeight = Math.max(1, height - resolvedMargin.top - resolvedMargin.bottom)
   const yAxisMinTicks = Math.max(
     MIN_Y_AXIS_TICKS,
     Math.min(PREFERRED_MAX_Y_AXIS_TICKS, Math.round(plotHeight / 56)),
   )
+
   const { min: defaultYAxisMin, max: defaultYAxisMax, ticks: defaultYAxisTicks } = useMemo(() => {
     if (!autoscale) {
       return {
@@ -324,6 +681,7 @@ export function PredictionChart({
     }
     return calculateYAxisBounds(data, series, yAxisMinTicks, MAX_Y_AXIS_TICKS)
   }, [autoscale, data, series, yAxisMinTicks])
+
   const yAxisMin = typeof yAxis?.min === 'number' && Number.isFinite(yAxis.min)
     ? yAxis.min
     : defaultYAxisMin
@@ -334,14 +692,13 @@ export function PredictionChart({
   const hasExplicitYMax = typeof yAxis?.max === 'number' && Number.isFinite(yAxis.max)
   const hasExplicitYTicks = Array.isArray(yAxis?.ticks) && yAxis.ticks.length > 0
   const shouldUseNiceYScale = autoscale && !(hasExplicitYMin || hasExplicitYMax || hasExplicitYTicks)
+
   function normalizeTicks(sourceTicks: number[]) {
     const seen = new Set<number>()
-
     return sourceTicks.filter((value) => {
       if (!Number.isFinite(value) || seen.has(value)) {
         return false
       }
-
       seen.add(value)
       return true
     })
@@ -357,6 +714,7 @@ export function PredictionChart({
             })()
       )
     : normalizeTicks(defaultYAxisTicks)
+
   const domainBounds = useMemo(() => {
     const explicitStart = toDomainTimestamp(xDomain?.start)
     const explicitEnd = toDomainTimestamp(xDomain?.end)
@@ -396,6 +754,7 @@ export function PredictionChart({
 
     return { start, end }
   }, [data, leadingGapStart, xDomain?.end, xDomain?.start])
+
   const dataBounds = useMemo(() => {
     if (!data.length) {
       return null
@@ -420,6 +779,111 @@ export function PredictionChart({
 
     return { start, end }
   }, [data])
+
+  const resolvedXAxisTickValues = useMemo(() => {
+    if (!Array.isArray(xAxisTickValues) || xAxisTickValues.length === 0) {
+      return null
+    }
+
+    const filtered = xAxisTickValues
+      .filter((tick) => {
+        const timestamp = tick.getTime()
+        return Number.isFinite(timestamp)
+          && timestamp >= domainBounds.start
+          && timestamp <= domainBounds.end
+      })
+      .sort((a, b) => a.getTime() - b.getTime())
+
+    return filtered.length >= 2 ? filtered : null
+  }, [domainBounds.end, domainBounds.start, xAxisTickValues])
+
+  return {
+    dataBounds,
+    domainBounds,
+    resolvedMargin,
+    resolvedXAxisTickValues,
+    resolvedYAxisTicks,
+    shouldUseNiceYScale,
+    yAxisMax,
+    yAxisMin,
+  }
+}
+
+function usePredictionChartTooltip({
+  clampCursorToDataExtent,
+  cursorStepMs,
+  data,
+  dataBounds,
+  disableCursorSplit,
+  domainBounds,
+  hasPointerInteractionRef,
+  height,
+  lastCursorProgressRef,
+  onCursorDataChange,
+  resolvedMargin,
+  revealAnimationFrameRef,
+  series,
+  seriesPathRef,
+  shouldUseNiceYScale,
+  width,
+  yAxisMax,
+  yAxisMin,
+}: {
+  clampCursorToDataExtent: boolean
+  cursorStepMs: number | undefined
+  data: DataPoint[]
+  dataBounds: { start: number, end: number } | null
+  disableCursorSplit: boolean
+  domainBounds: { start: number, end: number }
+  hasPointerInteractionRef: React.MutableRefObject<boolean>
+  height: number
+  lastCursorProgressRef: React.MutableRefObject<number>
+  onCursorDataChange: PredictionChartProps['onCursorDataChange']
+  resolvedMargin: { top: number, right: number, bottom: number, left: number }
+  revealAnimationFrameRef: React.RefObject<number | null>
+  series: SeriesConfig[]
+  seriesPathRef: React.RefObject<Record<string, SVGPathElement | null>>
+  shouldUseNiceYScale: boolean
+  width: number
+  yAxisMax: number
+  yAxisMin: number
+}) {
+  const {
+    tooltipData,
+    tooltipLeft,
+    tooltipOpen,
+    showTooltip,
+    hideTooltip,
+  } = useTooltip<DataPoint>()
+  const tooltipActive = Boolean(tooltipOpen && tooltipData && tooltipLeft !== undefined)
+
+  const emitCursorDataChange = useCallback(
+    (point: DataPoint | null) => {
+      if (!onCursorDataChange) {
+        return
+      }
+
+      if (!point) {
+        onCursorDataChange(null)
+        return
+      }
+
+      const values: Record<string, number> = {}
+
+      series.forEach((seriesItem) => {
+        const value = point[seriesItem.key]
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          values[seriesItem.key] = value
+        }
+      })
+
+      onCursorDataChange({
+        date: point.date,
+        values,
+      })
+    },
+    [onCursorDataChange, series],
+  )
 
   const getClampedCursorPoint = useCallback(
     (targetDate: Date) => {
@@ -601,386 +1065,78 @@ export function PredictionChart({
       yAxisMax,
       shouldUseNiceYScale,
       disableCursorSplit,
+      hasPointerInteractionRef,
+      lastCursorProgressRef,
+      seriesPathRef,
     ],
   )
-
-  const dataLength = data.length
-
-  const handleInteractionEnd = useCallback(() => {
-    hideTooltip()
-    emitCursorDataChange(null)
-
-    if (!dataLength) {
-      return
-    }
-
-    if (disableCursorSplit) {
-      return
-    }
-
-    if (!hasPointerInteractionRef.current) {
-      return
-    }
-
-    hasPointerInteractionRef.current = false
-
-    const startProgress = clamp01(lastCursorProgressRef.current)
-    const distance = Math.abs(1 - startProgress)
-    const duration = Math.max(400, distance * INTERACTION_BASE_REVEAL_DURATION)
-
-    runRevealAnimation({
-      from: startProgress,
-      to: 1,
-      duration,
-      frameRef: revealAnimationFrameRef,
-      setProgress: setRevealProgress,
-    })
-  }, [hideTooltip, emitCursorDataChange, dataLength, revealAnimationFrameRef, disableCursorSplit])
 
   const registerSeriesPath = useCallback((seriesKey: string) => {
     return (node: SVGPathElement | null) => {
       seriesPathRef.current[seriesKey] = node
     }
-  }, [])
+  }, [seriesPathRef])
 
-  useLayoutEffect(() => {
-    queueMicrotask(() => {
-      setIsClient(true)
-    })
-  }, [])
+  return {
+    emitCursorDataChange,
+    getClampedCursorPoint,
+    handleTooltip,
+    hideTooltip,
+    registerSeriesPath,
+    tooltipActive,
+    tooltipData,
+    tooltipLeft,
+  }
+}
 
-  useLayoutEffect(() => {
-    if (!isClient) {
-      return
-    }
+function useAnnotationHover({
+  normalizedSignature,
+  showAnnotations,
+}: {
+  normalizedSignature: string | number
+  showAnnotations: boolean
+}) {
+  const [hoveredAnnotationClusterId, setHoveredAnnotationClusterId] = useState<string | null>(null)
 
-    if (!providedData || providedData.length === 0) {
-      dataSignatureRef.current = normalizedSignature
-      queueMicrotask(() => {
-        setData([])
-      })
-      lastDataUpdateTypeRef.current = 'reset'
-      return
-    }
-
-    setData((previousData) => {
-      const signatureChanged = dataSignatureRef.current !== normalizedSignature
-      if (signatureChanged) {
-        dataSignatureRef.current = normalizedSignature
-        lastDataUpdateTypeRef.current = 'reset'
-        return providedData
-      }
-
-      if (previousData.length === 0) {
-        lastDataUpdateTypeRef.current = 'reset'
-        return providedData
-      }
-
-      const previousFirst = previousData[0]?.date?.getTime?.()
-      const previousLast = previousData.at(-1)?.date?.getTime?.()
-      const incomingFirst = providedData[0]?.date?.getTime?.()
-      const incomingLast = providedData.at(-1)?.date?.getTime?.()
-
-      const timelineValues = [previousFirst, previousLast, incomingFirst, incomingLast]
-      const hasInvalidTimeline = timelineValues.some(
-        value => typeof value !== 'number' || !Number.isFinite(value),
-      )
-
-      if (hasInvalidTimeline) {
-        lastDataUpdateTypeRef.current = 'reset'
-        return providedData
-      }
-
-      if (
-        typeof incomingLast === 'number'
-        && typeof previousLast === 'number'
-        && incomingLast < previousLast
-      ) {
-        lastDataUpdateTypeRef.current = 'reset'
-        return providedData
-      }
-
-      if (
-        typeof incomingFirst === 'number'
-        && typeof previousFirst === 'number'
-        && incomingFirst < previousFirst
-      ) {
-        lastDataUpdateTypeRef.current = 'reset'
-        return providedData
-      }
-
-      let nextData = previousData
-      let didTrim = false
-
-      if (
-        typeof incomingFirst === 'number'
-        && typeof previousFirst === 'number'
-        && incomingFirst > previousFirst
-      ) {
-        const firstIndexToKeep = previousData.findIndex(point => point.date.getTime() >= incomingFirst)
-        if (firstIndexToKeep === -1) {
-          nextData = []
-          didTrim = previousData.length > 0
-        }
-        else if (firstIndexToKeep > 0) {
-          nextData = previousData.slice(firstIndexToKeep)
-          didTrim = true
-        }
-      }
-
-      const latestNextPoint = nextData.length > 0 ? (nextData.at(-1) ?? null) : null
-      const lastTimestamp = latestNextPoint
-        ? latestNextPoint.date.getTime()
-        : null
-
-      const appendedPoints = providedData.filter((point) => {
-        const timestamp = point.date.getTime()
-        if (!Number.isFinite(timestamp)) {
-          return false
-        }
-
-        if (lastTimestamp === null) {
-          return true
-        }
-
-        return timestamp > lastTimestamp
-      })
-
-      if (appendedPoints.length > 0) {
-        lastDataUpdateTypeRef.current = 'append'
-        return [...nextData, ...appendedPoints]
-      }
-
-      if (didTrim) {
-        lastDataUpdateTypeRef.current = 'append'
-        return nextData
-      }
-
-      if (lastTimestamp !== null && nextData.length > 0) {
-        const latestPoint = nextData.at(-1)
-        const incomingLatestPoint = providedData.at(-1)
-        if (
-          latestPoint
-          && incomingLatestPoint
-          && incomingLatestPoint.date.getTime() === lastTimestamp
-          && !arePointsEqual(latestPoint, incomingLatestPoint)
-        ) {
-          lastDataUpdateTypeRef.current = 'append'
-          return [...nextData.slice(0, -1), incomingLatestPoint]
-        }
-      }
-
-      lastDataUpdateTypeRef.current = 'none'
-      return previousData
-    })
-  }, [providedData, normalizedSignature, isClient])
-
-  useLayoutEffect(() => {
+  useLayoutEffect(function resetAnnotationHoverOnSignatureChange() {
     queueMicrotask(() => {
       setHoveredAnnotationClusterId(null)
     })
   }, [normalizedSignature, showAnnotations])
 
-  useLayoutEffect(
-    () => () => stopRevealAnimation(revealAnimationFrameRef),
-    [revealAnimationFrameRef],
-  )
+  return { hoveredAnnotationClusterId, setHoveredAnnotationClusterId }
+}
 
-  useLayoutEffect(
-    () => () => stopRevealAnimation(crossFadeFrameRef),
-    [crossFadeFrameRef],
-  )
+function useChartSharedRefs() {
+  const revealAnimationFrameRef = useRef<number | null>(null)
+  const crossFadeFrameRef = useRef<number | null>(null)
+  const hasPointerInteractionRef = useRef(false)
+  const lastCursorProgressRef = useRef(0)
+  const seriesPathRef = useRef<Record<string, SVGPathElement | null>>({})
+  const clipId = useId().replace(/:/g, '')
 
-  useLayoutEffect(() => {
-    return () => {
-      if (surgeTimeoutRef.current) {
-        window.clearTimeout(surgeTimeoutRef.current)
-      }
-    }
-  }, [])
+  return {
+    clipId,
+    crossFadeFrameRef,
+    hasPointerInteractionRef,
+    lastCursorProgressRef,
+    revealAnimationFrameRef,
+    seriesPathRef,
+  }
+}
 
-  useLayoutEffect(() => {
-    if (data.length === 0) {
-      stopRevealAnimation(revealAnimationFrameRef)
-      stopRevealAnimation(crossFadeFrameRef)
-      surgePendingRef.current = false
-      queueMicrotask(() => {
-        setRevealProgress(0)
-        setCrossFadeProgress(1)
-        setCrossFadeData(null)
-        setSurgeActive(false)
-        setSurgeLengths({})
-        setRevealSeriesKeys((previousKeys) => {
-          if (previousKeys.length === 0) {
-            return previousKeys
-          }
+function useSeries(providedSeries: SeriesConfig[] | undefined) {
+  return useMemo(() => providedSeries ?? [], [providedSeries])
+}
 
-          return []
-        })
-      })
-      previousSeriesKeysRef.current = series.map(item => item.key)
-      lastDataUpdateTypeRef.current = 'reset'
-      previousDataRef.current = data
-      return
-    }
-
-    const updateType = lastDataUpdateTypeRef.current
-    const previousData = previousDataRef.current
-    const currentSeriesKeys = series.map(item => item.key)
-    const previousSeriesKeys = previousSeriesKeysRef.current
-    const addedSeries = currentSeriesKeys.filter(key => !previousSeriesKeys.includes(key))
-    const removedSeries = previousSeriesKeys.filter(key => !currentSeriesKeys.includes(key))
-    const seriesChanged = addedSeries.length > 0 || removedSeries.length > 0
-    const hasPreviousSeries = previousSeriesKeys.length > 0
-    const shouldPartialReveal = seriesChanged && addedSeries.length > 0 && hasPreviousSeries
-    const nextRevealSeries = currentSeriesKeys
-
-    queueMicrotask(() => {
-      setRevealSeriesKeys((previousKeys) => {
-        if (areSeriesKeyListsEqual(previousKeys, nextRevealSeries)) {
-          return previousKeys
-        }
-
-        return nextRevealSeries
-      })
-    })
-    previousSeriesKeysRef.current = currentSeriesKeys
-    const shouldRunSurge = updateType === 'reset' && !disableResetAnimation
-    surgePendingRef.current = shouldRunSurge
-
-    const canUseCrossFade = updateType === 'reset'
-      && !disableResetAnimation
-      && previousData
-      && previousData.length > 0
-      && !shouldPartialReveal
-      && currentSeriesKeys.length <= 1
-
-    if (canUseCrossFade) {
-      hasPointerInteractionRef.current = false
-      lastCursorProgressRef.current = 0
-      stopRevealAnimation(revealAnimationFrameRef)
-      queueMicrotask(() => {
-        setRevealProgress(1)
-        setCrossFadeData(previousData)
-      })
-      runRevealAnimation({
-        from: 0,
-        to: 1,
-        duration: CROSS_FADE_DURATION,
-        frameRef: crossFadeFrameRef,
-        setProgress: setCrossFadeProgress,
-      })
-    }
-    else {
-      stopRevealAnimation(crossFadeFrameRef)
-      queueMicrotask(() => {
-        setCrossFadeProgress(1)
-        setCrossFadeData(null)
-      })
-
-      if (updateType === 'reset' && !disableResetAnimation) {
-        hasPointerInteractionRef.current = false
-        lastCursorProgressRef.current = 0
-        runRevealAnimation({
-          from: 0,
-          to: 1,
-          duration: INITIAL_REVEAL_DURATION,
-          frameRef: revealAnimationFrameRef,
-          setProgress: setRevealProgress,
-        })
-      }
-      else {
-        stopRevealAnimation(revealAnimationFrameRef)
-        queueMicrotask(() => {
-          setRevealProgress(1)
-        })
-      }
-    }
-
-    lastDataUpdateTypeRef.current = 'none'
-    previousDataRef.current = data
-  }, [data, series, revealAnimationFrameRef, crossFadeFrameRef, disableResetAnimation])
-
-  useLayoutEffect(() => {
-    if (typeof document === 'undefined') {
-      return
-    }
-
-    const root = document.documentElement
-
-    function updateTheme() {
-      setIsDarkMode(root.classList.contains('dark'))
-    }
-
-    const observer = new MutationObserver(updateTheme)
-    observer.observe(root, { attributes: true, attributeFilter: ['class'] })
-
-    return () => observer.disconnect()
-  }, [])
-
-  useLayoutEffect(() => {
-    if (crossFadeData && crossFadeProgress >= 0.999) {
-      queueMicrotask(() => {
-        setCrossFadeData(null)
-      })
-    }
-  }, [crossFadeData, crossFadeProgress])
-
-  const crossFadeAnimating = Boolean(crossFadeData && crossFadeProgress < 0.999)
-  const revealSeriesSet = useMemo(() => new Set(revealSeriesKeys), [revealSeriesKeys])
-  const surgeFilter = isDarkMode
-    ? 'drop-shadow(0 0 2px rgba(255, 255, 255, 0.75))'
-    : 'drop-shadow(0 0 1.5px rgba(15, 23, 42, 0.45))'
-
-  const resolveSurgeColor = useCallback((_color: string) => {
-    if (isDarkMode) {
-      return 'rgba(255, 255, 255, 0.82)'
-    }
-    return 'rgba(15, 23, 42, 0.55)'
-  }, [isDarkMode])
-
-  useLayoutEffect(() => {
-    if (!surgePendingRef.current) {
-      return
-    }
-
-    if (revealProgress < 0.999) {
-      return
-    }
-
-    if (crossFadeAnimating || tooltipActive || data.length < 2 || series.length === 0 || revealSeriesKeys.length === 0) {
-      return
-    }
-
-    surgePendingRef.current = false
-
-    const nextLengths: Record<string, number> = {}
-    revealSeriesKeys.forEach((seriesKey) => {
-      const node = seriesPathRef.current[seriesKey]
-      if (node) {
-        nextLengths[seriesKey] = node.getTotalLength()
-      }
-    })
-
-    if (Object.keys(nextLengths).length === 0) {
-      return
-    }
-
-    queueMicrotask(() => {
-      setSurgeLengths(nextLengths)
-      setSurgeActive(true)
-    })
-
-    if (surgeTimeoutRef.current) {
-      window.clearTimeout(surgeTimeoutRef.current)
-    }
-
-    surgeTimeoutRef.current = window.setTimeout(() => {
-      setSurgeActive(false)
-    }, SURGE_DURATION)
-  }, [revealProgress, crossFadeAnimating, tooltipActive, data.length, series, revealSeriesKeys])
-
-  const firstFinitePointBySeries = useMemo(() => {
+function useFirstFinitePoints({
+  data,
+  series,
+}: {
+  data: DataPoint[]
+  series: SeriesConfig[]
+}) {
+  return useMemo(() => {
     const result: Record<string, DataPoint | null> = {}
 
     if (!data.length || !series.length) {
@@ -1016,22 +1172,198 @@ export function PredictionChart({
 
     return result
   }, [data, series])
-  const resolvedXAxisTickValues = useMemo(() => {
-    if (!Array.isArray(xAxisTickValues) || xAxisTickValues.length === 0) {
-      return null
-    }
+}
 
-    const filtered = xAxisTickValues
-      .filter((tick) => {
-        const timestamp = tick.getTime()
-        return Number.isFinite(timestamp)
-          && timestamp >= domainBounds.start
-          && timestamp <= domainBounds.end
-      })
-      .sort((a, b) => a.getTime() - b.getTime())
+export function PredictionChart({
+  data: providedData,
+  series: providedSeries,
+  width = 800,
+  height = 400,
+  margin = defaultMargin,
+  dataSignature,
+  onCursorDataChange,
+  cursorStepMs,
+  xAxisTickCount = DEFAULT_X_AXIS_TICKS,
+  xAxisTickValues,
+  xAxisTickFormatter,
+  xDomain,
+  xAxisTickFontSize = 11,
+  yAxisTickFontSize = 11,
+  showXAxisTopRule = false,
+  cursorGuideTop,
+  autoscale = true,
+  showXAxis = true,
+  showYAxis = true,
+  showHorizontalGrid = true,
+  showVerticalGrid = false,
+  gridLineStyle = 'dashed',
+  gridLineOpacity: gridLineOpacityOverride,
+  showAnnotations = true,
+  annotationMarkers = [],
+  leadingGapStart = null,
+  legendContent,
+  showLegend = true,
+  yAxis,
+  disableCursorSplit = false,
+  disableResetAnimation = false,
+  markerOuterRadius = 6,
+  markerInnerRadius = 2.8,
+  markerPulseStyle = 'filled',
+  markerOffsetX = 0,
+  lineEndOffsetX = 0,
+  lineStrokeWidth = 1.6,
+  lineCurve = 'catmullRom',
+  plotClipPadding,
+  showAreaFill = false,
+  areaFillTopOpacity = 0.16,
+  areaFillBottomOpacity = 0,
+  tooltipValueFormatter,
+  tooltipDateFormatter,
+  showTooltipSeriesLabels = true,
+  clampCursorToDataExtent = false,
+  tooltipHeader,
+  watermark,
+  showEndOfLineLabels = false,
+  endOfLineLabelConfig,
+}: PredictionChartProps): ReactElement {
+  const series = useSeries(providedSeries)
+  const normalizedSignature = dataSignature ?? '__default__'
+  const isClient = useClientDetection()
+  const isDarkMode = useDarkMode()
 
-    return filtered.length >= 2 ? filtered : null
-  }, [domainBounds.end, domainBounds.start, xAxisTickValues])
+  const {
+    clipId,
+    crossFadeFrameRef,
+    hasPointerInteractionRef,
+    lastCursorProgressRef,
+    revealAnimationFrameRef,
+    seriesPathRef,
+  } = useChartSharedRefs()
+
+  const {
+    data,
+    lastDataUpdateTypeRef,
+    previousDataRef,
+    previousSeriesKeysRef,
+  } = usePredictionChartData({
+    isClient,
+    normalizedSignature,
+    providedData,
+  })
+
+  const {
+    dataBounds,
+    domainBounds,
+    resolvedMargin,
+    resolvedXAxisTickValues,
+    resolvedYAxisTicks,
+    shouldUseNiceYScale,
+    yAxisMax,
+    yAxisMin,
+  } = usePredictionChartScales({
+    autoscale,
+    data,
+    height,
+    leadingGapStart,
+    margin,
+    series,
+    showXAxis,
+    showYAxis,
+    xAxisTickValues,
+    xDomain,
+    yAxis,
+  })
+
+  const {
+    emitCursorDataChange,
+    getClampedCursorPoint,
+    handleTooltip,
+    hideTooltip,
+    registerSeriesPath,
+    tooltipActive,
+    tooltipData,
+    tooltipLeft,
+  } = usePredictionChartTooltip({
+    clampCursorToDataExtent,
+    cursorStepMs,
+    data,
+    dataBounds,
+    disableCursorSplit,
+    domainBounds,
+    hasPointerInteractionRef,
+    height,
+    lastCursorProgressRef,
+    onCursorDataChange,
+    resolvedMargin,
+    revealAnimationFrameRef,
+    series,
+    seriesPathRef,
+    shouldUseNiceYScale,
+    width,
+    yAxisMax,
+    yAxisMin,
+  })
+
+  const {
+    crossFadeData,
+    crossFadeProgress,
+    handleInteractionEnd,
+    resolveSurgeColor,
+    revealProgress,
+    revealSeriesSet,
+    surgeActive,
+    surgeLengths,
+  } = useRevealAndCrossFade({
+    crossFadeFrameRef,
+    data,
+    disableCursorSplit,
+    disableResetAnimation,
+    emitCursorDataChange,
+    hasPointerInteractionRef,
+    hideTooltip,
+    isDarkMode,
+    lastCursorProgressRef,
+    lastDataUpdateTypeRef,
+    previousDataRef,
+    previousSeriesKeysRef,
+    revealAnimationFrameRef,
+    series,
+    seriesPathRef,
+    tooltipActive,
+  })
+
+  const { hoveredAnnotationClusterId, setHoveredAnnotationClusterId } = useAnnotationHover({
+    normalizedSignature,
+    showAnnotations,
+  })
+
+  const firstFinitePointBySeries = useFirstFinitePoints({ data, series })
+
+  const plotAreaClipId = `${clipId}-plot`
+  const leftClipId = `${clipId}-left`
+  const rightClipId = `${clipId}-right`
+  const shouldRenderLegend = showLegend && Boolean(legendContent)
+  const shouldRenderWatermark = Boolean(
+    watermark && (watermark.iconSvg || watermark.label),
+  )
+  const resolvedLineStrokeWidth = Number.isFinite(lineStrokeWidth) && lineStrokeWidth > 0
+    ? lineStrokeWidth
+    : 1.6
+  const resolvedAreaFillTopOpacity = Number.isFinite(areaFillTopOpacity)
+    ? clamp01(areaFillTopOpacity)
+    : 0.16
+  const resolvedAreaFillBottomOpacity = Number.isFinite(areaFillBottomOpacity)
+    ? clamp01(areaFillBottomOpacity)
+    : 0
+  const resolvedSurgeStrokeWidth = Math.max(resolvedLineStrokeWidth + 1.2, 2.8)
+  const resolvedLineCurve = lineCurve === 'monotoneX'
+    ? curveMonotoneX
+    : lineCurve === 'basis'
+      ? curveBasis
+      : curveCatmullRom
+  const surgeFilter = isDarkMode
+    ? 'drop-shadow(0 0 2px rgba(255, 255, 255, 0.75))'
+    : 'drop-shadow(0 0 1.5px rgba(15, 23, 42, 0.45))'
 
   if (!isClient || data.length === 0 || series.length === 0) {
     return (

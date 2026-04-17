@@ -39,6 +39,23 @@ interface HowItWorksStep {
   ctaLabel: string
 }
 
+function useControlledOpenState(
+  controlledOpen: boolean | undefined,
+  onOpenChange: ((open: boolean) => void) | undefined,
+) {
+  const [uncontrolledIsOpen, setUncontrolledIsOpen] = useState(false)
+  const isOpen = controlledOpen ?? uncontrolledIsOpen
+
+  function setOpen(nextOpen: boolean) {
+    if (controlledOpen === undefined) {
+      setUncontrolledIsOpen(nextOpen)
+    }
+    onOpenChange?.(nextOpen)
+  }
+
+  return { isOpen, setOpen }
+}
+
 export default function HowItWorks({
   displayMode = 'auto',
   open: controlledOpen,
@@ -48,7 +65,7 @@ export default function HowItWorks({
   const t = useExtracted()
   const isMobile = useIsMobile()
   const { open } = useAppKit()
-  const [uncontrolledIsOpen, setUncontrolledIsOpen] = useState(false)
+  const { isOpen, setOpen } = useControlledOpenState(controlledOpen, onOpenChange)
 
   const steps: ReadonlyArray<HowItWorksStep> = [
     {
@@ -77,18 +94,10 @@ export default function HowItWorks({
     },
   ]
 
-  const isOpen = controlledOpen ?? uncontrolledIsOpen
   const shouldUseMobileLayout = displayMode === 'auto'
     ? isMobile
     : displayMode === 'mobile'
   const contentKey = isOpen ? 'open' : 'closed'
-
-  function setOpen(nextOpen: boolean) {
-    if (controlledOpen === undefined) {
-      setUncontrolledIsOpen(nextOpen)
-    }
-    onOpenChange?.(nextOpen)
-  }
 
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen)
@@ -169,12 +178,7 @@ interface HowItWorksContentProps {
   variant: 'mobile' | 'desktop'
 }
 
-function HowItWorksContent({
-  imageWrapperClassName,
-  onComplete,
-  steps,
-  variant,
-}: HowItWorksContentProps) {
+function useHowItWorksStepNavigation(steps: ReadonlyArray<HowItWorksStep>, onComplete: () => void) {
   const [activeStep, setActiveStep] = useState(0)
   const currentStep = steps[activeStep]
   const isLastStep = activeStep === steps.length - 1
@@ -187,6 +191,17 @@ function HowItWorksContent({
 
     setActiveStep(step => Math.min(step + 1, steps.length - 1))
   }
+
+  return { activeStep, currentStep, handleNext }
+}
+
+function HowItWorksContent({
+  imageWrapperClassName,
+  onComplete,
+  steps,
+  variant,
+}: HowItWorksContentProps) {
+  const { activeStep, currentStep, handleNext } = useHowItWorksStepNavigation(steps, onComplete)
 
   return (
     <>

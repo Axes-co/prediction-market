@@ -10,6 +10,20 @@ import {
   resolvePredictionResultsFiltersFromSearchParams,
 } from '@/lib/prediction-results-filters'
 
+function useSyncFiltersFromSearchParams(
+  onChange: (nextState: {
+    searchParamsString: string
+    sort: PredictionResultsSortOption
+    status: PredictionResultsStatusOption
+  }) => void,
+) {
+  const searchParams = useSearchParams()
+
+  useLayoutEffect(function syncFiltersEffect() {
+    onChange(resolvePredictionResultsFiltersFromSearchParams(searchParams))
+  }, [onChange, searchParams])
+}
+
 export default function PredictionResultsSearchParamsSync({
   onChange,
 }: {
@@ -19,11 +33,7 @@ export default function PredictionResultsSearchParamsSync({
     status: PredictionResultsStatusOption
   }) => void
 }) {
-  const searchParams = useSearchParams()
-
-  useLayoutEffect(() => {
-    onChange(resolvePredictionResultsFiltersFromSearchParams(searchParams))
-  }, [onChange, searchParams])
+  useSyncFiltersFromSearchParams(onChange)
 
   return null
 }

@@ -15,8 +15,7 @@ import {
 import { LOCALE_LABELS, LOOP_LABELS, normalizeEnabledLocales, SUPPORTED_LOCALES } from '@/i18n/locales'
 import { stripLocalePrefix, withLocalePrefix } from '@/lib/locale-path'
 
-export default function LocaleSwitcherMenuItem() {
-  const locale = useLocale()
+function useLocaleCarousel() {
   const [isPending, setIsPending] = useState(false)
   const [enabledLocales, setEnabledLocales] = useState<SupportedLocale[] | null>(null)
   const [carouselState, setCarouselState] = useState({ index: 0, isSliding: true })
@@ -35,9 +34,8 @@ export default function LocaleSwitcherMenuItem() {
   const isSliding = carouselState.isSliding
   const displayDurationMs = 1800
   const transitionDurationMs = 240
-  const itemHeightRem = 1.25
 
-  useEffect(() => {
+  useEffect(function fetchEnabledLocales() {
     let isActive = true
 
     async function loadEnabledLocales() {
@@ -62,12 +60,12 @@ export default function LocaleSwitcherMenuItem() {
 
     void loadEnabledLocales()
 
-    return () => {
+    return function cleanupFetchEnabledLocales() {
       isActive = false
     }
   }, [])
 
-  useEffect(() => {
+  useEffect(function runCarouselInterval() {
     if (!shouldAnimate) {
       return
     }
@@ -79,7 +77,9 @@ export default function LocaleSwitcherMenuItem() {
       }))
     }, displayDurationMs + transitionDurationMs)
 
-    return () => window.clearInterval(interval)
+    return function cleanupCarouselInterval() {
+      window.clearInterval(interval)
+    }
   }, [shouldAnimate, displayDurationMs, transitionDurationMs, localeLabels.length])
 
   function handleCarouselTransitionEnd() {
@@ -94,6 +94,14 @@ export default function LocaleSwitcherMenuItem() {
       }
     })
   }
+
+  return { isPending, setIsPending, displayLocales, loopedLabels, shouldAnimate, carouselIndex, isSliding, handleCarouselTransitionEnd }
+}
+
+export default function LocaleSwitcherMenuItem() {
+  const locale = useLocale()
+  const { isPending, setIsPending, displayLocales, loopedLabels, shouldAnimate, carouselIndex, isSliding, handleCarouselTransitionEnd } = useLocaleCarousel()
+  const itemHeightRem = 1.25
 
   function handleValueChange(nextLocale: string) {
     const resolvedLocale = nextLocale as SupportedLocale

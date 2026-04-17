@@ -39,7 +39,7 @@ export const DEFAULT_FILTERS: FilterState = {
   hideEarnings: false,
 }
 
-export function FilterProvider({ children, initialTag }: FilterProviderProps) {
+function useFilterContextValue(initialTag: string | undefined): FilterContextType {
   const [filters, setFilters] = useState<FilterState>({
     ...DEFAULT_FILTERS,
     ...(initialTag && { tag: initialTag, mainTag: initialTag }),
@@ -49,7 +49,11 @@ export function FilterProvider({ children, initialTag }: FilterProviderProps) {
     setFilters(prev => ({ ...prev, ...updates }))
   }, [])
 
-  const filterContextValue = useMemo(() => ({ filters, updateFilters }), [filters, updateFilters])
+  return useMemo(() => ({ filters, updateFilters }), [filters, updateFilters])
+}
+
+export function FilterProvider({ children, initialTag }: FilterProviderProps) {
+  const filterContextValue = useFilterContextValue(initialTag)
 
   return (
     <FilterContext value={filterContextValue}>

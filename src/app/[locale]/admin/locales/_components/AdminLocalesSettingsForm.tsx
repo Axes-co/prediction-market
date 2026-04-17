@@ -35,12 +35,12 @@ function buildEnabledState(
   }, {} as Record<SupportedLocale, boolean>)
 }
 
-function AdminLocalesSettingsFormInner({
-  supportedLocales,
-  enabledLocales,
-  automaticTranslationsEnabled,
-  isOpenRouterConfigured,
-}: AdminLocalesSettingsFormProps) {
+function useLocalesSettingsForm(
+  supportedLocales: readonly SupportedLocale[],
+  enabledLocales: SupportedLocale[],
+  automaticTranslationsEnabled: boolean,
+  isOpenRouterConfigured: boolean,
+) {
   const t = useExtracted()
   const [state, formAction, isPending] = useActionState(updateLocalesSettingsAction, initialState)
   const wasPendingRef = useRef(isPending)
@@ -51,7 +51,7 @@ function AdminLocalesSettingsFormInner({
     () => isOpenRouterConfigured && automaticTranslationsEnabled,
   )
 
-  useEffect(() => {
+  useEffect(function toastOnLocalesTransition() {
     const transitionedToIdle = wasPendingRef.current && !isPending
 
     if (transitionedToIdle && state.error === null) {
@@ -63,6 +63,34 @@ function AdminLocalesSettingsFormInner({
 
     wasPendingRef.current = isPending
   }, [isPending, state.error, t])
+
+  return {
+    state,
+    formAction,
+    isPending,
+    enabledState,
+    setEnabledState,
+    automaticTranslationsState,
+    setAutomaticTranslationsState,
+  }
+}
+
+function AdminLocalesSettingsFormInner({
+  supportedLocales,
+  enabledLocales,
+  automaticTranslationsEnabled,
+  isOpenRouterConfigured,
+}: AdminLocalesSettingsFormProps) {
+  const t = useExtracted()
+  const {
+    state,
+    formAction,
+    isPending,
+    enabledState,
+    setEnabledState,
+    automaticTranslationsState,
+    setAutomaticTranslationsState,
+  } = useLocalesSettingsForm(supportedLocales, enabledLocales, automaticTranslationsEnabled, isOpenRouterConfigured)
 
   function handleToggle(locale: SupportedLocale, nextValue: boolean) {
     setEnabledState(prev => ({
@@ -151,8 +179,8 @@ function AdminLocalesSettingsFormInner({
   )
 }
 
-export default function AdminLocalesSettingsForm(props: AdminLocalesSettingsFormProps) {
-  const formResetKey = useMemo(() => JSON.stringify({
+function useLocalesFormResetKey(props: AdminLocalesSettingsFormProps) {
+  return useMemo(() => JSON.stringify({
     supportedLocales: props.supportedLocales,
     enabledLocales: props.enabledLocales,
     automaticTranslationsEnabled: props.automaticTranslationsEnabled,
@@ -163,6 +191,10 @@ export default function AdminLocalesSettingsForm(props: AdminLocalesSettingsForm
     props.automaticTranslationsEnabled,
     props.isOpenRouterConfigured,
   ])
+}
+
+export default function AdminLocalesSettingsForm(props: AdminLocalesSettingsFormProps) {
+  const formResetKey = useLocalesFormResetKey(props)
 
   return <AdminLocalesSettingsFormInner key={formResetKey} {...props} />
 }

@@ -2,7 +2,6 @@
 
 import type { SearchLoadingStates } from '@/types'
 import { LoaderIcon } from 'lucide-react'
-import { useMemo } from 'react'
 import { cn } from '@/lib/utils'
 
 interface SearchTabsProps {
@@ -11,13 +10,13 @@ interface SearchTabsProps {
   isLoading: SearchLoadingStates
 }
 
+const SEARCH_TABS = ['events', 'profiles'] as const
+
 export function SearchTabs({
   activeTab,
   onTabChange,
   isLoading,
 }: SearchTabsProps) {
-  const searchTabs = useMemo(() => ['events', 'profiles'] as const, [])
-
   function handleKeyDown(event: React.KeyboardEvent, tab: 'events' | 'profiles') {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault()
@@ -28,7 +27,7 @@ export function SearchTabs({
   return (
     <div className="bg-background px-1 pt-1">
       <ul className="relative flex h-10 gap-2">
-        {searchTabs.map((tab) => {
+        {SEARCH_TABS.map((tab) => {
           const isActive = activeTab === tab
           const loading = tab === 'events' ? isLoading.events : isLoading.profiles
 

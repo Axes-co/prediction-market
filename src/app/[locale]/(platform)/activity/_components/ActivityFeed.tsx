@@ -218,34 +218,19 @@ function resolveActivityCreatorWallet(payload: LiveActivityPayload) {
   return normalizeWalletAddress(payload.creator)
 }
 
-export default function ActivityFeed() {
-  const t = useExtracted()
-  const normalizeOutcomeLabel = useOutcomeLabel()
-  const { tags } = usePlatformNavigationData()
-  const wsUrl = process.env.WS_LIVE_DATA_URL
-  const wsUrlRef = useRef<string | null>(wsUrl ?? null)
-  const router = useRouter()
-  const [categoryFilter, setCategoryFilter] = useState<string>('all')
-  const [minAmountFilter, setMinAmountFilter] = useState<string>('none')
-  const [items, setItems] = useState<LiveActivityItem[]>([])
-  const [allowedCreatorWallets, setAllowedCreatorWallets] = useState<ReadonlySet<string> | null>(null)
-  const [visibleWindow, setVisibleWindow] = useState<{ key: string, extra: number }>({ key: '', extra: 0 })
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
-  const seenIdsRef = useRef<Set<string>>(new Set())
-  const categoryValues = useMemo(() => buildActivityCategoryValues(tags), [tags])
-  const categoryOptions = useMemo(
-    () => buildActivityCategoryOptions(tags, t('All')),
-    [t, tags],
-  )
+function useBaseVisibleCount() {
   const viewportHeight = useSyncExternalStore(
     subscribeToViewportResize,
     getViewportHeightSnapshot,
     getServerViewportHeightSnapshot,
   )
-  const baseVisibleCount = useMemo(() => clampBaseVisibleCount(viewportHeight), [viewportHeight])
-  const activeCategoryFilter = categoryValues.has(categoryFilter) ? categoryFilter : 'all'
+  return useMemo(() => clampBaseVisibleCount(viewportHeight), [viewportHeight])
+}
 
-  useEffect(() => {
+function useAllowedCreatorWallets() {
+  const [allowedCreatorWallets, setAllowedCreatorWallets] = useState<ReadonlySet<string> | null>(null)
+
+  useEffect(function loadAllowedCreatorWalletsEffect() {
     const abortController = new AbortController()
 
     async function loadAllowedCreators() {
@@ -278,12 +263,28 @@ export default function ActivityFeed() {
 
     void loadAllowedCreators()
 
-    return () => {
+    return function abortLoadAllowedCreators() {
       abortController.abort()
     }
   }, [])
 
-  useEffect(() => {
+  return allowedCreatorWallets
+}
+
+function useLiveActivityStream({
+  wsUrl,
+  allowedCreatorWallets,
+  categoryValues,
+}: {
+  wsUrl: string | undefined
+  allowedCreatorWallets: ReadonlySet<string> | null
+  categoryValues: ReadonlySet<string>
+}) {
+  const [items, setItems] = useState<LiveActivityItem[]>([])
+  const wsUrlRef = useRef<string | null>(wsUrl ?? null)
+  const seenIdsRef = useRef<Set<string>>(new Set())
+
+  useEffect(function subscribeLiveActivityStream() {
     if (!wsUrl || !allowedCreatorWallets) {
       return
     }
@@ -445,7 +446,7 @@ export default function ActivityFeed() {
     connect()
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
-    return () => {
+    return function teardownLiveActivityStream() {
       isActive = false
       clearReconnect()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
@@ -462,6 +463,18 @@ export default function ActivityFeed() {
     }
   }, [allowedCreatorWallets, categoryValues, wsUrl])
 
+  return items
+}
+
+function useFilteredActivityOrders({
+  items,
+  activeCategoryFilter,
+  minAmountFilter,
+}: {
+  items: LiveActivityItem[]
+  activeCategoryFilter: string
+  minAmountFilter: string
+}) {
   const minAmountMicro = useMemo(() => {
     const parsed = Number(minAmountFilter)
     if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -470,30 +483,70 @@ export default function ActivityFeed() {
     return Number(toMicro(parsed))
   }, [minAmountFilter])
 
-  const filteredOrders = useMemo(() => {
+  return useMemo(() => {
     let filtered = items
     if (activeCategoryFilter !== 'all') {
       filtered = filtered.filter(item => item.categories.includes(activeCategoryFilter))
     }
     return filterActivitiesByMinAmount(filtered.map(item => item.order), minAmountMicro)
   }, [activeCategoryFilter, items, minAmountMicro])
+}
 
+function useActivityCategoryOptions(tags: Array<{ slug: string, name: string }>, allLabel: string) {
+  const categoryValues = useMemo(() => buildActivityCategoryValues(tags), [tags])
+  const categoryOptions = useMemo(
+    () => buildActivityCategoryOptions(tags, allLabel),
+    [allLabel, tags],
+  )
+  return { categoryValues, categoryOptions }
+}
+
+function useActivityFilters() {
+  const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [minAmountFilter, setMinAmountFilter] = useState<string>('none')
+  return { categoryFilter, setCategoryFilter, minAmountFilter, setMinAmountFilter }
+}
+
+function useActivityFilterLabels({
+  categoryOptions,
+  activeCategoryFilter,
+  minAmountFilter,
+  allLabel,
+}: {
+  categoryOptions: ActivityCategoryOption[]
+  activeCategoryFilter: string
+  minAmountFilter: string
+  allLabel: string
+}) {
   const minAmountDisplay = useMemo(() => {
     return MIN_AMOUNT_OPTIONS.find(option => option.value === minAmountFilter)?.display ?? 'Min amount'
   }, [minAmountFilter])
 
   const categoryDisplay = useMemo(() => {
-    return categoryOptions.find(option => option.value === activeCategoryFilter)?.label ?? t('All')
-  }, [activeCategoryFilter, categoryOptions, t])
+    return categoryOptions.find(option => option.value === activeCategoryFilter)?.label ?? allLabel
+  }, [activeCategoryFilter, allLabel, categoryOptions])
 
-  const visibleKey = `${activeCategoryFilter}:${minAmountFilter}:${baseVisibleCount}`
+  return { minAmountDisplay, categoryDisplay }
+}
+
+function useActivityVisibleWindow({
+  filteredOrdersLength,
+  baseVisibleCount,
+  visibleKey,
+}: {
+  filteredOrdersLength: number
+  baseVisibleCount: number
+  visibleKey: string
+}) {
+  const [visibleWindow, setVisibleWindow] = useState<{ key: string, extra: number }>({ key: '', extra: 0 })
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+
   const visibleExtra = visibleWindow.key === visibleKey ? visibleWindow.extra : 0
-  const visibleCount = Math.min(filteredOrders.length, baseVisibleCount + visibleExtra)
+  const visibleCount = Math.min(filteredOrdersLength, baseVisibleCount + visibleExtra)
   const pageSize = Math.max(6, Math.round(baseVisibleCount * 0.6))
-  const hasHiddenItems = visibleCount < filteredOrders.length
-  const visibleOrders = filteredOrders.slice(0, visibleCount)
+  const hasHiddenItems = visibleCount < filteredOrdersLength
 
-  useEffect(() => {
+  useEffect(function observeActivityFeedSentinel() {
     const node = loadMoreRef.current
     if (!node || !hasHiddenItems) {
       return
@@ -514,8 +567,45 @@ export default function ActivityFeed() {
     )
 
     observer.observe(node)
-    return () => observer.disconnect()
+    return function unobserveActivityFeedSentinel() {
+      observer.disconnect()
+    }
   }, [hasHiddenItems, pageSize, visibleKey])
+
+  return { loadMoreRef, visibleCount, hasHiddenItems }
+}
+
+export default function ActivityFeed() {
+  const t = useExtracted()
+  const normalizeOutcomeLabel = useOutcomeLabel()
+  const { tags } = usePlatformNavigationData()
+  const wsUrl = process.env.WS_LIVE_DATA_URL
+  const router = useRouter()
+  const allLabel = t('All')
+  const { categoryFilter, setCategoryFilter, minAmountFilter, setMinAmountFilter } = useActivityFilters()
+  const { categoryValues, categoryOptions } = useActivityCategoryOptions(tags, allLabel)
+  const baseVisibleCount = useBaseVisibleCount()
+  const activeCategoryFilter = categoryValues.has(categoryFilter) ? categoryFilter : 'all'
+
+  const allowedCreatorWallets = useAllowedCreatorWallets()
+  const items = useLiveActivityStream({ wsUrl, allowedCreatorWallets, categoryValues })
+
+  const filteredOrders = useFilteredActivityOrders({ items, activeCategoryFilter, minAmountFilter })
+
+  const { minAmountDisplay, categoryDisplay } = useActivityFilterLabels({
+    categoryOptions,
+    activeCategoryFilter,
+    minAmountFilter,
+    allLabel,
+  })
+
+  const visibleKey = `${activeCategoryFilter}:${minAmountFilter}:${baseVisibleCount}`
+  const { loadMoreRef, visibleCount, hasHiddenItems } = useActivityVisibleWindow({
+    filteredOrdersLength: filteredOrders.length,
+    baseVisibleCount,
+    visibleKey,
+  })
+  const visibleOrders = filteredOrders.slice(0, visibleCount)
 
   const isLoading = items.length === 0
 

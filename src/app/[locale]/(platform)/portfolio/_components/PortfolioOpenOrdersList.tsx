@@ -1,6 +1,7 @@
 'use client'
 
-import type { InfiniteData } from '@tanstack/react-query'
+import type { InfiniteData, QueryClient } from '@tanstack/react-query'
+import type { RefObject } from 'react'
 import type { PortfolioOpenOrdersSort, PortfolioUserOpenOrder } from '@/app/[locale]/(platform)/portfolio/_types/PortfolioOpenOrdersTypes'
 import type { UserOpenOrder } from '@/types'
 import { useQueryClient } from '@tanstack/react-query'
@@ -22,15 +23,10 @@ interface PortfolioOpenOrdersListProps {
   userAddress: string
 }
 
-export default function PortfolioOpenOrdersList({ userAddress }: PortfolioOpenOrdersListProps) {
-  const user = useUser()
-  const queryClient = useQueryClient()
-  const { openTradeRequirements } = useTradingOnboarding()
+function useOpenOrdersFilterState(userAddress: string) {
   const [searchQuery, setSearchQuery] = useState('')
   const debouncedSearchQuery = useDebounce(searchQuery, 300)
   const [sortBy, setSortBy] = useState<PortfolioOpenOrdersSort>('market')
-  const [isCancellingAll, setIsCancellingAll] = useState(false)
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
   const apiSearchFilters = useMemo(
     () => resolveOpenOrdersSearchParams(debouncedSearchQuery),
     [debouncedSearchQuery],
@@ -43,28 +39,49 @@ export default function PortfolioOpenOrdersList({ userAddress }: PortfolioOpenOr
     [apiSearchKey, userAddress],
   )
 
-  const {
-    status,
-    data,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-  } = usePortfolioOpenOrdersQuery({
-    userAddress,
-    apiSearchKey,
+  return {
+    searchQuery,
+    setSearchQuery,
+    sortBy,
+    setSortBy,
     apiSearchFilters,
-  })
+    apiSearchKey,
+    openOrdersQueryKey,
+  }
+}
 
+function useVisibleOpenOrders({
+  data,
+  searchQuery,
+  sortBy,
+}: {
+  data: InfiniteData<{ data: PortfolioUserOpenOrder[], next_cursor: string }> | undefined
+  searchQuery: string
+  sortBy: PortfolioOpenOrdersSort
+}) {
   const orders = useMemo(() => data?.pages.flatMap(page => page.data) ?? [], [data?.pages])
   const visibleOrders = useMemo(() => {
     const filtered = orders.filter(order => matchesOpenOrdersSearchQuery(order, searchQuery))
     return sortOpenOrders(filtered, sortBy)
   }, [orders, searchQuery, sortBy])
-  const canCancelAll = Boolean(
-    user?.proxy_wallet_address
-    && userAddress
-    && user.proxy_wallet_address.toLowerCase() === userAddress.toLowerCase(),
-  )
+
+  return { orders, visibleOrders }
+}
+
+function useCancelAllOpenOrders({
+  userAddress,
+  orders,
+  queryClient,
+  openOrdersQueryKey,
+  openTradeRequirements,
+}: {
+  userAddress: string
+  orders: PortfolioUserOpenOrder[]
+  queryClient: QueryClient
+  openOrdersQueryKey: (string | undefined)[]
+  openTradeRequirements: ReturnType<typeof useTradingOnboarding>['openTradeRequirements']
+}) {
+  const [isCancellingAll, setIsCancellingAll] = useState(false)
 
   const removeOrdersFromCache = useCallback((orderIds: string[]) => {
     if (!orderIds.length) {
@@ -125,7 +142,21 @@ export default function PortfolioOpenOrdersList({ userAddress }: PortfolioOpenOr
     }
   }, [isCancellingAll, openTradeRequirements, orders.length, queryClient, removeOrdersFromCache, userAddress])
 
-  useEffect(() => {
+  return { isCancellingAll, handleCancelAll }
+}
+
+function useInfiniteScrollSentinel({
+  hasNextPage,
+  isFetchingNextPage,
+  fetchNextPage,
+}: {
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  fetchNextPage: () => Promise<unknown>
+}): { loadMoreRef: RefObject<HTMLDivElement | null> } {
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(function observeLoadMoreSentinel() {
     if (!hasNextPage || !loadMoreRef.current) {
       return undefined
     }
@@ -138,8 +169,61 @@ export default function PortfolioOpenOrdersList({ userAddress }: PortfolioOpenOr
     }, { rootMargin: '200px' })
 
     observer.observe(loadMoreRef.current)
-    return () => observer.disconnect()
+    return function disconnectLoadMoreObserver() {
+      observer.disconnect()
+    }
   }, [fetchNextPage, hasNextPage, isFetchingNextPage])
+
+  return { loadMoreRef }
+}
+
+export default function PortfolioOpenOrdersList({ userAddress }: PortfolioOpenOrdersListProps) {
+  const user = useUser()
+  const queryClient = useQueryClient()
+  const { openTradeRequirements } = useTradingOnboarding()
+  const {
+    searchQuery,
+    setSearchQuery,
+    sortBy,
+    setSortBy,
+    apiSearchFilters,
+    apiSearchKey,
+    openOrdersQueryKey,
+  } = useOpenOrdersFilterState(userAddress)
+
+  const {
+    status,
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = usePortfolioOpenOrdersQuery({
+    userAddress,
+    apiSearchKey,
+    apiSearchFilters,
+  })
+
+  const { orders, visibleOrders } = useVisibleOpenOrders({ data, searchQuery, sortBy })
+
+  const canCancelAll = Boolean(
+    user?.proxy_wallet_address
+    && userAddress
+    && user.proxy_wallet_address.toLowerCase() === userAddress.toLowerCase(),
+  )
+
+  const { isCancellingAll, handleCancelAll } = useCancelAllOpenOrders({
+    userAddress,
+    orders,
+    queryClient,
+    openOrdersQueryKey,
+    openTradeRequirements,
+  })
+
+  const { loadMoreRef } = useInfiniteScrollSentinel({
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  })
 
   const emptyText = userAddress
     ? (searchQuery.trim() ? 'No open orders match your search.' : 'No open orders found.')

@@ -34,40 +34,23 @@ interface PublicProfileHeroCardsProps {
   fallbackChartEndDate?: string
 }
 
-function ProfitLossCard({
-  snapshot: _snapshot,
-  portfolioAddress,
-  fallbackChartEndDate,
+function usePnlSeries({
+  pnlAddress,
+  pnlBaseUrl,
+  activeTimeframe,
+  pnlSeriesKey,
 }: {
-  snapshot: PortfolioSnapshot
-  portfolioAddress?: string | null
-  fallbackChartEndDate?: string
+  pnlAddress: string | null | undefined
+  pnlBaseUrl: string
+  activeTimeframe: (typeof PNL_TIMEFRAMES)[number]
+  pnlSeriesKey: string
 }) {
-  const site = useSiteIdentity()
-  const platformName = site.name ?? ''
-  const [activeTimeframe, setActiveTimeframe] = useState<(typeof PNL_TIMEFRAMES)[number]>('ALL')
-  const [cursorX, setCursorX] = useState<number | null>(null)
-  const timeRangeContainerRef = useRef<HTMLDivElement | null>(null)
-  const timeRangeRef = useRef<(HTMLButtonElement | null)[]>([])
-  const [timeRangeIndicator, setTimeRangeIndicator] = useState({ width: 0, left: 0 })
-  const [timeRangeIndicatorReady, setTimeRangeIndicatorReady] = useState(false)
-  const chartId = useId().replace(/:/g, '')
-  const lineGradientId = `${chartId}-line`
-  const areaGradientId = `${chartId}-area`
-  const areaFadeId = `${chartId}-fade`
-  const areaMaskId = `${chartId}-mask`
-  const logoSvg = site.logoSvg
-    .replace(/fill="url\([^"]+\)"/gi, 'fill="currentColor"')
-  const pnlAddress = portfolioAddress
-  const pnlBaseUrl = process.env.USER_PNL_URL!
-  const pnlSeriesKey = `${pnlAddress ?? ''}:${pnlBaseUrl}:${activeTimeframe}`
   const [pnlSeriesState, setPnlSeriesState] = useState<{ key: string, series: PnlPoint[] }>({
     key: pnlSeriesKey,
     series: [],
   })
-  const pnlSeries = pnlSeriesState.key === pnlSeriesKey ? pnlSeriesState.series : []
 
-  useEffect(() => {
+  useEffect(function fetchPnlSeriesEffect() {
     if (!pnlAddress || !pnlBaseUrl) {
       return
     }
@@ -124,8 +107,20 @@ function ProfitLossCard({
         }
       })
 
-    return () => controller.abort()
+    return function abortPnlFetch() {
+      controller.abort()
+    }
   }, [activeTimeframe, pnlAddress, pnlBaseUrl, pnlSeriesKey])
+
+  const pnlSeries = pnlSeriesState.key === pnlSeriesKey ? pnlSeriesState.series : []
+  return { pnlSeries }
+}
+
+function usePnlTimeframeIndicator(activeTimeframe: (typeof PNL_TIMEFRAMES)[number]) {
+  const timeRangeContainerRef = useRef<HTMLDivElement | null>(null)
+  const timeRangeRef = useRef<(HTMLButtonElement | null)[]>([])
+  const [timeRangeIndicator, setTimeRangeIndicator] = useState({ width: 0, left: 0 })
+  const [timeRangeIndicatorReady, setTimeRangeIndicatorReady] = useState(false)
 
   const updateIndicator = useCallback(() => {
     const activeIndex = PNL_TIMEFRAMES.findIndex(range => range === activeTimeframe)
@@ -142,16 +137,33 @@ function ProfitLossCard({
     })
   }, [activeTimeframe])
 
-  useLayoutEffect(() => {
+  useLayoutEffect(function runIndicatorLayoutSync() {
     updateIndicator()
   }, [updateIndicator])
 
-  useEffect(() => {
+  useEffect(function bindIndicatorResizeListener() {
     updateIndicator()
     window.addEventListener('resize', updateIndicator)
-    return () => window.removeEventListener('resize', updateIndicator)
+    return function unbindIndicatorResizeListener() {
+      window.removeEventListener('resize', updateIndicator)
+    }
   }, [updateIndicator])
 
+  return {
+    timeRangeContainerRef,
+    timeRangeRef,
+    timeRangeIndicator,
+    timeRangeIndicatorReady,
+  }
+}
+
+function usePnlChartFallbackData({
+  fallbackChartEndDate,
+  activeTimeframe,
+}: {
+  fallbackChartEndDate: string | undefined
+  activeTimeframe: (typeof PNL_TIMEFRAMES)[number]
+}) {
   const fallbackRange = useMemo(() => ({ startValue: 0, endValue: 0 }), [])
   const fallbackDurationMs = useMemo(() => {
     const ranges = {
@@ -181,24 +193,13 @@ function ProfitLossCard({
     })
   }, [fallbackEndDate, fallbackRange, fallbackStartDate])
 
-  const hasPnlSeries = pnlSeries.length > 0
-  const chartData = hasPnlSeries ? pnlSeries : fallbackData
-  const startDate = chartData[0]?.date ?? fallbackStartDate
-  const endDate = chartData.at(-1)?.date ?? fallbackEndDate
-  const startValue = chartData[0]?.value ?? fallbackRange.startValue
-  const endValue = chartData.at(-1)?.value ?? fallbackRange.endValue
+  return { fallbackRange, fallbackEndDate, fallbackStartDate, fallbackData }
+}
 
-  const chartWidth = 360
-  const chartHeight = 80
-  const margin = { top: 0, right: 0, bottom: 0, left: 0 }
-  const innerWidth = chartWidth - margin.left - margin.right
-  const innerHeight = chartHeight - margin.top - margin.bottom
-  const linePadding = Math.round(innerHeight * 0.22)
-  const lineTop = linePadding
-  const lineBottom = innerHeight - linePadding
-  const [minValue, maxValue] = useMemo(() => {
+function usePnlChartDomain(chartData: PnlPoint[]) {
+  return useMemo(() => {
     if (!chartData.length) {
-      return [0, 0]
+      return [0, 0] as const
     }
     let min = chartData[0].value
     let max = chartData[0].value
@@ -210,12 +211,27 @@ function ProfitLossCard({
         max = point.value
       }
     }
-    return [min, max]
+    return [min, max] as const
   }, [chartData])
-  const domainPadding = minValue === maxValue ? Math.max(1, Math.abs(minValue || 1)) : 0
-  const paddedMin = minValue - domainPadding
-  const paddedMax = maxValue + domainPadding
+}
 
+function usePnlChartScales({
+  startDate,
+  endDate,
+  paddedMin,
+  paddedMax,
+  innerWidth,
+  lineBottom,
+  lineTop,
+}: {
+  startDate: Date
+  endDate: Date
+  paddedMin: number
+  paddedMax: number
+  innerWidth: number
+  lineBottom: number
+  lineTop: number
+}) {
   const xScale = useMemo(
     () => scaleTime<number>({
       range: [0, innerWidth],
@@ -231,6 +247,39 @@ function ProfitLossCard({
     }),
     [lineBottom, lineTop, paddedMax, paddedMin],
   )
+  return { xScale, yScale }
+}
+
+function usePnlCursorInteraction({
+  innerWidth,
+  innerHeight,
+  chartData,
+  endDate,
+  endValue,
+  xScale,
+  yScale,
+}: {
+  innerWidth: number
+  innerHeight: number
+  chartData: PnlPoint[]
+  endDate: Date
+  endValue: number
+  xScale: ReturnType<typeof scaleTime<number>>
+  yScale: ReturnType<typeof scaleLinear<number>>
+}) {
+  const [cursorX, setCursorX] = useState<number | null>(null)
+
+  const handlePointerMove = useCallback((event: ReactTouchEvent<SVGRectElement> | ReactMouseEvent<SVGRectElement>) => {
+    const point = localPoint(event)
+    if (!point) {
+      return
+    }
+    setCursorX(point.x)
+  }, [])
+
+  const handlePointerLeave = useCallback(() => {
+    setCursorX(null)
+  }, [])
 
   const clampedCursorX = cursorX == null ? null : Math.max(0, Math.min(cursorX, innerWidth))
   const cursorDate = useMemo(
@@ -284,15 +333,31 @@ function ProfitLossCard({
       top: `${(cursorY / innerHeight) * 100}%`,
     }
   }, [clampedCursorX, cursorY, innerHeight, innerWidth])
-  const displayAbsoluteValue = clampedCursorX == null ? endValue : cursorValue
-  const displayBaselineValue = activeTimeframe === 'ALL' ? 0 : startValue
-  const displayNetValue = displayAbsoluteValue - displayBaselineValue
-  const isDeltaPositive = displayNetValue > 0
-  const isDeltaNegative = displayNetValue < 0
-  const areValuesHidden = usePortfolioValueVisibility(state => state.isHidden)
-  const [gainTotal, lossTotal] = useMemo(() => {
+
+  return {
+    handlePointerMove,
+    handlePointerLeave,
+    clampedCursorX,
+    cursorDate,
+    cursorValue,
+    cursorDotPosition,
+  }
+}
+
+function usePnlGainLoss({
+  chartData,
+  cursorDate,
+  endDate,
+  activeTimeframe,
+}: {
+  chartData: PnlPoint[]
+  cursorDate: Date | null
+  endDate: Date
+  activeTimeframe: (typeof PNL_TIMEFRAMES)[number]
+}) {
+  return useMemo(() => {
     if (!chartData.length) {
-      return [0, 0]
+      return [0, 0] as const
     }
 
     const targetTime = (cursorDate ?? endDate).getTime()
@@ -301,7 +366,7 @@ function ProfitLossCard({
     const baseline = activeTimeframe === 'ALL' ? 0 : firstPoint.value
 
     if (targetTime < firstTime) {
-      return [0, 0]
+      return [0, 0] as const
     }
 
     let gain = 0
@@ -349,8 +414,111 @@ function ProfitLossCard({
       break
     }
 
-    return [gain, loss]
+    return [gain, loss] as const
   }, [activeTimeframe, chartData, cursorDate, endDate])
+}
+
+function usePnlChartIds() {
+  const chartId = useId().replace(/:/g, '')
+  return {
+    lineGradientId: `${chartId}-line`,
+    areaGradientId: `${chartId}-area`,
+    areaFadeId: `${chartId}-fade`,
+    areaMaskId: `${chartId}-mask`,
+  }
+}
+
+function usePnlActiveTimeframe() {
+  const [activeTimeframe, setActiveTimeframe] = useState<(typeof PNL_TIMEFRAMES)[number]>('ALL')
+  return { activeTimeframe, setActiveTimeframe }
+}
+
+function ProfitLossCard({
+  snapshot: _snapshot,
+  portfolioAddress,
+  fallbackChartEndDate,
+}: {
+  snapshot: PortfolioSnapshot
+  portfolioAddress?: string | null
+  fallbackChartEndDate?: string
+}) {
+  const site = useSiteIdentity()
+  const platformName = site.name ?? ''
+  const { activeTimeframe, setActiveTimeframe } = usePnlActiveTimeframe()
+  const { lineGradientId, areaGradientId, areaFadeId, areaMaskId } = usePnlChartIds()
+  const logoSvg = site.logoSvg
+    .replace(/fill="url\([^"]+\)"/gi, 'fill="currentColor"')
+  const pnlAddress = portfolioAddress
+  const pnlBaseUrl = process.env.USER_PNL_URL!
+  const pnlSeriesKey = `${pnlAddress ?? ''}:${pnlBaseUrl}:${activeTimeframe}`
+  const { pnlSeries } = usePnlSeries({ pnlAddress, pnlBaseUrl, activeTimeframe, pnlSeriesKey })
+
+  const {
+    timeRangeContainerRef,
+    timeRangeRef,
+    timeRangeIndicator,
+    timeRangeIndicatorReady,
+  } = usePnlTimeframeIndicator(activeTimeframe)
+
+  const { fallbackRange, fallbackEndDate, fallbackStartDate, fallbackData } = usePnlChartFallbackData({
+    fallbackChartEndDate,
+    activeTimeframe,
+  })
+
+  const hasPnlSeries = pnlSeries.length > 0
+  const chartData = hasPnlSeries ? pnlSeries : fallbackData
+  const startDate = chartData[0]?.date ?? fallbackStartDate
+  const endDate = chartData.at(-1)?.date ?? fallbackEndDate
+  const startValue = chartData[0]?.value ?? fallbackRange.startValue
+  const endValue = chartData.at(-1)?.value ?? fallbackRange.endValue
+
+  const chartWidth = 360
+  const chartHeight = 80
+  const margin = { top: 0, right: 0, bottom: 0, left: 0 }
+  const innerWidth = chartWidth - margin.left - margin.right
+  const innerHeight = chartHeight - margin.top - margin.bottom
+  const linePadding = Math.round(innerHeight * 0.22)
+  const lineTop = linePadding
+  const lineBottom = innerHeight - linePadding
+  const [minValue, maxValue] = usePnlChartDomain(chartData)
+  const domainPadding = minValue === maxValue ? Math.max(1, Math.abs(minValue || 1)) : 0
+  const paddedMin = minValue - domainPadding
+  const paddedMax = maxValue + domainPadding
+
+  const { xScale, yScale } = usePnlChartScales({
+    startDate,
+    endDate,
+    paddedMin,
+    paddedMax,
+    innerWidth,
+    lineBottom,
+    lineTop,
+  })
+
+  const {
+    handlePointerMove,
+    handlePointerLeave,
+    clampedCursorX,
+    cursorDate,
+    cursorValue,
+    cursorDotPosition,
+  } = usePnlCursorInteraction({
+    innerWidth,
+    innerHeight,
+    chartData,
+    endDate,
+    endValue,
+    xScale,
+    yScale,
+  })
+
+  const displayAbsoluteValue = clampedCursorX == null ? endValue : cursorValue
+  const displayBaselineValue = activeTimeframe === 'ALL' ? 0 : startValue
+  const displayNetValue = displayAbsoluteValue - displayBaselineValue
+  const isDeltaPositive = displayNetValue > 0
+  const isDeltaNegative = displayNetValue < 0
+  const areValuesHidden = usePortfolioValueVisibility(state => state.isHidden)
+  const [gainTotal, lossTotal] = usePnlGainLoss({ chartData, cursorDate, endDate, activeTimeframe })
   const timeframeLabel = ({
     'ALL': 'All-Time',
     '1D': 'Past Day',
@@ -362,18 +530,6 @@ function ProfitLossCard({
       cursorDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
     }`
     : null
-
-  const handlePointerMove = useCallback((event: ReactTouchEvent<SVGRectElement> | ReactMouseEvent<SVGRectElement>) => {
-    const point = localPoint(event)
-    if (!point) {
-      return
-    }
-    setCursorX(point.x)
-  }, [])
-
-  const handlePointerLeave = useCallback(() => {
-    setCursorX(null)
-  }, [])
 
   return (
     <Card className="relative h-full overflow-hidden rounded-lg bg-background">

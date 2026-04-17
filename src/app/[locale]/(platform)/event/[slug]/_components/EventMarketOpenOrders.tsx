@@ -36,6 +36,292 @@ interface EventMarketOpenOrdersProps {
   eventSlug: string
 }
 
+function useOpenOrdersQueryKeys({
+  userId,
+  eventSlug,
+  conditionId,
+}: {
+  userId?: string | null
+  eventSlug: string
+  conditionId?: string
+}) {
+  const openOrdersQueryKey = useMemo(
+    () => buildUserOpenOrdersQueryKey(userId, eventSlug, conditionId),
+    [eventSlug, conditionId, userId],
+  )
+  const eventOpenOrdersQueryKey = useMemo(
+    () => buildUserOpenOrdersQueryKey(userId, eventSlug),
+    [eventSlug, userId],
+  )
+  return { openOrdersQueryKey, eventOpenOrdersQueryKey }
+}
+
+function useClearInfiniteScrollErrorOnMarketChange({
+  conditionId,
+  eventSlug,
+  clearError,
+}: {
+  conditionId?: string
+  eventSlug: string
+  clearError: () => void
+}) {
+  useEffect(function clearInfiniteScrollErrorOnMarketChange() {
+    queueMicrotask(clearError)
+  }, [conditionId, eventSlug, clearError])
+}
+
+function useOpenOrdersPolling({
+  hasOrders,
+  queryClient,
+  openOrdersQueryKey,
+  eventOpenOrdersQueryKey,
+}: {
+  hasOrders: boolean
+  queryClient: ReturnType<typeof useQueryClient>
+  openOrdersQueryKey: readonly unknown[]
+  eventOpenOrdersQueryKey: readonly unknown[]
+}) {
+  useEffect(function pollOpenOrdersWhileVisible() {
+    if (!hasOrders || typeof window === 'undefined') {
+      return
+    }
+
+    const intervalId = window.setInterval(function refreshOpenOrders() {
+      void queryClient.invalidateQueries({ queryKey: openOrdersQueryKey })
+      void queryClient.invalidateQueries({ queryKey: eventOpenOrdersQueryKey })
+    }, 60_000)
+
+    return function stopPollingOpenOrders() {
+      window.clearInterval(intervalId)
+    }
+  }, [eventOpenOrdersQueryKey, hasOrders, openOrdersQueryKey, queryClient])
+}
+
+function useInfiniteScrollSentinel({
+  sentinelRef,
+  hasNextPage,
+  status,
+  isFetchingNextPage,
+  hasInfiniteScrollError,
+  onFetchNextPage,
+}: {
+  sentinelRef: React.RefObject<HTMLDivElement | null>
+  hasNextPage: boolean
+  status: 'pending' | 'error' | 'success'
+  isFetchingNextPage: boolean
+  hasInfiniteScrollError: boolean
+  onFetchNextPage: () => void
+}) {
+  useEffect(function observeInfiniteScrollSentinel() {
+    if (!sentinelRef.current || !hasNextPage || status === 'pending') {
+      return
+    }
+
+    const observer = new IntersectionObserver(function handleSentinelIntersection([entry]) {
+      if (!entry?.isIntersecting) {
+        return
+      }
+      if (isFetchingNextPage || hasInfiniteScrollError) {
+        return
+      }
+
+      onFetchNextPage()
+    }, { rootMargin: '200px 0px' })
+
+    observer.observe(sentinelRef.current)
+    return function unobserveInfiniteScrollSentinel() {
+      observer.disconnect()
+    }
+  }, [hasInfiniteScrollError, hasNextPage, isFetchingNextPage, onFetchNextPage, sentinelRef, status])
+}
+
+function useSortedOrders(orders: UserOpenOrder[], sortState: { column: SortColumn, direction: SortDirection } | null) {
+  return useMemo(() => sortOrders(orders, sortState), [orders, sortState])
+}
+
+function useOpenOrdersCancellation({
+  marketConditionId,
+  sortedOrders,
+  queryClient,
+  openOrdersQueryKey,
+  eventOpenOrdersQueryKey,
+  openTradeRequirements,
+}: {
+  marketConditionId: string
+  sortedOrders: UserOpenOrder[]
+  queryClient: ReturnType<typeof useQueryClient>
+  openOrdersQueryKey: readonly unknown[]
+  eventOpenOrdersQueryKey: readonly unknown[]
+  openTradeRequirements: (options: { forceTradingAuth: boolean }) => void
+}) {
+  const t = useExtracted()
+  const [pendingCancelIds, setPendingCancelIds] = useState<Set<string>>(() => new Set())
+  const [isCancellingAll, setIsCancellingAll] = useState(false)
+
+  const removeOrdersFromCache = useCallback(function removeOrdersFromCache(orderIds: string[]) {
+    if (!orderIds.length) {
+      return
+    }
+
+    function updateCache(queryKey: readonly unknown[]) {
+      queryClient.setQueryData<InfiniteData<{ data: UserOpenOrder[], next_cursor: string }>>(queryKey, (current) => {
+        if (!current) {
+          return current
+        }
+
+        const updatedPages = current.pages.map(page => ({
+          ...page,
+          data: page.data.filter(item => !orderIds.includes(item.id)),
+        }))
+        return { ...current, pages: updatedPages }
+      })
+    }
+
+    updateCache(openOrdersQueryKey)
+    updateCache(eventOpenOrdersQueryKey)
+  }, [eventOpenOrdersQueryKey, openOrdersQueryKey, queryClient])
+
+  const scheduleOpenOrdersRefresh = useCallback(function scheduleOpenOrdersRefresh() {
+    setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: openOrdersQueryKey })
+      void queryClient.invalidateQueries({ queryKey: eventOpenOrdersQueryKey })
+    }, 10_000)
+  }, [eventOpenOrdersQueryKey, openOrdersQueryKey, queryClient])
+
+  const handleCancelOrder = useCallback(async function handleCancelOrder(order: UserOpenOrder) {
+    if (pendingCancelIds.has(order.id)) {
+      return
+    }
+
+    setPendingCancelIds((current) => {
+      const next = new Set(current)
+      next.add(order.id)
+      return next
+    })
+
+    try {
+      const response = await cancelOrderAction(order.id)
+      if (response?.error) {
+        throw new Error(response.error)
+      }
+
+      toast.success(t('Order cancelled'))
+
+      removeOrdersFromCache([order.id])
+      await queryClient.invalidateQueries({ queryKey: openOrdersQueryKey })
+      void queryClient.invalidateQueries({ queryKey: eventOpenOrdersQueryKey })
+      void queryClient.invalidateQueries({ queryKey: ['orderbook-summary'] })
+      void queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
+      setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
+      }, 3000)
+      scheduleOpenOrdersRefresh()
+    }
+    catch (error: any) {
+      const message = typeof error?.message === 'string'
+        ? error.message
+        : t('Failed to cancel order.')
+      if (isTradingAuthRequiredError(message)) {
+        openTradeRequirements({ forceTradingAuth: true })
+      }
+      else {
+        toast.error(message)
+      }
+    }
+    finally {
+      setPendingCancelIds((current) => {
+        const next = new Set(current)
+        next.delete(order.id)
+        return next
+      })
+    }
+  }, [eventOpenOrdersQueryKey, openOrdersQueryKey, openTradeRequirements, pendingCancelIds, queryClient, removeOrdersFromCache, scheduleOpenOrdersRefresh, t])
+
+  const handleCancelAll = useCallback(async function handleCancelAll() {
+    if (!sortedOrders.length || isCancellingAll) {
+      return
+    }
+
+    const orderIds = sortedOrders.map(order => order.id)
+    setIsCancellingAll(true)
+    setPendingCancelIds((current) => {
+      const next = new Set(current)
+      orderIds.forEach(id => next.add(id))
+      return next
+    })
+
+    try {
+      const result = await cancelMarketOrdersAction({ market: marketConditionId })
+      if (result.error) {
+        throw new Error(result.error)
+      }
+
+      const failedIds = Object.keys(result.notCanceled ?? {})
+      const failedCount = failedIds.length
+
+      if (failedCount === 0) {
+        toast.success(t('All open orders for this market were cancelled.'))
+      }
+      else {
+        const tUnsafe = t as unknown as (message: string, values?: Record<string, any>) => string
+        toast.error(tUnsafe(
+          'Could not cancel {count} order{count, plural, one {} other {s}}.',
+          { count: failedCount },
+        ))
+      }
+
+      if (result.cancelled.length) {
+        removeOrdersFromCache(result.cancelled)
+      }
+      await queryClient.invalidateQueries({ queryKey: openOrdersQueryKey })
+      void queryClient.invalidateQueries({ queryKey: eventOpenOrdersQueryKey })
+      void queryClient.invalidateQueries({ queryKey: ['orderbook-summary'] })
+      void queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
+      setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
+      }, 3000)
+      scheduleOpenOrdersRefresh()
+    }
+    catch (error: any) {
+      const message = typeof error?.message === 'string'
+        ? error.message
+        : t('Failed to cancel open orders.')
+      if (isTradingAuthRequiredError(message)) {
+        openTradeRequirements({ forceTradingAuth: true })
+      }
+      else {
+        toast.error(message)
+      }
+    }
+    finally {
+      setPendingCancelIds((current) => {
+        const next = new Set(current)
+        orderIds.forEach(id => next.delete(id))
+        return next
+      })
+      setIsCancellingAll(false)
+    }
+  }, [
+    isCancellingAll,
+    marketConditionId,
+    openTradeRequirements,
+    eventOpenOrdersQueryKey,
+    openOrdersQueryKey,
+    queryClient,
+    removeOrdersFromCache,
+    scheduleOpenOrdersRefresh,
+    sortedOrders,
+    t,
+  ])
+
+  return {
+    pendingCancelIds,
+    isCancellingAll,
+    handleCancelOrder,
+    handleCancelAll,
+  }
+}
+
 interface OpenOrderRowProps {
   order: UserOpenOrder
   onCancel: (order: UserOpenOrder) => void
@@ -259,25 +545,24 @@ export default function EventMarketOpenOrders({ market, eventSlug }: EventMarket
   const { openTradeRequirements } = useTradingOnboarding()
   const isSingleMarket = useIsSingleMarket()
   const [infiniteScrollError, setInfiniteScrollError] = useState<string | null>(null)
-  const [pendingCancelIds, setPendingCancelIds] = useState<Set<string>>(() => new Set())
-  const [isCancellingAll, setIsCancellingAll] = useState(false)
   const [isCancelAllDialogOpen, setIsCancelAllDialogOpen] = useState(false)
   const [sortState, setSortState] = useState<{ column: SortColumn, direction: SortDirection } | null>(null)
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      setInfiniteScrollError(null)
-    })
-  }, [market.condition_id, eventSlug])
+  const clearInfiniteScrollError = useCallback(function clearInfiniteScrollError() {
+    setInfiniteScrollError(null)
+  }, [])
 
-  const openOrdersQueryKey = useMemo(
-    () => buildUserOpenOrdersQueryKey(user?.id, eventSlug, market.condition_id),
-    [eventSlug, market.condition_id, user?.id],
-  )
-  const eventOpenOrdersQueryKey = useMemo(
-    () => buildUserOpenOrdersQueryKey(user?.id, eventSlug),
-    [eventSlug, user?.id],
-  )
+  useClearInfiniteScrollErrorOnMarketChange({
+    conditionId: market.condition_id,
+    eventSlug,
+    clearError: clearInfiniteScrollError,
+  })
+
+  const { openOrdersQueryKey, eventOpenOrdersQueryKey } = useOpenOrdersQueryKeys({
+    userId: user?.id,
+    eventSlug,
+    conditionId: market.condition_id,
+  })
 
   const {
     status,
@@ -292,89 +577,19 @@ export default function EventMarketOpenOrders({ market, eventSlug }: EventMarket
   })
 
   const orders = useMemo(() => data?.pages.flatMap(page => page.data) ?? [], [data?.pages])
-  const sortedOrders = useMemo(() => sortOrders(orders, sortState), [orders, sortState])
+  const sortedOrders = useSortedOrders(orders, sortState)
   const hasOrders = sortedOrders.length > 0
 
-  const removeOrdersFromCache = useCallback((orderIds: string[]) => {
-    if (!orderIds.length) {
-      return
-    }
+  const { pendingCancelIds, isCancellingAll, handleCancelOrder, handleCancelAll } = useOpenOrdersCancellation({
+    marketConditionId: market.condition_id,
+    sortedOrders,
+    queryClient,
+    openOrdersQueryKey,
+    eventOpenOrdersQueryKey,
+    openTradeRequirements,
+  })
 
-    function updateCache(queryKey: readonly unknown[]) {
-      queryClient.setQueryData<InfiniteData<{ data: UserOpenOrder[], next_cursor: string }>>(queryKey, (current) => {
-        if (!current) {
-          return current
-        }
-
-        const updatedPages = current.pages.map(page => ({
-          ...page,
-          data: page.data.filter(item => !orderIds.includes(item.id)),
-        }))
-        return { ...current, pages: updatedPages }
-      })
-    }
-
-    updateCache(openOrdersQueryKey)
-    updateCache(eventOpenOrdersQueryKey)
-  }, [eventOpenOrdersQueryKey, openOrdersQueryKey, queryClient])
-
-  const scheduleOpenOrdersRefresh = useCallback(() => {
-    setTimeout(() => {
-      void queryClient.invalidateQueries({ queryKey: openOrdersQueryKey })
-      void queryClient.invalidateQueries({ queryKey: eventOpenOrdersQueryKey })
-    }, 10_000)
-  }, [eventOpenOrdersQueryKey, openOrdersQueryKey, queryClient])
-
-  const handleCancelOrder = useCallback(async (order: UserOpenOrder) => {
-    if (pendingCancelIds.has(order.id)) {
-      return
-    }
-
-    setPendingCancelIds((current) => {
-      const next = new Set(current)
-      next.add(order.id)
-      return next
-    })
-
-    try {
-      const response = await cancelOrderAction(order.id)
-      if (response?.error) {
-        throw new Error(response.error)
-      }
-
-      toast.success(t('Order cancelled'))
-
-      removeOrdersFromCache([order.id])
-      await queryClient.invalidateQueries({ queryKey: openOrdersQueryKey })
-      void queryClient.invalidateQueries({ queryKey: eventOpenOrdersQueryKey })
-      void queryClient.invalidateQueries({ queryKey: ['orderbook-summary'] })
-      void queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
-      setTimeout(() => {
-        void queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
-      }, 3000)
-      scheduleOpenOrdersRefresh()
-    }
-    catch (error: any) {
-      const message = typeof error?.message === 'string'
-        ? error.message
-        : t('Failed to cancel order.')
-      if (isTradingAuthRequiredError(message)) {
-        openTradeRequirements({ forceTradingAuth: true })
-      }
-      else {
-        toast.error(message)
-      }
-    }
-    finally {
-      setPendingCancelIds((current) => {
-        const next = new Set(current)
-        next.delete(order.id)
-        return next
-      })
-    }
-  }, [eventOpenOrdersQueryKey, openOrdersQueryKey, openTradeRequirements, pendingCancelIds, queryClient, removeOrdersFromCache, scheduleOpenOrdersRefresh, t])
-
-  const handleSort = useCallback((column: SortColumn) => {
+  const handleSort = useCallback(function toggleSortDirection(column: SortColumn) {
     setSortState((current) => {
       if (current?.column === column) {
         return {
@@ -386,84 +601,7 @@ export default function EventMarketOpenOrders({ market, eventSlug }: EventMarket
     })
   }, [])
 
-  const handleCancelAll = useCallback(async () => {
-    if (!sortedOrders.length || isCancellingAll) {
-      return
-    }
-
-    const orderIds = sortedOrders.map(order => order.id)
-    setIsCancellingAll(true)
-    setPendingCancelIds((current) => {
-      const next = new Set(current)
-      orderIds.forEach(id => next.add(id))
-      return next
-    })
-
-    try {
-      const result = await cancelMarketOrdersAction({ market: market.condition_id })
-      if (result.error) {
-        throw new Error(result.error)
-      }
-
-      const failedIds = Object.keys(result.notCanceled ?? {})
-      const failedCount = failedIds.length
-
-      if (failedCount === 0) {
-        toast.success(t('All open orders for this market were cancelled.'))
-      }
-      else {
-        const tUnsafe = t as unknown as (message: string, values?: Record<string, any>) => string
-        toast.error(tUnsafe(
-          'Could not cancel {count} order{count, plural, one {} other {s}}.',
-          { count: failedCount },
-        ))
-      }
-
-      if (result.cancelled.length) {
-        removeOrdersFromCache(result.cancelled)
-      }
-      await queryClient.invalidateQueries({ queryKey: openOrdersQueryKey })
-      void queryClient.invalidateQueries({ queryKey: eventOpenOrdersQueryKey })
-      void queryClient.invalidateQueries({ queryKey: ['orderbook-summary'] })
-      void queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
-      setTimeout(() => {
-        void queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
-      }, 3000)
-      scheduleOpenOrdersRefresh()
-    }
-    catch (error: any) {
-      const message = typeof error?.message === 'string'
-        ? error.message
-        : t('Failed to cancel open orders.')
-      if (isTradingAuthRequiredError(message)) {
-        openTradeRequirements({ forceTradingAuth: true })
-      }
-      else {
-        toast.error(message)
-      }
-    }
-    finally {
-      setPendingCancelIds((current) => {
-        const next = new Set(current)
-        orderIds.forEach(id => next.delete(id))
-        return next
-      })
-      setIsCancellingAll(false)
-    }
-  }, [
-    isCancellingAll,
-    market.condition_id,
-    openTradeRequirements,
-    eventOpenOrdersQueryKey,
-    openOrdersQueryKey,
-    queryClient,
-    removeOrdersFromCache,
-    scheduleOpenOrdersRefresh,
-    sortedOrders,
-    t,
-  ])
-
-  const handleCancelAllConfirm = useCallback(() => {
+  const handleCancelAllConfirm = useCallback(function handleCancelAllConfirm() {
     if (isCancellingAll) {
       return
     }
@@ -471,43 +609,30 @@ export default function EventMarketOpenOrders({ market, eventSlug }: EventMarket
     void handleCancelAll()
   }, [handleCancelAll, isCancellingAll])
 
-  useEffect(() => {
-    if (!hasOrders || typeof window === 'undefined') {
-      return
-    }
-
-    const intervalId = window.setInterval(() => {
-      void queryClient.invalidateQueries({ queryKey: openOrdersQueryKey })
-      void queryClient.invalidateQueries({ queryKey: eventOpenOrdersQueryKey })
-    }, 60_000)
-
-    return () => window.clearInterval(intervalId)
-  }, [eventOpenOrdersQueryKey, hasOrders, openOrdersQueryKey, queryClient])
-
-  useEffect(() => {
-    if (!sentinelRef.current || !hasNextPage || status === 'pending') {
-      return
-    }
-
-    const observer = new IntersectionObserver(([entry]) => {
-      if (!entry?.isIntersecting) {
+  const handleFetchNextPageFromSentinel = useCallback(function handleFetchNextPageFromSentinel() {
+    fetchNextPage().catch((error: any) => {
+      if (error?.name === 'CanceledError' || error?.name === 'AbortError') {
         return
       }
-      if (isFetchingNextPage || infiniteScrollError) {
-        return
-      }
+      setInfiniteScrollError(error?.message || t('Failed to load more open orders'))
+    })
+  }, [fetchNextPage, t])
 
-      fetchNextPage().catch((error: any) => {
-        if (error?.name === 'CanceledError' || error?.name === 'AbortError') {
-          return
-        }
-        setInfiniteScrollError(error?.message || t('Failed to load more open orders'))
-      })
-    }, { rootMargin: '200px 0px' })
+  useOpenOrdersPolling({
+    hasOrders,
+    queryClient,
+    openOrdersQueryKey,
+    eventOpenOrdersQueryKey,
+  })
 
-    observer.observe(sentinelRef.current)
-    return () => observer.disconnect()
-  }, [fetchNextPage, hasNextPage, infiniteScrollError, isFetchingNextPage, status, t])
+  useInfiniteScrollSentinel({
+    sentinelRef,
+    hasNextPage,
+    status,
+    isFetchingNextPage,
+    hasInfiniteScrollError: Boolean(infiniteScrollError),
+    onFetchNextPage: handleFetchNextPageFromSentinel,
+  })
 
   const shouldRender = Boolean(user?.id && status === 'success' && hasOrders)
 

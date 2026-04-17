@@ -37,9 +37,7 @@ const AUTHENTICATOR_APP_LINKS = {
   'Google Authenticator': 'https://support.google.com/accounts/answer/1066447',
 } as const
 
-export default function SettingsTwoFactorAuthContent({ user }: { user: User }) {
-  const t = useExtracted()
-  const { copied, copy } = useClipboard()
+function useTwoFactorState(user: User) {
   const [state, setState] = useState<ComponentState>({
     isLoading: false,
     setupData: null,
@@ -49,6 +47,13 @@ export default function SettingsTwoFactorAuthContent({ user }: { user: User }) {
     isVerifying: false,
     isDisabling: false,
   })
+  return { state, setState }
+}
+
+export default function SettingsTwoFactorAuthContent({ user }: { user: User }) {
+  const t = useExtracted()
+  const { copied, copy } = useClipboard()
+  const { state, setState } = useTwoFactorState(user)
 
   function extractTotpSecret() {
     try {

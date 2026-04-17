@@ -26,11 +26,7 @@ interface AdminMarketContextSettingsFormProps {
   variables: MarketContextVariable[]
 }
 
-function AdminMarketContextSettingsFormInner({
-  defaultPrompt,
-  isEnabled,
-  variables,
-}: AdminMarketContextSettingsFormProps) {
+function useMarketContextSettingsForm(defaultPrompt: string, isEnabled: boolean) {
   const t = useExtracted()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -42,18 +38,20 @@ function AdminMarketContextSettingsFormInner({
   const [state, formAction, isPending] = useActionState(updateMarketContextSettingsAction, initialState)
   const wasPendingRef = useRef(isPending)
 
-  useEffect(() => {
-    return () => {
-      if (highlightTimeoutRef.current) {
-        clearTimeout(highlightTimeoutRef.current)
+  useEffect(function cleanupTimeoutsOnUnmount() {
+    const highlightRef = highlightTimeoutRef
+    const variableLiftRef = variableLiftTimeoutRef
+    return function cleanup() {
+      if (highlightRef.current) {
+        clearTimeout(highlightRef.current)
       }
-      if (variableLiftTimeoutRef.current) {
-        clearTimeout(variableLiftTimeoutRef.current)
+      if (variableLiftRef.current) {
+        clearTimeout(variableLiftRef.current)
       }
     }
   }, [])
 
-  useEffect(() => {
+  useEffect(function toastOnSettingsTransition() {
     const transitionedToIdle = wasPendingRef.current && !isPending
 
     if (transitionedToIdle && state.error === null) {
@@ -65,6 +63,47 @@ function AdminMarketContextSettingsFormInner({
 
     wasPendingRef.current = isPending
   }, [isPending, state.error, t])
+
+  return {
+    textareaRef,
+    highlightTimeoutRef,
+    variableLiftTimeoutRef,
+    promptValue,
+    setPromptValue,
+    enabled,
+    setEnabled,
+    isPromptHighlighted,
+    setIsPromptHighlighted,
+    liftedVariableKey,
+    setLiftedVariableKey,
+    state,
+    formAction,
+    isPending,
+  }
+}
+
+function AdminMarketContextSettingsFormInner({
+  defaultPrompt,
+  isEnabled,
+  variables,
+}: AdminMarketContextSettingsFormProps) {
+  const t = useExtracted()
+  const {
+    textareaRef,
+    highlightTimeoutRef,
+    variableLiftTimeoutRef,
+    promptValue,
+    setPromptValue,
+    enabled,
+    setEnabled,
+    isPromptHighlighted,
+    setIsPromptHighlighted,
+    liftedVariableKey,
+    setLiftedVariableKey,
+    state,
+    formAction,
+    isPending,
+  } = useMarketContextSettingsForm(defaultPrompt, isEnabled)
 
   function getVariableDescription(variable: MarketContextVariable) {
     switch (variable.key) {

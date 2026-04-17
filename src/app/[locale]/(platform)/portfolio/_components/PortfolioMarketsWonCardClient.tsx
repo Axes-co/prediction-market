@@ -80,24 +80,9 @@ function formatSignedPercent(value: number, digits: number) {
   return `${sign}${formatted}`
 }
 
-export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarketsWonCardClientProps) {
-  const { summary, markets } = data
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isSharingOnX, setIsSharingOnX] = useState(false)
-  const [hiddenClaimSignature, setHiddenClaimSignature] = useState<string | null>(null)
-  const { ensureTradingReady, openTradeRequirements } = useTradingOnboarding()
-  const { signMessageAsync } = useSignMessage()
-  const { runWithSignaturePrompt } = useSignaturePromptRunner()
-  const queryClient = useQueryClient()
-  const user = useUser()
-  const router = useRouter()
-  const site = useSiteIdentity()
-
-  const siteName = site.name
+function useMarketsWonClaimSignature(markets: PortfolioClaimMarket[]) {
   const previewMarkets = useMemo(() => markets.slice(0, 3), [markets])
   const previewExtraCount = Math.max(0, markets.length - 3)
-
   const claimableSignature = useMemo(() => {
     const claimableMarkets = markets
       .filter(market => market.indexSets.length > 0)
@@ -111,12 +96,40 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
   }, [markets])
   const hasClaimableMarkets = claimableSignature.length > 0
 
+  return { previewMarkets, previewExtraCount, claimableSignature, hasClaimableMarkets }
+}
+
+function useMarketsWonDialogState() {
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
+
   const handleDialogOpenChange = useCallback((nextOpen: boolean) => {
     setIsDialogOpen(nextOpen)
     if (nextOpen) {
       triggerConfetti('yes')
     }
   }, [])
+
+  return { isDialogOpen, setIsDialogOpen, handleDialogOpenChange }
+}
+
+function useMarketsWonClaimState() {
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [hiddenClaimSignature, setHiddenClaimSignature] = useState<string | null>(null)
+  return { isSubmitting, setIsSubmitting, hiddenClaimSignature, setHiddenClaimSignature }
+}
+
+function useMarketsWonShareOnX({
+  siteName,
+  totalProceeds,
+  userUsername,
+  userProxyWalletAddress,
+}: {
+  siteName: string
+  totalProceeds: number
+  userUsername: string | null | undefined
+  userProxyWalletAddress: string | null | undefined
+}) {
+  const [isSharingOnX, setIsSharingOnX] = useState(false)
 
   const handleShareOnX = useCallback(() => {
     if (typeof window === 'undefined') {
@@ -125,12 +138,12 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
 
     setIsSharingOnX(true)
     try {
-      const profileSlug = user?.username?.trim() || user?.proxy_wallet_address?.trim() || ''
+      const profileSlug = userUsername?.trim() || userProxyWalletAddress?.trim() || ''
       const shareTargetUrl = profileSlug
         ? new URL(buildPublicProfilePath(profileSlug) ?? '/', window.location.origin).toString()
         : window.location.origin
       const shareText = [
-        `I just won ${formatCurrency(summary.totalProceeds)} on ${siteName}!`,
+        `I just won ${formatCurrency(totalProceeds)} on ${siteName}!`,
         '',
         'Join me and put your money where your mouth is:',
       ].join('\n')
@@ -144,7 +157,31 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
     finally {
       window.setTimeout(setIsSharingOnX, 200, false)
     }
-  }, [siteName, summary.totalProceeds, user?.proxy_wallet_address, user?.username])
+  }, [siteName, totalProceeds, userProxyWalletAddress, userUsername])
+
+  return { isSharingOnX, handleShareOnX }
+}
+
+export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarketsWonCardClientProps) {
+  const { summary, markets } = data
+  const { isSubmitting, setIsSubmitting, hiddenClaimSignature, setHiddenClaimSignature } = useMarketsWonClaimState()
+  const { ensureTradingReady, openTradeRequirements } = useTradingOnboarding()
+  const { signMessageAsync } = useSignMessage()
+  const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const queryClient = useQueryClient()
+  const user = useUser()
+  const router = useRouter()
+  const site = useSiteIdentity()
+
+  const siteName = site.name
+  const { previewMarkets, previewExtraCount, claimableSignature, hasClaimableMarkets } = useMarketsWonClaimSignature(markets)
+  const { isDialogOpen, setIsDialogOpen, handleDialogOpenChange } = useMarketsWonDialogState()
+  const { isSharingOnX, handleShareOnX } = useMarketsWonShareOnX({
+    siteName,
+    totalProceeds: summary.totalProceeds,
+    userUsername: user?.username,
+    userProxyWalletAddress: user?.proxy_wallet_address,
+  })
 
   async function handleClaimAll() {
     if (isSubmitting) {

@@ -606,7 +606,7 @@ function clampCountdownDigit(value: number) {
   return Math.max(0, Math.min(9, value))
 }
 
-function RollingCountdownDigit({ digit }: { digit: number }) {
+function useRollingDigit(digit: number) {
   const nextDigit = clampCountdownDigit(digit)
   const [currentDigit, setCurrentDigit] = useState(() => nextDigit)
   const [previousDigit, setPreviousDigit] = useState<number | null>(null)
@@ -627,139 +627,18 @@ function RollingCountdownDigit({ digit }: { digit: number }) {
     setPreviousDigit(null)
   }
 
-  return (
-    <span className="relative inline-flex h-[1em] w-[0.72em] overflow-hidden">
-      {previousDigit !== null && (
-        <span
-          className={cn(
-            'absolute inset-0 flex items-center justify-center transition-all duration-200 ease-out',
-            isAnimating ? '-translate-y-full opacity-0' : 'translate-y-0 opacity-100',
-          )}
-        >
-          {previousDigit}
-        </span>
-      )}
-      <span
-        className={cn(
-          'absolute inset-0 flex items-center justify-center transition-all duration-200 ease-out',
-          previousDigit === null
-            ? 'translate-y-0 opacity-100'
-            : isAnimating
-              ? 'translate-y-0 opacity-100'
-              : 'translate-y-full opacity-0',
-        )}
-        onTransitionEnd={handleDigitTransitionEnd}
-      >
-        {currentDigit}
-      </span>
-    </span>
-  )
-}
-
-function AnimatedCountdownValue({ value }: { value: number }) {
-  const safeValue = Math.max(0, Math.floor(value))
-  const digits = safeValue.toString().padStart(2, '0').split('')
-
-  return (
-    <span className="inline-flex items-center leading-none tabular-nums">
-      {digits.map((digit, index) => (
-        <RollingCountdownDigit
-          key={index}
-          digit={Number(digit)}
-        />
-      ))}
-    </span>
-  )
-}
-
-export function shouldUseLiveSeriesChart(event: Event, config: EventLiveChartConfig | null | undefined) {
-  if (!config?.enabled) {
-    return false
+  return {
+    currentDigit,
+    previousDigit,
+    isAnimating,
+    handleDigitTransitionEnd,
   }
-
-  if (event.total_markets_count !== 1) {
-    return false
-  }
-
-  const seriesSlug = event.series_slug?.trim()
-  return Boolean(seriesSlug && seriesSlug === config.series_slug)
 }
 
-interface EventLiveSeriesChartProps {
-  event: Event
-  isMobile: boolean
-  seriesEvents?: EventSeriesEntry[]
-  config: EventLiveChartConfig
-}
-
-export default function EventLiveSeriesChart({
-  event,
-  isMobile,
-  seriesEvents = [],
-  config,
-}: EventLiveSeriesChartProps) {
-  const subscriptionSymbol = useMemo(
-    () => normalizeSubscriptionSymbol(config.topic, config.symbol),
-    [config.symbol, config.topic],
-  )
-  const resetKey = `${event.id}:${config.topic}:${config.event_type}:${subscriptionSymbol}`
-
-  return (
-    <EventLiveSeriesChartContent
-      key={resetKey}
-      event={event}
-      isMobile={isMobile}
-      seriesEvents={seriesEvents}
-      config={config}
-      subscriptionSymbol={subscriptionSymbol}
-    />
-  )
-}
-
-interface EventLiveSeriesChartContentProps {
-  event: Event
-  isMobile: boolean
-  seriesEvents: EventSeriesEntry[]
-  config: EventLiveChartConfig
-  subscriptionSymbol: string
-}
-
-function EventLiveSeriesChartContent({
-  event,
-  isMobile,
-  seriesEvents,
-  config,
-  subscriptionSymbol,
-}: EventLiveSeriesChartContentProps) {
-  const wsUrl = process.env.WS_LIVE_DATA_URL
-  const site = useSiteIdentity()
-  const { width: windowWidth } = useWindowSize()
-  const liveColor = config.line_color || '#F59E0B'
+function useLiveClockTick(isLiveView: boolean) {
   const [nowMs, setNowMs] = useState(0)
-  const [data, setData] = useState<DataPoint[]>([])
-  const [persistedFallbackPrice, setPersistedFallbackPrice] = useState<PersistedLivePrice | null>(
-    () => readPersistedLivePrice(config.topic, subscriptionSymbol),
-  )
-  const [baselinePrice, setBaselinePrice] = useState<number | null>(null)
-  const [referenceSnapshot, setReferenceSnapshot] = useState<LiveSeriesPriceSnapshot | null>(null)
-  const [status, setStatus] = useState<'connecting' | 'live' | 'offline'>(
-    () => (wsUrl ? 'connecting' : 'offline'),
-  )
-  const [activeView, setActiveView] = useState<'live' | 'market'>('live')
-  const isLiveView = activeView === 'live'
-  const startTimestamp = useMemo(() => parseUtcDate(event.start_date ?? null), [event.start_date])
-  const explicitEndTimestamp = useMemo(() => resolveEventEndTimestamp(event), [event])
-  const hasExplicitEndTimestamp = explicitEndTimestamp != null
-  const endTimestamp = explicitEndTimestamp ?? nowMs
-  const isEventClosed = hasExplicitEndTimestamp && nowMs >= endTimestamp
-  const isMarketClosed = useMemo(() => {
-    if (config.topic.trim().toLowerCase() !== 'equity_prices') {
-      return false
-    }
-    return !isUsEquityMarketOpen(nowMs)
-  }, [config.topic, nowMs])
 
-  useEffect(() => {
+  useEffect(function tickLiveClockWhileVisible() {
     if (!isLiveView) {
       return
     }
@@ -785,7 +664,7 @@ function EventLiveSeriesChartContent({
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
-    return () => {
+    return function stopLiveClockTicker() {
       if (frameId != null) {
         window.cancelAnimationFrame(frameId)
       }
@@ -793,7 +672,37 @@ function EventLiveSeriesChartContent({
     }
   }, [isLiveView])
 
-  useEffect(() => {
+  return nowMs
+}
+
+interface UseLiveSeriesDataParams {
+  config: EventLiveChartConfig
+  subscriptionSymbol: string
+  isLiveView: boolean
+  wsUrl: string | undefined
+  explicitEndTimestamp: number | null
+  startTimestamp: number | null
+}
+
+function useLiveSeriesData({
+  config,
+  subscriptionSymbol,
+  isLiveView,
+  wsUrl,
+  explicitEndTimestamp,
+  startTimestamp,
+}: UseLiveSeriesDataParams) {
+  const [data, setData] = useState<DataPoint[]>([])
+  const [persistedFallbackPrice, setPersistedFallbackPrice] = useState<PersistedLivePrice | null>(
+    () => readPersistedLivePrice(config.topic, subscriptionSymbol),
+  )
+  const [baselinePrice, setBaselinePrice] = useState<number | null>(null)
+  const [referenceSnapshot, setReferenceSnapshot] = useState<LiveSeriesPriceSnapshot | null>(null)
+  const [status, setStatus] = useState<'connecting' | 'live' | 'offline'>(
+    () => (wsUrl ? 'connecting' : 'offline'),
+  )
+
+  useEffect(function loadPriceSnapshotOnConfigChange() {
     const seriesSlug = config.series_slug?.trim()
     if (!seriesSlug) {
       return
@@ -860,13 +769,13 @@ function EventLiveSeriesChartContent({
 
     loadPriceSnapshot()
 
-    return () => {
+    return function cancelPriceSnapshotFetch() {
       isCancelled = true
       controller.abort()
     }
   }, [config.active_window_minutes, config.series_slug, config.topic, explicitEndTimestamp, startTimestamp, subscriptionSymbol])
 
-  useEffect(() => {
+  useEffect(function subscribeLivePriceWebSocket() {
     if (!isLiveView) {
       return
     }
@@ -1058,7 +967,7 @@ function EventLiveSeriesChartContent({
     connect()
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
-    return () => {
+    return function teardownLivePriceWebSocket() {
       isActive = false
       setStatus('offline')
       clearReconnect()
@@ -1076,14 +985,102 @@ function EventLiveSeriesChartContent({
     }
   }, [config.event_type, config.topic, isLiveView, wsUrl, subscriptionSymbol])
 
-  const series = useMemo<SeriesConfig[]>(
-    () => ([{
-      key: SERIES_KEY,
-      name: config.display_symbol || config.display_name,
-      color: liveColor,
-    }]),
-    [config.display_name, config.display_symbol, liveColor],
+  return {
+    data,
+    status,
+    baselinePrice,
+    referenceSnapshot,
+    persistedFallbackPrice,
+  }
+}
+
+interface UseCountdownParams {
+  endTimestamp: number
+  nowMs: number
+  hasExplicitEndTimestamp: boolean
+  isEventClosed: boolean
+}
+
+function useCountdown({
+  endTimestamp,
+  nowMs,
+  hasExplicitEndTimestamp,
+  isEventClosed,
+}: UseCountdownParams) {
+  const countdown = useMemo(() => {
+    const totalSeconds = Math.max(0, Math.floor((endTimestamp - nowMs) / 1000))
+    const showDays = totalSeconds > 24 * 60 * 60
+    const days = showDays ? Math.floor(totalSeconds / (24 * 60 * 60)) : 0
+    const hours = showDays
+      ? Math.floor((totalSeconds % (24 * 60 * 60)) / 3600)
+      : Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+
+    return {
+      totalSeconds,
+      showDays,
+      days,
+      hours,
+      minutes,
+      seconds,
+    }
+  }, [endTimestamp, nowMs])
+
+  const visibleCountdownUnits = useMemo(
+    () => getVisibleCountdownUnits(
+      countdown.showDays,
+      countdown.days,
+      countdown.hours,
+      countdown.minutes,
+      countdown.seconds,
+    ),
+    [countdown.showDays, countdown.days, countdown.hours, countdown.minutes, countdown.seconds],
   )
+
+  const countdownLeftLabel = useMemo(
+    () => toCountdownLeftLabel(
+      countdown.showDays,
+      countdown.days,
+      countdown.hours,
+      countdown.minutes,
+      countdown.seconds,
+    ),
+    [countdown.showDays, countdown.days, countdown.hours, countdown.minutes, countdown.seconds],
+  )
+
+  const shouldShowCountdown = hasExplicitEndTimestamp && !isEventClosed && countdown.totalSeconds > 0
+
+  return {
+    visibleCountdownUnits,
+    countdownLeftLabel,
+    shouldShowCountdown,
+  }
+}
+
+function useResolutionTimeLabels(endTimestamp: number) {
+  const etDateLabel = useMemo(
+    () => formatDateAtTimezone(endTimestamp, 'America/New_York'),
+    [endTimestamp],
+  )
+  const etTimeLabel = useMemo(
+    () => formatTimeAtTimezone(endTimestamp, 'America/New_York'),
+    [endTimestamp],
+  )
+  const utcDateLabel = useMemo(
+    () => formatDateAtTimezone(endTimestamp, 'UTC'),
+    [endTimestamp],
+  )
+  const utcTimeLabel = useMemo(
+    () => formatTimeAtTimezone(endTimestamp, 'UTC'),
+    [endTimestamp],
+  )
+
+  return { etDateLabel, etTimeLabel, utcDateLabel, utcTimeLabel }
+}
+
+function useLiveChartAxis({ isMobile, nowMs }: { isMobile: boolean, nowMs: number }) {
+  const { width: windowWidth } = useWindowSize()
 
   const chartWidth = useMemo(() => {
     if (!windowWidth) {
@@ -1095,6 +1092,58 @@ function EventLiveSeriesChartContent({
     return Math.min(windowWidth * 0.55, 900)
   }, [isMobile, windowWidth])
 
+  const xAxisTickValues = useMemo(() => {
+    const startMs = nowMs - LIVE_WINDOW_MS
+    const visibleStartMs = startMs + LIVE_X_AXIS_LEFT_LABEL_GUARD_MS
+    const firstTickMs = Math.ceil(startMs / LIVE_X_AXIS_STEP_MS) * LIVE_X_AXIS_STEP_MS
+    const ticks: Date[] = []
+
+    for (let tickMs = firstTickMs; tickMs <= nowMs; tickMs += LIVE_X_AXIS_STEP_MS) {
+      if (tickMs >= visibleStartMs) {
+        ticks.push(new Date(tickMs))
+      }
+    }
+
+    if (ticks.length >= 2) {
+      return ticks
+    }
+
+    return [
+      new Date(visibleStartMs),
+      new Date(nowMs),
+    ]
+  }, [nowMs])
+
+  const liveXAxisDomain = useMemo(
+    () => ({
+      start: new Date(nowMs - LIVE_WINDOW_MS),
+      end: new Date(nowMs),
+    }),
+    [nowMs],
+  )
+
+  return { chartWidth, xAxisTickValues, liveXAxisDomain }
+}
+
+interface UseLiveChartComputationsParams {
+  data: DataPoint[]
+  nowMs: number
+  referenceSnapshot: LiveSeriesPriceSnapshot | null
+  persistedFallbackPrice: PersistedLivePrice | null
+  config: EventLiveChartConfig
+  startTimestamp: number | null
+  endTimestamp: number
+}
+
+function useLiveChartComputations({
+  data,
+  nowMs,
+  referenceSnapshot,
+  persistedFallbackPrice,
+  config,
+  startTimestamp,
+  endTimestamp,
+}: UseLiveChartComputationsParams) {
   const fallbackCurrentPrice = useMemo(() => {
     if (referenceSnapshot) {
       const snapshotPrice = normalizeLiveChartPrice(
@@ -1127,6 +1176,7 @@ function EventLiveSeriesChartContent({
 
     return inferIntervalMsFromSeriesSlug(config.series_slug)
   }, [config.active_window_minutes, config.series_slug, referenceSnapshot?.interval_ms])
+
   const tradingWindowStartMs = useMemo(() => {
     if (startTimestamp != null && startTimestamp > 0 && startTimestamp < endTimestamp) {
       return startTimestamp
@@ -1139,7 +1189,6 @@ function EventLiveSeriesChartContent({
 
     return endTimestamp - tradingWindowMs
   }, [endTimestamp, referenceSnapshot?.event_window_start_ms, startTimestamp, tradingWindowMs])
-  const isTradingWindowActive = !isEventClosed && nowMs >= tradingWindowStartMs
 
   const renderData = useMemo(() => {
     if (!data.length) {
@@ -1195,6 +1244,188 @@ function EventLiveSeriesChartContent({
 
     return next
   }, [data, nowMs])
+
+  return {
+    fallbackCurrentPrice,
+    tradingWindowStartMs,
+    renderData,
+  }
+}
+
+function RollingCountdownDigit({ digit }: { digit: number }) {
+  const {
+    currentDigit,
+    previousDigit,
+    isAnimating,
+    handleDigitTransitionEnd,
+  } = useRollingDigit(digit)
+
+  return (
+    <span className="relative inline-flex h-[1em] w-[0.72em] overflow-hidden">
+      {previousDigit !== null && (
+        <span
+          className={cn(
+            'absolute inset-0 flex items-center justify-center transition-all duration-200 ease-out',
+            isAnimating ? '-translate-y-full opacity-0' : 'translate-y-0 opacity-100',
+          )}
+        >
+          {previousDigit}
+        </span>
+      )}
+      <span
+        className={cn(
+          'absolute inset-0 flex items-center justify-center transition-all duration-200 ease-out',
+          previousDigit === null
+            ? 'translate-y-0 opacity-100'
+            : isAnimating
+              ? 'translate-y-0 opacity-100'
+              : 'translate-y-full opacity-0',
+        )}
+        onTransitionEnd={handleDigitTransitionEnd}
+      >
+        {currentDigit}
+      </span>
+    </span>
+  )
+}
+
+function AnimatedCountdownValue({ value }: { value: number }) {
+  const safeValue = Math.max(0, Math.floor(value))
+  const digits = safeValue.toString().padStart(2, '0').split('')
+
+  return (
+    <span className="inline-flex items-center leading-none tabular-nums">
+      {digits.map((digit, index) => (
+        <RollingCountdownDigit
+          key={index}
+          digit={Number(digit)}
+        />
+      ))}
+    </span>
+  )
+}
+
+export function shouldUseLiveSeriesChart(event: Event, config: EventLiveChartConfig | null | undefined) {
+  if (!config?.enabled) {
+    return false
+  }
+
+  if (event.total_markets_count !== 1) {
+    return false
+  }
+
+  const seriesSlug = event.series_slug?.trim()
+  return Boolean(seriesSlug && seriesSlug === config.series_slug)
+}
+
+interface EventLiveSeriesChartProps {
+  event: Event
+  isMobile: boolean
+  seriesEvents?: EventSeriesEntry[]
+  config: EventLiveChartConfig
+}
+
+export default function EventLiveSeriesChart({
+  event,
+  isMobile,
+  seriesEvents = [],
+  config,
+}: EventLiveSeriesChartProps) {
+  const subscriptionSymbol = useMemo(
+    () => normalizeSubscriptionSymbol(config.topic, config.symbol),
+    [config.symbol, config.topic],
+  )
+  const resetKey = `${event.id}:${config.topic}:${config.event_type}:${subscriptionSymbol}`
+
+  return (
+    <EventLiveSeriesChartContent
+      key={resetKey}
+      event={event}
+      isMobile={isMobile}
+      seriesEvents={seriesEvents}
+      config={config}
+      subscriptionSymbol={subscriptionSymbol}
+    />
+  )
+}
+
+interface EventLiveSeriesChartContentProps {
+  event: Event
+  isMobile: boolean
+  seriesEvents: EventSeriesEntry[]
+  config: EventLiveChartConfig
+  subscriptionSymbol: string
+}
+
+function EventLiveSeriesChartContent({
+  event,
+  isMobile,
+  seriesEvents,
+  config,
+  subscriptionSymbol,
+}: EventLiveSeriesChartContentProps) {
+  const wsUrl = process.env.WS_LIVE_DATA_URL
+  const liveColor = config.line_color || '#F59E0B'
+  const [activeView, setActiveView] = useState<'live' | 'market'>('live')
+  const isLiveView = activeView === 'live'
+  const isMarketView = activeView === 'market'
+  const isLiveChartView = activeView === 'live'
+
+  const startTimestamp = useMemo(() => parseUtcDate(event.start_date ?? null), [event.start_date])
+  const explicitEndTimestamp = useMemo(() => resolveEventEndTimestamp(event), [event])
+  const hasExplicitEndTimestamp = explicitEndTimestamp != null
+
+  const nowMs = useLiveClockTick(isLiveView)
+  const endTimestamp = explicitEndTimestamp ?? nowMs
+  const isEventClosed = hasExplicitEndTimestamp && nowMs >= endTimestamp
+  const isMarketClosed = useMemo(() => {
+    if (config.topic.trim().toLowerCase() !== 'equity_prices') {
+      return false
+    }
+    return !isUsEquityMarketOpen(nowMs)
+  }, [config.topic, nowMs])
+
+  const {
+    data,
+    status,
+    baselinePrice,
+    referenceSnapshot,
+    persistedFallbackPrice,
+  } = useLiveSeriesData({
+    config,
+    subscriptionSymbol,
+    isLiveView,
+    wsUrl,
+    explicitEndTimestamp,
+    startTimestamp,
+  })
+
+  const series = useMemo<SeriesConfig[]>(
+    () => ([{
+      key: SERIES_KEY,
+      name: config.display_symbol || config.display_name,
+      color: liveColor,
+    }]),
+    [config.display_name, config.display_symbol, liveColor],
+  )
+
+  const { chartWidth, xAxisTickValues, liveXAxisDomain } = useLiveChartAxis({ isMobile, nowMs })
+
+  const {
+    fallbackCurrentPrice,
+    tradingWindowStartMs,
+    renderData,
+  } = useLiveChartComputations({
+    data,
+    nowMs,
+    referenceSnapshot,
+    persistedFallbackPrice,
+    config,
+    startTimestamp,
+    endTimestamp,
+  })
+
+  const isTradingWindowActive = !isEventClosed && nowMs >= tradingWindowStartMs
 
   const lastPoint = renderData.at(-1)
   const currentPrice = typeof lastPoint?.[SERIES_KEY] === 'number'
@@ -1265,92 +1496,26 @@ function EventLiveSeriesChartContent({
   const targetLineGuideColor = hexToRgba('#94a3b8', 0.62)
   const targetBadgeColor = '#94a3b8'
   const currentPriceGuideColor = hexToRgba(liveColor, 0.62)
-  const countdown = useMemo(() => {
-    const totalSeconds = Math.max(0, Math.floor((endTimestamp - nowMs) / 1000))
-    const showDays = totalSeconds > 24 * 60 * 60
-    const days = showDays ? Math.floor(totalSeconds / (24 * 60 * 60)) : 0
-    const hours = showDays
-      ? Math.floor((totalSeconds % (24 * 60 * 60)) / 3600)
-      : Math.floor(totalSeconds / 3600)
-    const minutes = Math.floor((totalSeconds % 3600) / 60)
-    const seconds = totalSeconds % 60
 
-    return {
-      totalSeconds,
-      showDays,
-      days,
-      hours,
-      minutes,
-      seconds,
-    }
-  }, [endTimestamp, nowMs])
-  const shouldShowCountdown = hasExplicitEndTimestamp && !isEventClosed && countdown.totalSeconds > 0
-  const xAxisTickValues = useMemo(() => {
-    const startMs = nowMs - LIVE_WINDOW_MS
-    const visibleStartMs = startMs + LIVE_X_AXIS_LEFT_LABEL_GUARD_MS
-    const firstTickMs = Math.ceil(startMs / LIVE_X_AXIS_STEP_MS) * LIVE_X_AXIS_STEP_MS
-    const ticks: Date[] = []
+  const {
+    visibleCountdownUnits,
+    countdownLeftLabel,
+    shouldShowCountdown,
+  } = useCountdown({
+    endTimestamp,
+    nowMs,
+    hasExplicitEndTimestamp,
+    isEventClosed,
+  })
 
-    for (let tickMs = firstTickMs; tickMs <= nowMs; tickMs += LIVE_X_AXIS_STEP_MS) {
-      if (tickMs >= visibleStartMs) {
-        ticks.push(new Date(tickMs))
-      }
-    }
+  const { etDateLabel, etTimeLabel, utcDateLabel, utcTimeLabel } = useResolutionTimeLabels(endTimestamp)
+  const site = useSiteIdentity()
+  const watermark = {
+    iconSvg: site.logoSvg,
+    iconImageUrl: site.logoImageUrl,
+    label: site.name,
+  }
 
-    if (ticks.length >= 2) {
-      return ticks
-    }
-
-    return [
-      new Date(visibleStartMs),
-      new Date(nowMs),
-    ]
-  }, [nowMs])
-  const liveXAxisDomain = useMemo(
-    () => ({
-      start: new Date(nowMs - LIVE_WINDOW_MS),
-      end: new Date(nowMs),
-    }),
-    [nowMs],
-  )
-  const visibleCountdownUnits = useMemo(
-    () => getVisibleCountdownUnits(
-      countdown.showDays,
-      countdown.days,
-      countdown.hours,
-      countdown.minutes,
-      countdown.seconds,
-    ),
-    [countdown.showDays, countdown.days, countdown.hours, countdown.minutes, countdown.seconds],
-  )
-  const countdownLeftLabel = useMemo(
-    () => toCountdownLeftLabel(
-      countdown.showDays,
-      countdown.days,
-      countdown.hours,
-      countdown.minutes,
-      countdown.seconds,
-    ),
-    [countdown.showDays, countdown.days, countdown.hours, countdown.minutes, countdown.seconds],
-  )
-  const etDateLabel = useMemo(
-    () => formatDateAtTimezone(endTimestamp, 'America/New_York'),
-    [endTimestamp],
-  )
-  const etTimeLabel = useMemo(
-    () => formatTimeAtTimezone(endTimestamp, 'America/New_York'),
-    [endTimestamp],
-  )
-  const utcDateLabel = useMemo(
-    () => formatDateAtTimezone(endTimestamp, 'UTC'),
-    [endTimestamp],
-  )
-  const utcTimeLabel = useMemo(
-    () => formatTimeAtTimezone(endTimestamp, 'UTC'),
-    [endTimestamp],
-  )
-  const isMarketView = activeView === 'market'
-  const isLiveChartView = activeView === 'live'
   const liveSwitchIconStyle = isLiveChartView
     ? {
         color: liveColor,
@@ -1365,14 +1530,6 @@ function EventLiveSeriesChartContent({
         transform: 'translateX(0)',
       }
 
-  const watermark = useMemo(
-    () => ({
-      iconSvg: site.logoSvg,
-      iconImageUrl: site.logoImageUrl,
-      label: site.name,
-    }),
-    [site.logoImageUrl, site.logoSvg, site.name],
-  )
   const countdownEndedLogo = (watermark.iconSvg || watermark.label)
     ? (
         <div

@@ -60,6 +60,20 @@ interface EventMergeSharesDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+function useMergeSharesFormState() {
+  const [amount, setAmount] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  function resetFormState() {
+    setAmount('')
+    setError(null)
+    setIsSubmitting(false)
+  }
+
+  return { amount, setAmount, error, setError, isSubmitting, setIsSubmitting, resetFormState }
+}
+
 export default function EventMergeSharesDialog({
   open,
   availableShares,
@@ -81,9 +95,7 @@ export default function EventMergeSharesDialog({
   const isMobile = useIsMobile()
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
-  const [amount, setAmount] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { amount, setAmount, error, setError, isSubmitting, setIsSubmitting, resetFormState } = useMergeSharesFormState()
 
   function formatFullPrecision(value: number) {
     if (!Number.isFinite(value)) {
@@ -100,14 +112,8 @@ export default function EventMergeSharesDialog({
     return trimmed || '0'
   }
 
-  function resetDialogState() {
-    setAmount('')
-    setError(null)
-    setIsSubmitting(false)
-  }
-
   function closeDialog() {
-    resetDialogState()
+    resetFormState()
     onOpenChange(false)
   }
 

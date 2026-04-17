@@ -16,12 +16,26 @@ interface EventTabsProps {
   initialTab?: EventTabKey
 }
 
+function useActiveTab(initialTab: EventTabKey) {
+  const [activeTab, setActiveTab] = useState<EventTabKey>(initialTab)
+  return { activeTab, setActiveTab }
+}
+
+function useCommentsCount(commentMetrics: ReturnType<typeof useCommentMetrics>['data']) {
+  return useMemo(() => {
+    if (commentMetrics?.comments_count != null) {
+      return commentMetrics.comments_count
+    }
+    return null
+  }, [commentMetrics?.comments_count])
+}
+
 export default function EventTabs({
   event,
   user,
   initialTab = 'comments',
 }: EventTabsProps) {
-  const [activeTab, setActiveTab] = useState<EventTabKey>(initialTab)
+  const { activeTab, setActiveTab } = useActiveTab(initialTab)
   const { data: commentMetrics } = useCommentMetrics(event.slug)
   const { status: liveCommentsStatus } = useLiveCommentsChannel({
     eventSlug: event.slug,
@@ -29,12 +43,7 @@ export default function EventTabs({
     enabled: activeTab === 'comments',
   })
   const marketChannelStatus = useMarketChannelStatus()
-  const commentsCount = useMemo(() => {
-    if (commentMetrics?.comments_count != null) {
-      return commentMetrics.comments_count
-    }
-    return null
-  }, [commentMetrics?.comments_count])
+  const commentsCount = useCommentsCount(commentMetrics)
 
   return (
     <div className="mt-6">
