@@ -1,60 +1,49 @@
 import type { MarketPositionTag } from '@/app/[locale]/(platform)/event/[slug]/_components/EventMarketCard'
 import type { EventMarketRow } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useEventMarketRows'
-import type { MarketDetailTab } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useMarketDetailController'
 import type { SharesByCondition } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useUserShareBalances'
 import type { OrderBookSummariesResponse } from '@/app/[locale]/(platform)/event/[slug]/_types/EventOrderBookTypes'
-import type { DataApiActivity } from '@/lib/data-api/user'
 import type { NormalizedBookLevel } from '@/lib/order-panel-utils'
 import type { Event, UserPosition } from '@/types'
 import { useQuery } from '@tanstack/react-query'
-import { CheckIcon, ChevronDownIcon, LockKeyholeIcon, RefreshCwIcon, XIcon } from 'lucide-react'
-import { useExtracted, useLocale } from 'next-intl'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ChevronDownIcon } from 'lucide-react'
+import { useExtracted } from 'next-intl'
+import { useCallback, useMemo, useState } from 'react'
 import SellPositionModal from '@/app/[locale]/(platform)/_components/SellPositionModal'
-import ConnectionStatusIndicator from '@/app/[locale]/(platform)/event/[slug]/_components/ConnectionStatusIndicator'
 import EventMarketCard from '@/app/[locale]/(platform)/event/[slug]/_components/EventMarketCard'
-import { useMarketChannelStatus } from '@/app/[locale]/(platform)/event/[slug]/_components/EventMarketChannelProvider'
-import EventMarketHistory from '@/app/[locale]/(platform)/event/[slug]/_components/EventMarketHistory'
-import EventMarketOpenOrders from '@/app/[locale]/(platform)/event/[slug]/_components/EventMarketOpenOrders'
-import EventMarketPositions from '@/app/[locale]/(platform)/event/[slug]/_components/EventMarketPositions'
-import EventOrderBook, { useOrderBookSummaries } from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderBook'
-import MarketOutcomeGraph from '@/app/[locale]/(platform)/event/[slug]/_components/MarketOutcomeGraph'
-import ResolutionTimelinePanel from '@/app/[locale]/(platform)/event/[slug]/_components/ResolutionTimelinePanel'
+import { useOrderBookSummaries } from '@/app/[locale]/(platform)/event/[slug]/_components/EventOrderBook'
+import MarketDetailTabs from '@/app/[locale]/(platform)/event/[slug]/_components/MarketDetailTabs'
+import OtherOutcomeRow from '@/app/[locale]/(platform)/event/[slug]/_components/OtherOutcomeRow'
+import ResolvedMarketRow from '@/app/[locale]/(platform)/event/[slug]/_components/ResolvedMarketRow'
 import { useChanceRefresh } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useChanceRefresh'
 import { useEventMarketRows } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useEventMarketRows'
 import { useMarketDetailController } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useMarketDetailController'
 import { useUserOpenOrdersQuery } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useUserOpenOrdersQuery'
 import { useUserShareBalances } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useUserShareBalances'
 import { useXTrackerTweetCount } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useXTrackerTweetCount'
+import { isMarketResolved, POSITION_VISIBILITY_THRESHOLD } from '@/app/[locale]/(platform)/event/[slug]/_utils/eventMarketUtils'
 import {
   resolveEventResolvedOutcomeIndex,
-  toResolutionTimelineOutcome,
 } from '@/app/[locale]/(platform)/event/[slug]/_utils/eventResolvedOutcome'
 import { isTweetMarketsEvent } from '@/app/[locale]/(platform)/event/[slug]/_utils/eventTweetMarkets'
 import { isResolutionReviewActive } from '@/app/[locale]/(platform)/event/[slug]/_utils/resolution-timeline-builder'
-import EventIconImage from '@/components/EventIconImage'
-import { Button } from '@/components/ui/button'
 import { useCurrentTimestamp } from '@/hooks/useCurrentTimestamp'
 import { useOutcomeLabel } from '@/hooks/useOutcomeLabel'
-import { useSiteIdentity } from '@/hooks/useSiteIdentity'
-import { resolveUniqueBinaryWinningOutcomeIndexFromPayoutNumerators } from '@/lib/binary-outcome-resolution'
 import { ORDER_SIDE, ORDER_TYPE, OUTCOME_INDEX } from '@/lib/constants'
-import { fetchUserActivityData, fetchUserOtherBalance, fetchUserPositionsForMarket } from '@/lib/data-api/user'
-import { formatAmountInputValue, formatSharesLabel, fromMicro } from '@/lib/formatters'
+import { fetchUserOtherBalance, fetchUserPositionsForMarket } from '@/lib/data-api/user'
+import { formatAmountInputValue, fromMicro } from '@/lib/formatters'
 import { resolveOutcomeUnitPrice } from '@/lib/market-pricing'
 import { applyPositionDeltasToUserPositions } from '@/lib/optimistic-trading'
 import { calculateMarketFill, normalizeBookLevels } from '@/lib/order-panel-utils'
-import { buildUmaProposeUrl, buildUmaSettledUrl } from '@/lib/uma'
 import { cn } from '@/lib/utils'
 import { useIsSingleMarket, useOrder } from '@/stores/useOrder'
 import { useUser } from '@/stores/useUser'
+
+export { resolveWinningOutcomeIndex } from '@/app/[locale]/(platform)/event/[slug]/_utils/eventMarketUtils'
 
 interface EventMarketsProps {
   event: Event
   isMobile: boolean
 }
-
-const POSITION_VISIBILITY_THRESHOLD = 0.01
 
 function toNumber(value: unknown) {
   if (value === null || value === undefined) {
@@ -65,25 +54,12 @@ function toNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : null
 }
 
-function isMarketResolved(market: Event['markets'][number]) {
-  return Boolean(market.is_resolved || market.condition?.resolved)
-}
-
 function getMarketEndTime(market: Event['markets'][number]) {
   if (!market.end_time) {
     return null
   }
   const parsed = Date.parse(market.end_time)
   return Number.isNaN(parsed) ? null : parsed
-}
-
-export function resolveWinningOutcomeIndex(market: Event['markets'][number]) {
-  const explicitWinner = market.outcomes.find(outcome => outcome.is_winning_outcome)
-  if (explicitWinner && (explicitWinner.outcome_index === OUTCOME_INDEX.YES || explicitWinner.outcome_index === OUTCOME_INDEX.NO)) {
-    return explicitWinner.outcome_index
-  }
-
-  return resolveUniqueBinaryWinningOutcomeIndexFromPayoutNumerators(market.condition?.payout_numerators)
 }
 
 function useTweetMarketResolution({
@@ -987,450 +963,5 @@ export default function EventMarkets({ event, isMobile }: EventMarketsProps) {
         />
       )}
     </>
-  )
-}
-
-function ResolvedMarketRow({
-  row,
-  showMarketIcon,
-  isExpanded,
-  resolvedOutcomeIndexOverride = null,
-  onToggle,
-}: {
-  row: EventMarketRow
-  showMarketIcon: boolean
-  isExpanded: boolean
-  resolvedOutcomeIndexOverride?: typeof OUTCOME_INDEX.YES | typeof OUTCOME_INDEX.NO | null
-  onToggle: () => void
-}) {
-  const t = useExtracted()
-  const locale = useLocale()
-  const normalizeOutcomeLabel = useOutcomeLabel()
-  const { market } = row
-  const resolvedOutcomeIndex = resolvedOutcomeIndexOverride ?? resolveWinningOutcomeIndex(market)
-  const hasResolvedOutcome = resolvedOutcomeIndex === OUTCOME_INDEX.YES || resolvedOutcomeIndex === OUTCOME_INDEX.NO
-  const isYesOutcome = resolvedOutcomeIndex === OUTCOME_INDEX.YES
-  const resolvedOutcomeText = market.outcomes.find(
-    outcome => outcome.outcome_index === resolvedOutcomeIndex,
-  )?.outcome_text
-  const resolvedOutcomeLabel = (resolvedOutcomeText ? normalizeOutcomeLabel(resolvedOutcomeText) : '')
-    || resolvedOutcomeText
-    || (isYesOutcome ? t('Yes') : t('No'))
-  const resolvedVolume = Number.isFinite(market.volume) ? market.volume : 0
-  const shouldShowIcon = showMarketIcon && Boolean(market.icon_url)
-
-  return (
-    <div
-      className={cn(
-        `
-          group relative z-0 flex w-full cursor-pointer flex-col items-start py-3 pr-2 pl-4 transition-all duration-200
-          ease-in-out
-          before:pointer-events-none before:absolute before:-inset-x-3 before:inset-y-0 before:-z-10 before:rounded-lg
-          before:bg-black/5 before:opacity-0 before:transition-opacity before:duration-200 before:content-['']
-          hover:before:opacity-100
-          lg:flex-row lg:items-center lg:rounded-lg lg:px-0
-          dark:before:bg-white/5
-        `,
-      )}
-      role="button"
-      tabIndex={0}
-      aria-expanded={isExpanded}
-      onClick={onToggle}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onToggle()
-        }
-      }}
-    >
-      <div className="flex w-full flex-col gap-3 lg:flex-row lg:items-center">
-        <div className="flex w-full items-start gap-3 lg:w-2/5">
-          {shouldShowIcon && (
-            <EventIconImage
-              src={market.icon_url}
-              alt={market.title}
-              sizes="42px"
-              containerClassName="size-[42px] shrink-0 rounded-md"
-            />
-          )}
-          <div>
-            <div className="text-sm font-bold underline-offset-2 group-hover:underline">
-              {market.short_title || market.title}
-            </div>
-            <div className="text-sm text-muted-foreground">
-              $
-              {t('{amount} Vol.', {
-                amount: `$${resolvedVolume.toLocaleString(locale, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}`,
-              })}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex w-full justify-end lg:ms-auto lg:w-auto">
-          {hasResolvedOutcome
-            ? (
-                <span className="inline-flex items-center gap-2 text-sm font-semibold text-foreground">
-                  <span className="text-base font-bold">{resolvedOutcomeLabel}</span>
-                  <span className={cn(
-                    'flex size-4 items-center justify-center rounded-full',
-                    isYesOutcome ? 'bg-yes' : 'bg-no',
-                  )}
-                  >
-                    {isYesOutcome
-                      ? <CheckIcon className="size-3 text-background" strokeWidth={2.5} />
-                      : <XIcon className="size-3 text-background" strokeWidth={2.5} />}
-                  </span>
-                </span>
-              )
-            : (
-                <span className="text-sm font-semibold text-muted-foreground">{t('Resolved')}</span>
-              )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function OtherOutcomeRow({ shares, showMarketIcon }: { shares: number, showMarketIcon?: boolean }) {
-  const t = useExtracted()
-  const sharesLabel = formatSharesLabel(shares, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
-
-  return (
-    <div
-      className={cn(
-        `
-          relative z-0 flex w-full cursor-default flex-col items-start py-3 pr-2 pl-4 transition-all duration-200
-          ease-in-out
-          before:pointer-events-none before:absolute before:-inset-x-3 before:inset-y-0 before:-z-10 before:rounded-lg
-          before:bg-black/5 before:opacity-0 before:transition-opacity before:duration-200 before:content-['']
-          hover:before:opacity-100
-          lg:flex-row lg:items-center lg:rounded-lg lg:px-0
-          dark:before:bg-white/5
-        `,
-      )}
-    >
-      <div className="flex w-full flex-col gap-2 lg:w-2/5">
-        <div className="flex items-start gap-3">
-          {showMarketIcon && (
-            <div className="size-10.5 shrink-0 rounded-md bg-muted/60" aria-hidden="true" />
-          )}
-          <div className="text-sm font-bold text-foreground">{t('Other')}</div>
-        </div>
-        <div>
-          <span className={cn(
-            `
-              inline-flex items-center gap-1 rounded-sm bg-yes/15 px-1.5 py-0.5 text-xs/tight font-semibold
-              text-yes-foreground
-            `,
-          )}
-          >
-            <LockKeyholeIcon className="size-3 text-yes" />
-            <span className="tabular-nums">{sharesLabel}</span>
-            <span>{t('Yes')}</span>
-          </span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-interface MarketDetailTabsProps {
-  currentTimestamp: number | null
-  market: Event['markets'][number]
-  event: Event
-  isMobile: boolean
-  isNegRiskEnabled: boolean
-  isNegRiskAugmented: boolean
-  variant?: 'default' | 'resolved'
-  resolvedOutcomeIndexOverride?: typeof OUTCOME_INDEX.YES | typeof OUTCOME_INDEX.NO | null
-  convertOptions: Array<{ id: string, label: string, shares: number, conditionId: string }>
-  eventOutcomes: Array<{ conditionId: string, questionId?: string, label: string, iconUrl?: string | null }>
-  activeOutcomeForMarket: Event['markets'][number]['outcomes'][number] | undefined
-  tabController: {
-    selected: MarketDetailTab | undefined
-    select: (tabId: MarketDetailTab) => void
-  }
-  orderBookData: {
-    summaries: OrderBookSummariesResponse | undefined
-    isLoading: boolean
-    refetch: () => Promise<unknown>
-    isRefetching: boolean
-  }
-  sharesByCondition: SharesByCondition
-}
-
-function MarketDetailTabs({
-  currentTimestamp,
-  market,
-  event,
-  isMobile,
-  isNegRiskEnabled,
-  isNegRiskAugmented,
-  variant = 'default',
-  resolvedOutcomeIndexOverride = null,
-  convertOptions,
-  eventOutcomes,
-  activeOutcomeForMarket,
-  tabController,
-  orderBookData,
-  sharesByCondition,
-}: MarketDetailTabsProps) {
-  const t = useExtracted()
-  const { name: siteName } = useSiteIdentity()
-  const user = useUser()
-  const marketChannelStatus = useMarketChannelStatus()
-  const { selected: controlledTab, select } = tabController
-  const positionSizeThreshold = POSITION_VISIBILITY_THRESHOLD
-  const isResolvedView = variant === 'resolved'
-  const isResolvedMarket = isMarketResolved(market)
-  const shouldHideOrderBook = isResolvedView || isResolvedMarket
-  const marketShares = sharesByCondition?.[market.condition_id]
-  const yesShares = marketShares?.[OUTCOME_INDEX.YES] ?? 0
-  const noShares = marketShares?.[OUTCOME_INDEX.NO] ?? 0
-  const hasPositions = Boolean(
-    user?.proxy_wallet_address
-    && marketShares
-    && (yesShares >= positionSizeThreshold || noShares >= positionSizeThreshold),
-  )
-
-  const { data: openOrdersData } = useUserOpenOrdersQuery({
-    userId: user?.id,
-    eventSlug: event.slug,
-    conditionId: market.condition_id,
-    enabled: Boolean(user?.id) && !isResolvedView,
-  })
-  const hasOpenOrders = useMemo(() => {
-    if (isResolvedView) {
-      return false
-    }
-    const pages = openOrdersData?.pages ?? []
-    return pages.some(page => page.data.length > 0)
-  }, [isResolvedView, openOrdersData?.pages])
-
-  const { data: historyPreview } = useQuery<DataApiActivity[]>({
-    queryKey: ['user-market-activity-preview', user?.proxy_wallet_address, market.condition_id],
-    queryFn: ({ signal }) =>
-      fetchUserActivityData({
-        pageParam: 0,
-        userAddress: user?.proxy_wallet_address ?? '',
-        conditionId: market.condition_id,
-        signal,
-      }),
-    enabled: Boolean(user?.proxy_wallet_address && market.condition_id) && !isResolvedView,
-    staleTime: 1000 * 60 * 5,
-    gcTime: 1000 * 60 * 10,
-  })
-  const hasHistory = useMemo(
-    () => {
-      if (isResolvedView) {
-        return false
-      }
-      return (historyPreview ?? []).some(activity =>
-        activity.type?.toLowerCase() === 'trade'
-        && activity.conditionId === market.condition_id)
-    },
-    [historyPreview, isResolvedView, market.condition_id],
-  )
-
-  const visibleTabs = useMemo(() => {
-    if (isResolvedView) {
-      return [
-        { id: 'graph', label: t('Graph') },
-        { id: 'history', label: t('History') },
-        { id: 'resolution', label: t('Resolution') },
-      ] satisfies Array<{ id: MarketDetailTab, label: string }>
-    }
-
-    const tabs: Array<{ id: MarketDetailTab, label: string }> = [
-      { id: 'graph', label: t('Graph') },
-    ]
-
-    if (!shouldHideOrderBook) {
-      tabs.unshift({ id: 'orderBook', label: t('Order Book') })
-    }
-
-    if (hasOpenOrders) {
-      const graphTabIndex = tabs.findIndex(tab => tab.id === 'graph')
-      const insertionIndex = graphTabIndex === -1 ? tabs.length : graphTabIndex
-      tabs.splice(insertionIndex, 0, { id: 'openOrders', label: t('Open Orders') })
-    }
-    if (hasPositions) {
-      tabs.unshift({ id: 'positions', label: t('Positions') })
-    }
-    if (hasHistory) {
-      tabs.push({ id: 'history', label: t('History') })
-    }
-    tabs.push({ id: 'resolution', label: t('Resolution') })
-    return tabs
-  }, [hasHistory, hasOpenOrders, hasPositions, isResolvedView, shouldHideOrderBook, t])
-
-  const selectedTab = useMemo<MarketDetailTab>(() => {
-    if (controlledTab && visibleTabs.some(tab => tab.id === controlledTab)) {
-      return controlledTab
-    }
-    return visibleTabs[0]?.id ?? 'graph'
-  }, [controlledTab, visibleTabs])
-
-  const proposeUrl = useMemo(
-    () => buildUmaProposeUrl(market.condition, siteName),
-    [market.condition, siteName],
-  )
-  const settledUrl = useMemo(
-    () => buildUmaSettledUrl(market.condition, siteName) ?? buildUmaProposeUrl(market.condition, siteName),
-    [market.condition, siteName],
-  )
-
-  useEffect(function syncSelectedTabWithController() {
-    if (selectedTab !== controlledTab) {
-      select(selectedTab)
-    }
-  }, [controlledTab, select, selectedTab])
-
-  return (
-    <div className="pt-0">
-      <div className="px-0">
-        <div className="flex items-center gap-2 border-b">
-          <div className="flex w-0 flex-1 gap-4 overflow-x-auto">
-            {visibleTabs.map((tab) => {
-              const isActive = selectedTab === tab.id
-              return (
-                <button
-                  key={`${market.condition_id}-${tab.id}`}
-                  type="button"
-                  className={cn(
-                    `border-b-2 border-transparent pt-1 pb-2 text-sm font-semibold whitespace-nowrap transition-colors`,
-                    isActive
-                      ? 'border-primary text-foreground'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    select(tab.id)
-                  }}
-                >
-                  {tab.label}
-                </button>
-              )
-            })}
-          </div>
-
-          {!shouldHideOrderBook && (
-            <ConnectionStatusIndicator className="-mt-2" status={marketChannelStatus} />
-          )}
-
-          {!shouldHideOrderBook && (
-            <button
-              type="button"
-              className={cn(
-                `
-                  -mt-1 ml-auto inline-flex size-7 items-center justify-center rounded-sm text-muted-foreground
-                  transition-colors
-                `,
-                'hover:bg-muted/70 hover:text-foreground',
-                'focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none',
-              )}
-              aria-label={t('Refresh order book')}
-              title={t('Refresh order book')}
-              onClick={() => { void orderBookData.refetch() }}
-              disabled={orderBookData.isLoading || orderBookData.isRefetching}
-            >
-              <RefreshCwIcon
-                className={cn(
-                  'size-3',
-                  { 'animate-spin': orderBookData.isLoading || orderBookData.isRefetching },
-                )}
-              />
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className={cn('px-0', selectedTab === 'orderBook' ? 'pt-4 pb-0' : 'py-4')}>
-        {selectedTab === 'orderBook' && !shouldHideOrderBook && (
-          <EventOrderBook
-            market={market}
-            outcome={activeOutcomeForMarket}
-            summaries={orderBookData.summaries}
-            isLoadingSummaries={orderBookData.isLoading}
-            eventSlug={event.slug}
-            openMobileOrderPanelOnLevelSelect={isMobile}
-          />
-        )}
-
-        {selectedTab === 'graph' && activeOutcomeForMarket && (
-          <MarketOutcomeGraph
-            market={market}
-            outcome={activeOutcomeForMarket}
-            allMarkets={event.markets}
-            eventCreatedAt={event.created_at}
-            isMobile={isMobile}
-            currentTimestamp={currentTimestamp}
-          />
-        )}
-
-        {selectedTab === 'positions' && (
-          <EventMarketPositions
-            market={market}
-            eventId={event.id}
-            eventSlug={event.slug}
-            isNegRiskEnabled={isNegRiskEnabled}
-            isNegRiskAugmented={isNegRiskAugmented}
-            convertOptions={convertOptions}
-            eventOutcomes={eventOutcomes}
-            negRiskMarketId={event.neg_risk_market_id}
-          />
-        )}
-
-        {selectedTab === 'openOrders' && <EventMarketOpenOrders market={market} eventSlug={event.slug} />}
-
-        {selectedTab === 'history' && <EventMarketHistory market={market} />}
-
-        {selectedTab === 'resolution' && (
-          <div className="flex items-center justify-between gap-3">
-            <ResolutionTimelinePanel
-              market={market}
-              settledUrl={settledUrl}
-              outcomeOverride={toResolutionTimelineOutcome(
-                resolvedOutcomeIndexOverride ?? resolveWinningOutcomeIndex(market),
-              )}
-              className="min-w-0 flex-1"
-            />
-            {!isMarketResolved(market) && (
-              proposeUrl
-                ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                      asChild
-                      onClick={event => event.stopPropagation()}
-                    >
-                      <a href={proposeUrl} target="_blank" rel="noopener noreferrer">
-                        {t('Propose resolution')}
-                      </a>
-                    </Button>
-                  )
-                : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                      disabled
-                      onClick={event => event.stopPropagation()}
-                    >
-                      {t('Propose resolution')}
-                    </Button>
-                  )
-            )}
-          </div>
-        )}
-      </div>
-    </div>
   )
 }

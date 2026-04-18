@@ -3,15 +3,41 @@
 import type { Route } from 'next'
 import type { ChangeEvent } from 'react'
 import type {
+  AdminCreateEventFormProps,
+  AiValidationIssue,
+  AllowedCreatorCheckState,
+  CategoryItem,
+  CategorySuggestion,
+  ContentCheckState,
+  EventCreationMode,
+  FormState,
+  FundingCheckState,
+  MainCategory,
+  MainTagsApiResponse,
+  MarketConfigResponse,
+  MarketMode,
+  NativeGasCheckState,
+  OpenRouterCheckState,
+  OptionItem,
+  PrepareFinalizeRequestTx,
+  PreparePayloadBody,
+  PrepareResponse,
+  PreSignCheckKey,
+  RecurringOccurrencePreview,
+  SignatureExecutionTx,
+  SignerOption,
+  SlugValidationState,
+  TeamLogoFileMap,
+} from './admin-create-event-form-types'
+import type {
   AdminSportsCustomMarketState,
   AdminSportsFormState,
-  AdminSportsPreparePayload,
   AdminSportsPropState,
   AdminSportsSlugCatalog,
   AdminSportsTeamHostStatus,
 } from '@/lib/admin-sports-create'
 import type { EventCreationDraftRecord } from '@/lib/db/queries/event-creations'
-import type { EventCreationAssetPayload, EventCreationAssetRef, EventCreationRecurrenceUnit } from '@/lib/event-creation'
+import type { EventCreationAssetPayload, EventCreationRecurrenceUnit } from '@/lib/event-creation'
 import { useAppKitAccount } from '@reown/appkit/react'
 import {
   ArrowLeftIcon,
@@ -30,11 +56,10 @@ import {
   SparkleIcon,
   SquarePenIcon,
   Trash2Icon,
-  XIcon,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { createPublicClient, formatUnits, getAddress, http, isAddress, keccak256, parseGwei, stringToHex, toHex } from 'viem'
+import { createPublicClient, formatUnits, getAddress, http, isAddress, keccak256, stringToHex, toHex } from 'viem'
 import { usePublicClient, useWalletClient } from 'wagmi'
 import AppLink from '@/components/AppLink'
 import EventIconImage from '@/components/EventIconImage'
@@ -66,7 +91,6 @@ import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
 import { useRouter } from '@/i18n/navigation'
 import {
   buildAdminSportsDerivedContent,
-  buildAdminSportsStepErrors,
   createAdminSportsCustomMarket,
   createAdminSportsProp,
   createInitialAdminSportsForm,
@@ -91,1095 +115,76 @@ import {
   slugifyEventCreationValue as slugify,
   slugifyEventCreationTemplate as slugifyTemplate,
 } from '@/lib/event-creation'
-import { AMOY_CHAIN_ID, IS_TEST_MODE, POLYGON_MAINNET_CHAIN_ID, POLYGON_SCAN_BASE } from '@/lib/network'
+import { AMOY_CHAIN_ID } from '@/lib/network'
 import { cn } from '@/lib/utils'
 import { useUser } from '@/stores/useUser'
-
-type MarketMode = 'binary' | 'multi_multiple' | 'multi_unique'
-type EventCreationMode = 'single' | 'recurring'
-
-const TOTAL_STEPS = 5
-const MIN_SUB_CATEGORIES = 4
-const USDC_DECIMALS = 6
-const FALLBACK_REQUIRED_USDC = 5
-const CREATE_EVENT_SIGNATURE_STORAGE_KEY = 'admin_create_event_signature_flow_v1'
-const TITLE_CATEGORY_MIN_LENGTH = 4
-const CONTENT_CHECK_PROGRESS_INTERVAL_MS = 1400
-const SIGNATURE_COUNTDOWN_INTERVAL_MS = 1000
-const PREPARE_POLL_DELAY_MS = 1500
-const PREPARE_POLL_MAX_ATTEMPTS = 240
-const FINALIZE_RETRY_DELAY_MS = 1000
-const FINALIZE_MAX_ATTEMPTS = 8
-const FINALIZE_POLL_DELAY_MS = 1500
-const FINALIZE_POLL_MAX_ATTEMPTS = 240
-const SLUG_CHECK_TIMEOUT_MS = 12000
-const OPENROUTER_CHECK_TIMEOUT_MS = 12000
-const CONTENT_CHECK_TIMEOUT_MS = 45000
-const CONTENT_CHECK_PROGRESS = [
-  'checking content language...',
-  'checking deterministic rules...',
-  'checking mandatory fields...',
-  'checking event date coherence...',
-  'checking resolution source format...',
-  'checking market structure consistency...',
-  'checking outcomes consistency...',
-  'checking final consistency...',
-] as const
-const MIN_AMOY_PRIORITY_FEE_WEI = parseGwei('25')
-const FALLBACK_MAX_FEE_PER_GAS_WEI = parseGwei('30')
-const APPROVE_GAS_UNITS_ESTIMATE = 70_000n
-const INITIALIZE_GAS_UNITS_ESTIMATE = 700_000n
-const GAS_ESTIMATE_BUFFER_NUMERATOR = 13n
-const GAS_ESTIMATE_BUFFER_DENOMINATOR = 10n
-const DEFAULT_CREATE_EVENT_CHAIN_ID = IS_TEST_MODE ? AMOY_CHAIN_ID : POLYGON_MAINNET_CHAIN_ID
-const CUSTOM_SPORTS_SLUG_SELECT_VALUE = '__custom__'
-const EOA_BALANCE_ABI = [
-  {
-    type: 'function',
-    name: 'balanceOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ type: 'uint256' }],
-  },
-] as const
-
-type SlugValidationState = 'idle' | 'checking' | 'unique' | 'duplicate' | 'error'
-type FundingCheckState = 'idle' | 'checking' | 'ok' | 'insufficient' | 'no_wallet' | 'error'
-type NativeGasCheckState = 'idle' | 'checking' | 'ok' | 'insufficient' | 'no_wallet' | 'error'
-type AllowedCreatorCheckState = 'idle' | 'checking' | 'ok' | 'missing' | 'no_wallet' | 'error'
-type OpenRouterCheckState = 'idle' | 'checking' | 'ok' | 'error'
-type ContentCheckState = 'idle' | 'checking' | 'ok' | 'error'
-type SignatureTxStatus = 'idle' | 'awaiting_wallet' | 'confirming' | 'success' | 'error'
-type PreSignCheckKey = 'funding' | 'nativeGas' | 'allowedCreator' | 'slug' | 'openRouter' | 'content'
-
-interface CategorySuggestion {
-  name: string
-  slug: string
-}
-
-interface MainCategory {
-  id: number
-  name: string
-  slug: string
-  childs: CategorySuggestion[]
-}
-
-interface MainTagsApiResponse {
-  mainCategories: MainCategory[]
-  globalCategories: CategorySuggestion[]
-}
-
-interface CategoryItem {
-  label: string
-  slug: string
-}
-
-interface OptionItem {
-  id: string
-  question: string
-  title: string
-  shortName: string
-  slug: string
-  outcomeYes: string
-  outcomeNo: string
-}
-
-interface FormState {
-  title: string
-  slug: string
-  endDateIso: string
-  mainCategorySlug: string
-  categories: CategoryItem[]
-  marketMode: MarketMode | null
-  binaryQuestion: string
-  binaryOutcomeYes: string
-  binaryOutcomeNo: string
-  options: OptionItem[]
-  resolutionSource: string
-  resolutionRules: string
-}
-
-interface SignerOption {
-  address: string
-  displayName: string
-  shortAddress: string
-}
-
-interface SlugCheckResponse {
-  exists: boolean
-}
-
-interface MarketConfigResponse {
-  defaultChainId?: number
-  supportedChainIds?: number[]
-  chains?: Array<{
-    chainId: number
-    usdcToken: string
-  }>
-  requiredCreatorFundingUsdc?: string
-  usdcToken?: string
-}
-
-interface AllowedCreatorsResponse {
-  wallets: string[]
-  allowed: boolean
-}
-
-interface AiValidationIssue {
-  code: 'english' | 'url' | 'rules' | 'mandatory' | 'date'
-  reason: string
-  step: 1 | 2 | 3
-}
-
-interface AiValidationResponse {
-  ok: boolean
-  checks: {
-    mandatory: boolean
-    language: boolean
-    deterministic: boolean
-  }
-  errors: AiValidationIssue[]
-  warnings?: AiValidationIssue[]
-}
-
-interface RecurringOccurrencePreview {
-  endDateIso: string
-  title: string
-  slug: string
-  resolutionRules: string
-}
-
-interface AiRulesResponse {
-  rules: string
-  samplesUsed: number
-}
-
-interface OpenRouterStatusResponse {
-  configured: boolean
-}
-
-interface PreparePayloadOption {
-  id: string
-  question: string
-  title: string
-  shortName: string
-  slug: string
-}
-
-interface PreparePayloadBody {
-  chainId: number
-  creator: string
-  title: string
-  slug: string
-  endDateIso: string
-  mainCategorySlug: string
-  categories: CategoryItem[]
-  marketMode: MarketMode
-  binaryQuestion?: string
-  binaryOutcomeYes?: string
-  binaryOutcomeNo?: string
-  options?: PreparePayloadOption[]
-  resolutionSource: string
-  resolutionRules: string
-  sports?: AdminSportsPreparePayload
-}
-
-interface AdminCreateEventFormProps {
-  sportsSlugCatalog: AdminSportsSlugCatalog
-  creationMode?: EventCreationMode
-  initialDraftRecord?: EventCreationDraftRecord | null
-  draftId?: string | null
-  initialTitle?: string
-  initialSlug?: string
-  initialEndDateIso?: string
-  allowPastResolutionDate?: boolean
-  hasConfiguredServerSigners?: boolean
-  serverDraftPayload?: Record<string, unknown> | null
-  serverAssetPayload?: EventCreationAssetPayload | null
-}
-
-const RECURRENCE_OPTIONS: Array<{ value: EventCreationRecurrenceUnit, label: string }> = [
-  { value: 'minute', label: 'Minutes' },
-  { value: 'hour', label: 'Hours' },
-  { value: 'day', label: 'Days' },
-  { value: 'week', label: 'Weeks' },
-  { value: 'month', label: 'Months' },
-  { value: 'quarter', label: 'Quarters' },
-  { value: 'semiannual', label: '6 months' },
-  { value: 'year', label: 'Years' },
-]
-
-const TEMPLATE_TOKEN_EXAMPLES = [
-  '{{day}} -> 22',
-  '{{day_padded}} -> 22',
-  '{{month}} -> 3',
-  '{{month_name_lower}} -> march',
-  '{{date}} -> 22 March',
-  '{{date-7}} -> 15 March',
-  '{{date_short}} -> 22/03/2026',
-  '{{year}} -> 2026',
-] as const
-
-const TEMPLATE_TOKEN_HELP_TEXT = 'All variables use the resolution date. Use + or - days for offsets, for example {{date-7}}.'
-
-type TeamLogoFileMap = Record<AdminSportsTeamHostStatus, File | null>
-
-interface PrepareTxPlanItem {
-  id: string
-  to: string
-  value: string
-  data: string
-  description: string
-  marketKey?: string
-}
-
-interface PrepareResponse {
-  requestId: string
-  chainId: number
-  creator: string
-  txPlan: PrepareTxPlanItem[]
-}
-
-interface PrepareAcceptedResponse {
-  requestId: string
-  chainId: number
-  creator: string
-  status: string
-}
-
-interface PrepareAuthChallengeResponse {
-  requestId: string
-  nonce: string
-  expiresAt: number
-  creator: string
-  chainId: number
-  payloadHash: string
-  domain: {
-    name: string
-    version: string
-    verifyingContract: string
-  }
-  primaryType: 'CreateMarketAuth'
-  types: {
-    CreateMarketAuth: Array<{
-      name: string
-      type: string
-    }>
-  }
-}
-
-interface PrepareFinalizeRequestTx {
-  id: string
-  hash: string
-}
-
-interface FinalizeResponse {
-  requestId: string
-  status: string
-}
-
-interface PendingRequestItem {
-  requestId: string
-  payloadHash: string
-  status: string
-  creator: string
-  chainId: number
-  expiresAt: number
-  updatedAt: number
-  errorMessage: string | null
-  prepared: PrepareResponse | null
-  txs: PrepareFinalizeRequestTx[]
-}
-
-interface PendingRequestResponse {
-  request: PendingRequestItem | null
-}
-
-interface SignatureExecutionTx extends PrepareTxPlanItem {
-  status: SignatureTxStatus
-  hash?: string
-  error?: string
-}
-
-function readApiError(payload: unknown): string | null {
-  if (!payload || typeof payload !== 'object') {
-    return null
-  }
-
-  const maybeError = (payload as { error?: unknown }).error
-  if (typeof maybeError === 'string') {
-    const normalized = maybeError.trim()
-    return normalized.length > 0 ? normalized : null
-  }
-
-  if (maybeError && typeof maybeError === 'object') {
-    const maybeMessage = (maybeError as { message?: unknown }).message
-    if (typeof maybeMessage === 'string') {
-      const normalized = maybeMessage.trim()
-      return normalized.length > 0 ? normalized : null
-    }
-  }
-
-  return null
-}
-
-function formatEventScheduleLabel(value: Date | null) {
-  if (!value || Number.isNaN(value.getTime())) {
-    return ''
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(value)
-}
-
-function hasRecurringDeploymentHistory(record: EventCreationDraftRecord | null | undefined) {
-  if (!record || record.creationMode !== 'recurring' || !record.startAt || !record.endDate) {
-    return false
-  }
-
-  const startAt = new Date(record.startAt)
-  const endDate = new Date(record.endDate)
-  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endDate.getTime())) {
-    return false
-  }
-
-  return startAt.getTime() !== endDate.getTime()
-}
-
-async function readResponseBody(response: Response): Promise<{
-  payload: unknown
-  text: string | null
-}> {
-  const raw = await response.text().catch(() => '')
-  const normalized = raw.trim()
-  if (!normalized) {
-    return {
-      payload: null,
-      text: null,
-    }
-  }
-
-  try {
-    return {
-      payload: JSON.parse(normalized) as unknown,
-      text: normalized,
-    }
-  }
-  catch {
-    return {
-      payload: null,
-      text: normalized,
-    }
-  }
-}
-
-function readResponseErrorMessage(payload: unknown, text: string | null): string | null {
-  const apiError = readApiError(payload)
-  if (apiError) {
-    return apiError
-  }
-  if (!text) {
-    return null
-  }
-
-  const cleaned = text
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  return cleaned.length > 0 ? cleaned : null
-}
-
-function isAllowedCreatorsResponse(payload: unknown): payload is AllowedCreatorsResponse {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  const candidate = payload as Partial<AllowedCreatorsResponse>
-  return Array.isArray(candidate.wallets) && typeof candidate.allowed === 'boolean'
-}
-
-function isAiValidationResponse(payload: unknown): payload is AiValidationResponse {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  const candidate = payload as Partial<AiValidationResponse>
-  if (typeof candidate.ok !== 'boolean' || !candidate.checks || typeof candidate.checks !== 'object') {
-    return false
-  }
-
-  const checks = candidate.checks as Partial<AiValidationResponse['checks']>
-  return typeof checks.mandatory === 'boolean'
-    && typeof checks.language === 'boolean'
-    && typeof checks.deterministic === 'boolean'
-    && Array.isArray(candidate.errors)
-    && (typeof candidate.warnings === 'undefined' || Array.isArray(candidate.warnings))
-}
-
-function isAiRulesResponse(payload: unknown): payload is AiRulesResponse {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  const candidate = payload as Partial<AiRulesResponse>
-  return typeof candidate.rules === 'string' && typeof candidate.samplesUsed === 'number'
-}
-
-function isOpenRouterStatusResponse(payload: unknown): payload is OpenRouterStatusResponse {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  return typeof (payload as Partial<OpenRouterStatusResponse>).configured === 'boolean'
-}
-
-function isPrepareTxPlanItem(payload: unknown): payload is PrepareTxPlanItem {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  const candidate = payload as Partial<PrepareTxPlanItem>
-  return typeof candidate.id === 'string'
-    && typeof candidate.to === 'string'
-    && typeof candidate.value === 'string'
-    && typeof candidate.data === 'string'
-    && typeof candidate.description === 'string'
-}
-
-function isPrepareResponse(payload: unknown): payload is PrepareResponse {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  const candidate = payload as Partial<PrepareResponse>
-  return typeof candidate.requestId === 'string'
-    && typeof candidate.chainId === 'number'
-    && typeof candidate.creator === 'string'
-    && Array.isArray(candidate.txPlan)
-    && candidate.txPlan.every(item => isPrepareTxPlanItem(item))
-}
-
-function isPrepareAcceptedResponse(payload: unknown): payload is PrepareAcceptedResponse {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  const candidate = payload as Partial<PrepareAcceptedResponse>
-  return typeof candidate.requestId === 'string'
-    && typeof candidate.chainId === 'number'
-    && typeof candidate.creator === 'string'
-    && typeof candidate.status === 'string'
-}
-
-function formatSignatureCountdown(totalSeconds: number): string {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds))
-  const minutes = Math.floor(safeSeconds / 60)
-  const seconds = safeSeconds % 60
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-}
-
-function isPrepareAuthChallengeResponse(payload: unknown): payload is PrepareAuthChallengeResponse {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  const candidate = payload as Partial<PrepareAuthChallengeResponse>
-  return typeof candidate.requestId === 'string'
-    && typeof candidate.nonce === 'string'
-    && typeof candidate.expiresAt === 'number'
-    && typeof candidate.creator === 'string'
-    && typeof candidate.chainId === 'number'
-    && typeof candidate.payloadHash === 'string'
-    && !!candidate.domain
-    && typeof candidate.domain === 'object'
-    && typeof (candidate.domain as { name?: unknown }).name === 'string'
-    && typeof (candidate.domain as { version?: unknown }).version === 'string'
-    && typeof (candidate.domain as { verifyingContract?: unknown }).verifyingContract === 'string'
-}
-
-function isFinalizeResponse(payload: unknown): payload is FinalizeResponse {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  const candidate = payload as Partial<FinalizeResponse>
-  return typeof candidate.requestId === 'string' && typeof candidate.status === 'string'
-}
-
-function isPrepareFinalizeRequestTx(payload: unknown): payload is PrepareFinalizeRequestTx {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  const candidate = payload as Partial<PrepareFinalizeRequestTx>
-  return typeof candidate.id === 'string'
-    && typeof candidate.hash === 'string'
-    && /^0x[a-fA-F0-9]{64}$/.test(candidate.hash)
-}
-
-function isPendingRequestResponse(payload: unknown): payload is PendingRequestResponse {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  const candidate = payload as Partial<PendingRequestResponse>
-  if (candidate.request === null) {
-    return true
-  }
-  if (!candidate.request || typeof candidate.request !== 'object') {
-    return false
-  }
-
-  const request = candidate.request as Partial<PendingRequestItem>
-  return typeof request.requestId === 'string'
-    && typeof request.payloadHash === 'string'
-    && typeof request.status === 'string'
-    && typeof request.creator === 'string'
-    && typeof request.chainId === 'number'
-    && typeof request.expiresAt === 'number'
-    && typeof request.updatedAt === 'number'
-    && (typeof request.errorMessage === 'string' || request.errorMessage === null)
-    && (request.prepared === null || isPrepareResponse(request.prepared))
-    && Array.isArray(request.txs)
-    && request.txs.every(item => isPrepareFinalizeRequestTx(item))
-}
-
-function isSlugCheckResponse(payload: unknown): payload is SlugCheckResponse {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  return typeof (payload as Partial<SlugCheckResponse>).exists === 'boolean'
-}
-
-async function fetchAdminApi(pathname: string, init?: RequestInit) {
-  const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`
-  const primaryUrl = `/admin/api${normalizedPath}`
-  const primaryResponse = await fetch(primaryUrl, init)
-  if (primaryResponse.status !== 404 || typeof window === 'undefined') {
-    return primaryResponse
-  }
-
-  const [maybeLocale] = window.location.pathname.split('/').filter(Boolean)
-  if (!maybeLocale) {
-    return primaryResponse
-  }
-
-  return fetch(`/${maybeLocale}/admin/api${normalizedPath}`, init)
-}
-
-async function fetchAdminApiWithTimeout(pathname: string, timeoutMs: number, init?: RequestInit) {
-  const controller = new AbortController()
-  const timeoutId = window.setTimeout(() => {
-    controller.abort()
-  }, timeoutMs)
-
-  try {
-    return await fetchAdminApi(pathname, {
-      ...init,
-      signal: controller.signal,
-    })
-  }
-  catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('Request timed out. Try again in a few moments.')
-    }
-    throw error
-  }
-  finally {
-    window.clearTimeout(timeoutId)
-  }
-}
-
-async function resolveStoredAssetFile(localFile: File | null, asset: EventCreationAssetRef | null, label: string) {
-  if (localFile) {
-    return localFile
-  }
-
-  if (!asset?.publicUrl) {
-    return null
-  }
-
-  const response = await fetch(asset.publicUrl, {
-    method: 'GET',
-    cache: 'no-store',
-  })
-  if (!response.ok) {
-    throw new Error(`Could not load ${label.toLowerCase()} from storage.`)
-  }
-
-  const blob = await response.blob()
-  return new File([blob], asset.fileName || 'asset', {
-    type: asset.contentType || blob.type || 'application/octet-stream',
-  })
-}
-
-function shortenAddress(address: string) {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`
-}
-
-function isValidUrl(value: string) {
-  try {
-    const parsed = new URL(value)
-    return Boolean(parsed.protocol)
-  }
-  catch {
-    return false
-  }
-}
-
-function extractTitleCategorySuggestions(title: string): CategorySuggestion[] {
-  const sanitized = title
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036F]/g, '')
-    .replace(/[^\w\s-]/g, ' ')
-
-  const words = sanitized
-    .split(/\s+/)
-    .map(word => word.trim())
-    .filter(word => word.length >= TITLE_CATEGORY_MIN_LENGTH)
-    .filter(word => /[a-z]/.test(word))
-    .slice(0, 12)
-
-  const bySlug = new Map<string, CategorySuggestion>()
-  words.forEach((word) => {
-    const slug = slugify(word)
-    if (!slug || bySlug.has(slug)) {
-      return
-    }
-
-    bySlug.set(slug, {
-      name: word,
-      slug,
-    })
-  })
-
-  return Array.from(bySlug.values())
-}
-
-function createOption(id: string): OptionItem {
-  return {
-    id,
-    question: '',
-    title: '',
-    shortName: '',
-    slug: '',
-    outcomeYes: 'Yes',
-    outcomeNo: 'No',
-  }
-}
-
-function createInitialForm(input?: {
-  title?: string
-  slug?: string
-  endDateIso?: string
-}): FormState {
-  return {
-    title: input?.title?.trim() || '',
-    slug: input?.slug?.trim() || '',
-    endDateIso: normalizeDateTimeLocalValue(input?.endDateIso ?? ''),
-    mainCategorySlug: '',
-    categories: [],
-    marketMode: null,
-    binaryQuestion: '',
-    binaryOutcomeYes: 'Yes',
-    binaryOutcomeNo: 'No',
-    options: [createOption('opt-1'), createOption('opt-2')],
-    resolutionSource: '',
-    resolutionRules: '',
-  }
-}
-
-function areCategoryItemsEqual(left: CategoryItem[], right: CategoryItem[]) {
-  if (left.length !== right.length) {
-    return false
-  }
-
-  return left.every((item, index) => {
-    const candidate = right[index]
-    return candidate?.label === item.label && candidate.slug === item.slug
-  })
-}
-
-function areOptionItemsEqual(left: OptionItem[], right: OptionItem[]) {
-  if (left.length !== right.length) {
-    return false
-  }
-
-  return left.every((item, index) => {
-    const candidate = right[index]
-    return candidate?.id === item.id
-      && candidate.question === item.question
-      && candidate.title === item.title
-      && candidate.shortName === item.shortName
-      && candidate.slug === item.slug
-      && candidate.outcomeYes === item.outcomeYes
-      && candidate.outcomeNo === item.outcomeNo
-  })
-}
-
-function isEventCreationRecurrenceUnit(value: unknown): value is EventCreationRecurrenceUnit {
-  return value === 'minute'
-    || value === 'hour'
-    || value === 'day'
-    || value === 'week'
-    || value === 'month'
-    || value === 'quarter'
-    || value === 'semiannual'
-    || value === 'year'
-}
-
-function buildStepErrors(
-  step: number,
-  args: {
-    form: FormState
-    creationMode: EventCreationMode
-    sportsForm: AdminSportsFormState
-    hasEventImage: boolean
-    hasTeamLogoByHostStatus: Record<AdminSportsTeamHostStatus, boolean>
-    slugValidationState: SlugValidationState
-    fundingCheckState: FundingCheckState
-    nativeGasCheckState: NativeGasCheckState
-    allowedCreatorCheckState: AllowedCreatorCheckState
-    openRouterCheckState: OpenRouterCheckState
-    contentCheckState: ContentCheckState
-    hasPendingAiErrors: boolean
-    hasContentCheckFatalError: boolean
-    allowPastResolutionDate: boolean
-    hasCreatorSelection: boolean
-    hasRecurringCadence: boolean
-    recurringPreviewErrors: string[]
-  },
-): string[] {
-  const errors: string[] = []
-  const sportsEventSelected = isSportsMainCategory(args.form.mainCategorySlug)
-
-  if (step === 1) {
-    if (!args.form.title.trim()) {
-      errors.push('Event title is required.')
-    }
-
-    if (!args.form.slug.trim()) {
-      errors.push('Event slug is required.')
-    }
-
-    if (!args.form.endDateIso) {
-      errors.push('Event end date and time is required.')
-    }
-    else {
-      const parsedEndDate = new Date(args.form.endDateIso)
-      if (Number.isNaN(parsedEndDate.getTime())) {
-        errors.push('Event end date is invalid.')
-      }
-      else if (!args.allowPastResolutionDate && parsedEndDate.getTime() <= Date.now()) {
-        errors.push('Event end date must be in the future.')
-      }
-    }
-
-    if (!args.hasEventImage) {
-      errors.push('Event image is required.')
-    }
-
-    if (!args.form.mainCategorySlug) {
-      errors.push('Main category is required.')
-    }
-
-    if (!sportsEventSelected && args.form.categories.length < MIN_SUB_CATEGORIES) {
-      errors.push(`Select at least ${MIN_SUB_CATEGORIES} sub categories.`)
-    }
-
-    if (args.creationMode === 'recurring') {
-      if (!args.hasCreatorSelection) {
-        errors.push('Select a creator for recurring deployments.')
-      }
-
-      if (!args.hasRecurringCadence) {
-        errors.push('Select a valid recurrence cadence.')
-      }
-    }
-
-    if (sportsEventSelected) {
-      errors.push(...buildAdminSportsStepErrors({
-        step,
-        sports: args.sportsForm,
-        hasTeamLogoByHostStatus: args.hasTeamLogoByHostStatus,
-      }))
-    }
-  }
-
-  if (step === 2) {
-    if (sportsEventSelected) {
-      errors.push(...buildAdminSportsStepErrors({
-        step,
-        sports: args.sportsForm,
-        hasTeamLogoByHostStatus: args.hasTeamLogoByHostStatus,
-      }))
-      return errors
-    }
-
-    if (!args.form.marketMode) {
-      errors.push('Select a market type.')
-      return errors
-    }
-
-    if (args.form.marketMode === 'binary') {
-      if (!args.form.binaryQuestion.trim()) {
-        errors.push('Binary question is required.')
-      }
-      if (!args.form.binaryOutcomeYes.trim() || !args.form.binaryOutcomeNo.trim()) {
-        errors.push('Both binary outcomes are required.')
-      }
-      return errors
-    }
-
-    if (args.form.options.length < 2) {
-      errors.push('Add at least 2 options for multi-market events.')
-    }
-
-    args.form.options.forEach((option, index) => {
-      if (!option.question.trim()) {
-        errors.push(`Option ${index + 1}: question is required.`)
-      }
-      if (!option.title.trim()) {
-        errors.push(`Option ${index + 1}: title is required.`)
-      }
-      if (!option.shortName.trim()) {
-        errors.push(`Option ${index + 1}: short name is required.`)
-      }
-      if (!option.slug.trim()) {
-        errors.push(`Option ${index + 1}: slug cannot be empty.`)
-      }
-      if (!option.outcomeYes.trim() || !option.outcomeNo.trim()) {
-        errors.push(`Option ${index + 1}: both outcomes are required.`)
-      }
-    })
-  }
-
-  if (step === 3) {
-    if (args.form.resolutionSource.trim() && !isValidUrl(args.form.resolutionSource.trim())) {
-      errors.push('Resolution source URL is invalid.')
-    }
-
-    if (!args.form.resolutionRules.trim()) {
-      errors.push('Resolution rules are required.')
-    }
-    else if (args.form.resolutionRules.trim().length < 60) {
-      errors.push('Resolution rules are too short.')
-    }
-
-    if (args.creationMode === 'recurring') {
-      errors.push(...args.recurringPreviewErrors)
-    }
-  }
-
-  if (step === 4) {
-    if (args.fundingCheckState === 'idle' || args.fundingCheckState === 'checking') {
-      errors.push('Run the EOA USDC check first.')
-    }
-    else if (args.fundingCheckState === 'no_wallet') {
-      errors.push('Connect the main EOA wallet to validate USDC balance.')
-    }
-    else if (args.fundingCheckState === 'error') {
-      errors.push('Could not validate EOA USDC balance right now. Try again.')
-    }
-    else if (args.fundingCheckState !== 'ok') {
-      errors.push('Main EOA wallet does not have enough USDC for the reward.')
-    }
-
-    if (args.nativeGasCheckState === 'idle' || args.nativeGasCheckState === 'checking') {
-      errors.push('Run POL gas check first.')
-    }
-    else if (args.nativeGasCheckState === 'no_wallet') {
-      errors.push('Connect the main EOA wallet to validate POL gas balance.')
-    }
-    else if (args.nativeGasCheckState === 'error') {
-      errors.push('Could not validate POL gas balance right now. Try again.')
-    }
-    else if (args.nativeGasCheckState !== 'ok') {
-      errors.push('Main EOA wallet does not have enough POL for market creation gas.')
-    }
-
-    if (args.allowedCreatorCheckState === 'idle' || args.allowedCreatorCheckState === 'checking') {
-      errors.push('Run the allowed market creator wallet check first.')
-    }
-    else if (args.allowedCreatorCheckState === 'no_wallet') {
-      errors.push('Connect the main EOA wallet first.')
-    }
-    else if (args.allowedCreatorCheckState === 'error') {
-      errors.push('Could not validate allowed market creator wallets right now.')
-    }
-    else if (args.allowedCreatorCheckState !== 'ok') {
-      errors.push('Main EOA wallet is not in allowed market creator wallets.')
-    }
-
-    if (args.slugValidationState === 'idle' || args.slugValidationState === 'checking') {
-      errors.push('Run slug availability check first.')
-    }
-    else if (args.slugValidationState === 'duplicate') {
-      errors.push('Slug already exists in your database.')
-    }
-    else if (args.slugValidationState === 'error') {
-      errors.push('Could not validate slug right now.')
-    }
-
-    if (args.openRouterCheckState === 'idle' || args.openRouterCheckState === 'checking') {
-      errors.push('Run OpenRouter check first.')
-      return errors
-    }
-    else if (args.openRouterCheckState !== 'ok') {
-      errors.push('OpenRouter must be active before content AI checker.')
-      return errors
-    }
-
-    if (args.contentCheckState === 'idle' || args.contentCheckState === 'checking') {
-      errors.push('Run content AI checker.')
-    }
-    else if (args.hasContentCheckFatalError) {
-      errors.push('Could not run content AI checker right now. Try again.')
-    }
-    else if (args.hasPendingAiErrors) {
-      errors.push('Content AI checker found issues.')
-    }
-  }
-
-  return errors
-}
-
-function getAiIssueKey(issue: AiValidationIssue) {
-  return `${issue.code}:${issue.step}:${issue.reason}`
-}
-
-function getExplorerTxBase() {
-  return `${POLYGON_SCAN_BASE}/tx/`
-}
-
-function getChainLabel() {
-  return IS_TEST_MODE ? 'Polygon Amoy' : 'Polygon'
-}
-
-function parseMinTipCapFromError(errorMessage: string): bigint | null {
-  const match = errorMessage.match(/minimum needed\s+(\d+)/i)
-  if (!match?.[1]) {
-    return null
-  }
-
-  try {
-    return BigInt(match[1])
-  }
-  catch {
-    return null
-  }
-}
-
-function isAlreadyInitializedError(message: string): boolean {
-  return /already initialized/i.test(message)
-}
-
-function isBigIntSerializationError(message: string): boolean {
-  return /json\.stringify.*bigint|serialize bigint/i.test(message)
-}
-
-function mapSignatureFlowErrorForUser(message: string): string {
-  if (isBigIntSerializationError(message)) {
-    return 'Could not send transaction with this wallet provider. Please retry or switch wallet.'
-  }
-  if (/too many subrequests|finalize failed \(5\d\d\)|unexpected server error|internal server error/i.test(message)) {
-    return 'Could not finalize the market right now. Please wait a few moments and retry the pending plan.'
-  }
-  if (/request arguments:/i.test(message) || /unknown rpc error/i.test(message)) {
-    return 'Could not send transaction right now. Please try again in a few moments.'
-  }
-  return message
-}
-
-function shouldRetryFinalizeRequest(message: string): boolean {
-  return /too many subrequests|finalization in progress|retry finalize to continue|finalize failed \(5\d\d\)|unexpected server error|internal server error|request timed out|failed to fetch|networkerror/i.test(message)
-}
-
-function OutcomeStateDot({ value }: { value: boolean }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex size-5 items-center justify-center rounded-full',
-        value ? 'bg-emerald-600 text-background' : 'bg-red-600 text-background',
-      )}
-    >
-      {value ? <CheckIcon className="size-3" /> : <XIcon className="size-3" />}
-    </span>
-  )
-}
-
-function CheckIndicator({
-  state,
-}: {
-  state: 'checking' | 'ok' | 'error'
-}) {
-  return (
-    <span
-      className={cn(
-        'inline-flex size-6 items-center justify-center rounded-full border',
-        state === 'checking' && 'border-yellow-500/60 bg-yellow-500/15 text-yellow-500',
-        state === 'ok' && 'border-emerald-500/60 bg-emerald-500/15 text-emerald-500',
-        state === 'error' && 'border-red-500/60 bg-red-500/15 text-red-500',
-      )}
-    >
-      {state === 'checking' && <Loader2Icon className="size-3.5 animate-spin" />}
-      {state === 'ok' && <CheckIcon className="size-3.5" />}
-      {state === 'error' && <XIcon className="size-3.5" />}
-    </span>
-  )
-}
-
-function SignatureTxIndicator({ status }: { status: SignatureTxStatus }) {
-  if (status === 'success') {
-    return (
-      <span className="
-        inline-flex size-6 items-center justify-center rounded-full border border-emerald-500/60 bg-emerald-500/15
-        text-emerald-500
-      "
-      >
-        <CheckIcon className="size-3.5" />
-      </span>
-    )
-  }
-
-  if (status === 'error') {
-    return (
-      <span className="
-        inline-flex size-6 items-center justify-center rounded-full border border-red-500/60 bg-red-500/15 text-red-500
-      "
-      >
-        <XIcon className="size-3.5" />
-      </span>
-    )
-  }
-
-  if (status === 'awaiting_wallet' || status === 'confirming') {
-    return (
-      <span className="
-        inline-flex size-6 items-center justify-center rounded-full border border-yellow-500/60 bg-yellow-500/15
-        text-yellow-500
-      "
-      >
-        <Loader2Icon className="size-3.5 animate-spin" />
-      </span>
-    )
-  }
-
-  return (
-    <span className="
-      inline-flex size-6 items-center justify-center rounded-full border border-muted-foreground/30 bg-muted/20
-      text-muted-foreground
-    "
-    >
-      <span className="size-2 rounded-full bg-current" />
-    </span>
-  )
-}
+import {
+  APPROVE_GAS_UNITS_ESTIMATE,
+  CONTENT_CHECK_PROGRESS,
+  CONTENT_CHECK_PROGRESS_INTERVAL_MS,
+  CONTENT_CHECK_TIMEOUT_MS,
+  CREATE_EVENT_SIGNATURE_STORAGE_KEY,
+  CUSTOM_SPORTS_SLUG_SELECT_VALUE,
+  DEFAULT_CREATE_EVENT_CHAIN_ID,
+  EOA_BALANCE_ABI,
+  FALLBACK_MAX_FEE_PER_GAS_WEI,
+  FALLBACK_REQUIRED_USDC,
+  FINALIZE_MAX_ATTEMPTS,
+  FINALIZE_POLL_DELAY_MS,
+  FINALIZE_POLL_MAX_ATTEMPTS,
+  FINALIZE_RETRY_DELAY_MS,
+  GAS_ESTIMATE_BUFFER_DENOMINATOR,
+  GAS_ESTIMATE_BUFFER_NUMERATOR,
+  INITIALIZE_GAS_UNITS_ESTIMATE,
+  MIN_AMOY_PRIORITY_FEE_WEI,
+  OPENROUTER_CHECK_TIMEOUT_MS,
+  PREPARE_POLL_DELAY_MS,
+  PREPARE_POLL_MAX_ATTEMPTS,
+  RECURRENCE_OPTIONS,
+  SIGNATURE_COUNTDOWN_INTERVAL_MS,
+  SLUG_CHECK_TIMEOUT_MS,
+  TEMPLATE_TOKEN_EXAMPLES,
+  TEMPLATE_TOKEN_HELP_TEXT,
+  TOTAL_STEPS,
+  USDC_DECIMALS,
+} from './admin-create-event-form-constants'
+import { CheckIndicator, OutcomeStateDot, SignatureTxIndicator } from './admin-create-event-form-indicators'
+import {
+  areCategoryItemsEqual,
+  areOptionItemsEqual,
+  buildStepErrors,
+  createInitialForm,
+  createOption,
+  extractTitleCategorySuggestions,
+  fetchAdminApi,
+  fetchAdminApiWithTimeout,
+  formatEventScheduleLabel,
+  formatSignatureCountdown,
+  getAiIssueKey,
+  getChainLabel,
+  getExplorerTxBase,
+  hasRecurringDeploymentHistory,
+  isAiRulesResponse,
+  isAiValidationResponse,
+  isAllowedCreatorsResponse,
+  isAlreadyInitializedError,
+  isBigIntSerializationError,
+  isEventCreationRecurrenceUnit,
+  isFinalizeResponse,
+  isOpenRouterStatusResponse,
+  isPendingRequestResponse,
+  isPrepareAcceptedResponse,
+  isPrepareAuthChallengeResponse,
+  isSlugCheckResponse,
+  mapSignatureFlowErrorForUser,
+  parseMinTipCapFromError,
+  readApiError,
+  readResponseBody,
+  readResponseErrorMessage,
+  resolveStoredAssetFile,
+  shortenAddress,
+  shouldRetryFinalizeRequest,
+} from './admin-create-event-form-utils'
 
 function useAdminCreateEventForm({
   sportsSlugCatalog,
@@ -2119,18 +1124,18 @@ function useAdminCreateEventForm({
     return map
   }, [currentStep, isStepValid, maxVisitedStep])
 
-  useEffect(() => {
+  useEffect(function revokeEventImagePreviewObjectUrl() {
     if (!eventImagePreviewUrl || !eventImagePreviewUrl.startsWith('blob:')) {
       return
     }
 
-    return () => {
+    return function cleanupEventImagePreviewObjectUrl() {
       URL.revokeObjectURL(eventImagePreviewUrl)
     }
   }, [eventImagePreviewUrl])
 
-  useEffect(() => {
-    return () => {
+  useEffect(function revokeOptionImagePreviewObjectUrls() {
+    return function cleanupOptionImagePreviewObjectUrls() {
       Object.values(optionImagePreviewUrls).forEach((url) => {
         if (url.startsWith('blob:')) {
           URL.revokeObjectURL(url)
@@ -2139,8 +1144,8 @@ function useAdminCreateEventForm({
     }
   }, [optionImagePreviewUrls])
 
-  useEffect(() => {
-    return () => {
+  useEffect(function revokeTeamLogoPreviewObjectUrls() {
+    return function cleanupTeamLogoPreviewObjectUrls() {
       Object.values(teamLogoPreviewUrls).forEach((url) => {
         if (url?.startsWith('blob:')) {
           URL.revokeObjectURL(url)
@@ -2149,8 +1154,8 @@ function useAdminCreateEventForm({
     }
   }, [teamLogoPreviewUrls])
 
-  useEffect(() => {
-    return () => {
+  useEffect(function cleanupPendingTimersOnUnmount() {
+    return function clearPendingTimers() {
       if (copyTimeoutRef.current !== null) {
         window.clearTimeout(copyTimeoutRef.current)
       }
@@ -2165,16 +1170,16 @@ function useAdminCreateEventForm({
     }
   }, [])
 
-  useEffect(() => {
+  useEffect(function runAuthChallengeCountdown() {
     if (!authChallengeExpiresAtMs) {
       return
     }
 
-    const timer = window.setInterval(() => {
+    const timer = window.setInterval(function tickSignatureCountdownNow() {
       setSignatureNowMs(Date.now())
     }, SIGNATURE_COUNTDOWN_INTERVAL_MS)
 
-    return () => {
+    return function clearAuthChallengeCountdownTimer() {
       window.clearInterval(timer)
     }
   }, [authChallengeExpiresAtMs])
@@ -2334,7 +1339,7 @@ function useAdminCreateEventForm({
     })
   }
 
-  useEffect(() => {
+  useEffect(function loadMainCategoriesOnMount() {
     async function loadMainCategories() {
       try {
         const response = await fetch('/admin/api/main-tags')
@@ -2355,8 +1360,8 @@ function useAdminCreateEventForm({
     void loadMainCategories()
   }, [])
 
-  useEffect(() => {
-    void (async () => {
+  useEffect(function loadSignerWalletsOnMount() {
+    async function loadSignerWallets() {
       try {
         setIsLoadingSigners(true)
         const response = await fetchAdminApi('/event-creations/signers', {
@@ -2378,7 +1383,9 @@ function useAdminCreateEventForm({
       finally {
         setIsLoadingSigners(false)
       }
-    })()
+    }
+
+    void loadSignerWallets()
   }, [])
 
   if (!automaticWalletAddress && signers.length === 1) {
@@ -2669,7 +1676,7 @@ function useAdminCreateEventForm({
     }
   }
 
-  useEffect(() => {
+  useEffect(function autosaveDraftPayload() {
     if (!draftId || typeof window === 'undefined') {
       return
     }
@@ -2751,7 +1758,7 @@ function useAdminCreateEventForm({
         })
     }, 800)
 
-    return () => {
+    return function clearDraftAutosaveTimeout() {
       if (draftAutosaveTimeoutRef.current !== null) {
         window.clearTimeout(draftAutosaveTimeoutRef.current)
         draftAutosaveTimeoutRef.current = null

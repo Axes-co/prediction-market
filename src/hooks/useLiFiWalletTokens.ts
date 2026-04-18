@@ -9,7 +9,7 @@ const USD_FORMATTER = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 })
 
-const MIN_USD_BALANCE = 2
+export const MIN_USD_BALANCE = 2
 
 function buildAcceptedTokenMap(tokensResponse: TokensExtendedResponse) {
   const acceptedByChain = new Map<number, Set<string>>()
