@@ -1,5 +1,3 @@
-'use cache'
-
 import type { Metadata } from 'next'
 import type { SupportedLocale } from '@/i18n/locales'
 import { setRequestLocale } from 'next-intl/server'
@@ -40,6 +38,8 @@ async function CachedEventMarketPageContent({
   slug: string
   market: string
 }) {
+  'use cache'
+
   const eventRoute = await getEventRouteBySlug(slug)
   if (!eventRoute) {
     notFound()
