@@ -113,5 +113,10 @@
   },
   "lint-staged": {
     "*": "eslint --fix"
+  },
+  "overrides": {
+    "@reown/appkit-adapter-wagmi": {
+      "@wagmi/connectors": "8.0.1"
+    }
   }
 }
