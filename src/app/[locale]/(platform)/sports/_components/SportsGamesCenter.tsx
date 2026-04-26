@@ -562,10 +562,12 @@ export default function SportsGamesCenter({
               >
                 {card.marketsCount > 0 && (
                   <span
-                    className={`
-                      inline-flex size-5 items-center justify-center rounded-sm bg-muted text-2xs font-semibold
-                      text-foreground/80
-                    `}
+                    className={cn(
+                      `
+                        inline-flex size-5 items-center justify-center rounded-sm bg-muted text-2xs font-semibold
+                        text-foreground/80
+                      `,
+                    )}
                   >
                     {card.marketsCount}
                   </span>
@@ -576,10 +578,10 @@ export default function SportsGamesCenter({
             </div>
           </div>
 
-          <div className="
+          <div className={cn(`
             flex flex-col gap-2.5
             min-[1200px]:flex-row min-[1200px]:items-center min-[1200px]:justify-between
-          "
+          `)}
           >
             <div className={cn('min-w-0 flex-1', isFinalizedCard ? 'space-y-3 pt-0.5' : 'space-y-2')}>
               {card.teams.map((team, teamIndex) => {
@@ -925,14 +927,16 @@ export default function SportsGamesCenter({
       disabled={weekOptions.length === 0}
     >
       <SelectTrigger
-        className={`
-          h-12 w-fit min-w-0 cursor-pointer rounded-full border-0 bg-card px-3.5 pr-2 text-sm font-semibold
-          text-foreground shadow-none
-          hover:bg-card
-          data-[size=default]:h-12!
-          dark:bg-card
-          dark:hover:bg-card
-        `}
+        className={cn(
+          `
+            h-12 w-fit min-w-0 cursor-pointer rounded-full border-0 bg-card px-3.5 pr-2 text-sm font-semibold
+            text-foreground shadow-none
+            hover:bg-card
+            data-[size=default]:h-12!
+            dark:bg-card
+            dark:hover:bg-card
+          `,
+        )}
       >
         <SelectValue placeholder="Week" />
       </SelectTrigger>
@@ -991,10 +995,12 @@ export default function SportsGamesCenter({
                 }
               }
             }}
-            className={`
-              ml-2 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none
-              placeholder:text-muted-foreground
-            `}
+            className={cn(
+              `
+                ml-2 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none
+                placeholder:text-muted-foreground
+              `,
+            )}
           />
           <button
             type="button"
@@ -1003,10 +1009,12 @@ export default function SportsGamesCenter({
               setSearchQuery('')
               setIsSearchOpen(false)
             }}
-            className={`
-              ml-2 flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors
-              hover:bg-muted/80 hover:text-foreground
-            `}
+            className={cn(
+              `
+                ml-2 flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors
+                hover:bg-muted/80 hover:text-foreground
+              `,
+            )}
           >
             <XIcon className="size-3.5" />
           </button>
@@ -1091,19 +1099,23 @@ export default function SportsGamesCenter({
 
   return (
     <>
-      <div className="
-        min-[1200px]:grid min-[1200px]:h-full min-[1200px]:min-h-0 min-[1200px]:grid-cols-[minmax(0,1fr)_21.25rem]
-        min-[1200px]:grid-rows-[minmax(0,1fr)] min-[1200px]:[align-content:start] min-[1200px]:items-stretch
-        min-[1200px]:gap-6
-      "
+      <div className={cn(
+        `
+          min-[1200px]:grid min-[1200px]:h-full min-[1200px]:min-h-0 min-[1200px]:grid-cols-[minmax(0,1fr)_21.25rem]
+          min-[1200px]:grid-rows-[minmax(0,1fr)] min-[1200px]:[align-content:start] min-[1200px]:items-stretch
+          min-[1200px]:gap-6
+        `,
+      )}
       >
         <section
           data-sports-scroll-pane="center"
-          className="
-            min-w-0
-            min-[1200px]:ml-4 min-[1200px]:min-h-0 min-[1200px]:self-stretch min-[1200px]:overflow-y-auto
-            min-[1200px]:overscroll-contain min-[1200px]:pr-1
-          "
+          className={cn(
+            `
+              min-w-0
+              min-[1200px]:ml-4 min-[1200px]:min-h-0 min-[1200px]:self-stretch min-[1200px]:overflow-y-auto
+              min-[1200px]:overscroll-contain min-[1200px]:pr-1
+            `,
+          )}
         >
           <div className="mb-3">
             {showHeading
@@ -1141,10 +1153,12 @@ export default function SportsGamesCenter({
                   <button
                     type="button"
                     onClick={() => router.push(`${verticalConfig.basePath}/${sportSlug}/games` as Route)}
-                    className={`
-                      rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground
-                      transition-colors
-                    `}
+                    className={cn(
+                      `
+                        rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground
+                        transition-colors
+                      `,
+                    )}
                   >
                     Games
                   </button>
@@ -1353,11 +1367,13 @@ export default function SportsGamesCenter({
 
         <aside
           data-sports-scroll-pane="aside"
-          className={`
-            hidden gap-4
-            min-[1200px]:sticky min-[1200px]:top-0 min-[1200px]:block min-[1200px]:h-fit min-[1200px]:max-h-full
-            min-[1200px]:self-start min-[1200px]:overflow-y-auto
-          `}
+          className={cn(
+            `
+              hidden gap-4
+              min-[1200px]:sticky min-[1200px]:top-0 min-[1200px]:block min-[1200px]:h-fit min-[1200px]:max-h-full
+              min-[1200px]:self-start min-[1200px]:overflow-y-auto
+            `,
+          )}
         >
           {activeTradeContext
             ? (

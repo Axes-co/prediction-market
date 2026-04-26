@@ -78,6 +78,7 @@ export default async function SportsEventMarketPage({
   ) {
     notFound()
   }
+
   const canonicalEventSlug = await resolveCanonicalEventSlugFromSportsPath(sport, event)
   if (!canonicalEventSlug) {
     notFound()

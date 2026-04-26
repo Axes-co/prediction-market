@@ -45,17 +45,11 @@ export async function resolveCanonicalEventSlugFromSportsPath(
 }
 
 export async function getEventTitleBySlug(eventSlug: string, locale: SupportedLocale) {
-  'use cache'
-  cacheTag(cacheTags.event(eventSlug))
-
   const { data } = await EventRepository.getEventTitleBySlug(eventSlug, locale)
   return data?.title ?? null
 }
 
 export async function getEventRouteBySlug(eventSlug: string) {
-  'use cache'
-  cacheTag(cacheTags.event(eventSlug))
-
   const { data, error } = await EventRepository.getEventRouteBySlug(eventSlug)
   if (error || !data) {
     return null
@@ -141,10 +135,6 @@ export async function loadEventPageShellData(
   eventSlug: string,
   locale: SupportedLocale,
 ): Promise<EventPageShellData> {
-  'use cache'
-  cacheTag(cacheTags.event(eventSlug))
-  cacheTag(cacheTags.settings)
-
   const [route, title, runtimeTheme] = await Promise.all([
     getEventRouteBySlug(eventSlug),
     getEventTitleBySlug(eventSlug, locale),

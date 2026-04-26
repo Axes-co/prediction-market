@@ -106,8 +106,6 @@ export async function renderSportsVerticalEventPage({
   event,
   vertical,
 }: RenderSportsVerticalEventPageParams) {
-  setRequestLocale(locale)
-
   const resolvedLocale = locale as SupportedLocale
   const canonicalEventSlug = await resolveCanonicalSportsEventSlug({ sport, league, event })
   const eventRoute = await getEventRouteBySlug(canonicalEventSlug)
@@ -199,8 +197,6 @@ export async function renderSportsVerticalEventMarketPage({
   market,
   vertical,
 }: RenderSportsVerticalEventMarketPageParams) {
-  setRequestLocale(locale)
-
   const resolvedLocale = locale as SupportedLocale
   const canonicalEventSlug = await resolveCanonicalSportsEventSlug({ sport, league, event })
   const eventRoute = await getEventRouteBySlug(canonicalEventSlug)

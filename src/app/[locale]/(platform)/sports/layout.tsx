@@ -1,3 +1,5 @@
+'use cache'
+
 import { notFound } from 'next/navigation'
 import { TradingOnboardingProvider } from '@/app/[locale]/(platform)/_providers/TradingOnboardingProvider'
 import SportsLayoutShell from '@/app/[locale]/(platform)/sports/_components/SportsLayoutShell'

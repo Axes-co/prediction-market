@@ -8,33 +8,65 @@ interface WindowSize {
 const INITIAL_WINDOW_SIZE: WindowSize = { width: 0, height: 0 }
 
 let cachedWindowSize = INITIAL_WINDOW_SIZE
+const subscribers = new Set<() => void>()
+let isListeningForWindowResize = false
+let initialWindowSizeFrame: number | null = null
+
+function readWindowSize() {
+  return {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }
+}
+
+function publishWindowSizeIfChanged() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const nextWindowSize = readWindowSize()
+  if (
+    cachedWindowSize.width === nextWindowSize.width
+    && cachedWindowSize.height === nextWindowSize.height
+  ) {
+    return
+  }
+
+  cachedWindowSize = nextWindowSize
+  subscribers.forEach(subscriber => subscriber())
+}
 
 function subscribeToWindowSizeStore(onStoreChange: () => void) {
   if (typeof window === 'undefined') {
     return function unsubscribeFromWindowSizeStore() {}
   }
 
-  window.addEventListener('resize', onStoreChange)
+  subscribers.add(onStoreChange)
+
+  if (!isListeningForWindowResize) {
+    isListeningForWindowResize = true
+    window.addEventListener('resize', publishWindowSizeIfChanged)
+    initialWindowSizeFrame = window.requestAnimationFrame(publishWindowSizeIfChanged)
+  }
 
   return function unsubscribeFromWindowSizeStore() {
-    window.removeEventListener('resize', onStoreChange)
+    subscribers.delete(onStoreChange)
+
+    if (subscribers.size > 0 || !isListeningForWindowResize) {
+      return
+    }
+
+    if (initialWindowSizeFrame != null) {
+      window.cancelAnimationFrame(initialWindowSizeFrame)
+      initialWindowSizeFrame = null
+    }
+
+    window.removeEventListener('resize', publishWindowSizeIfChanged)
+    isListeningForWindowResize = false
   }
 }
 
 function getWindowSizeClientSnapshot() {
-  const nextWindowSize = {
-    width: window.innerWidth,
-    height: window.innerHeight,
-  }
-
-  if (
-    cachedWindowSize.width === nextWindowSize.width
-    && cachedWindowSize.height === nextWindowSize.height
-  ) {
-    return cachedWindowSize
-  }
-
-  cachedWindowSize = nextWindowSize
   return cachedWindowSize
 }
 

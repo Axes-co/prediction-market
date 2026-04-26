@@ -1,9 +1,6 @@
-'use cache'
-
 import type { Metadata, Viewport } from 'next'
 import { hasLocale, NextIntlClientProvider } from 'next-intl'
 import { setRequestLocale } from 'next-intl/server'
-import { cacheTag } from 'next/cache'
 import { notFound } from 'next/navigation'
 import CustomJavascriptCode from '@/components/CustomJavascriptCode'
 import GlobalAnnouncementBanner from '@/components/GlobalAnnouncementBanner'
@@ -14,7 +11,6 @@ import TestModeBannerDeferred from '@/components/TestModeBannerDeferred'
 import { loadEnabledLocales } from '@/i18n/locale-settings'
 import { isRtlLocale } from '@/i18n/locales'
 import { routing } from '@/i18n/routing'
-import { cacheTags } from '@/lib/cache-tags'
 import { openSauceOne } from '@/lib/fonts'
 import { loadGlobalAnnouncementSettings } from '@/lib/global-announcement-settings'
 import { IS_TEST_MODE } from '@/lib/network'
@@ -123,7 +119,6 @@ export default async function LocaleLayout({ params, children }: LayoutProps<'/[
   const runtimeTheme = await loadRuntimeThemeState()
   const globalAnnouncement = await loadGlobalAnnouncementSettings()
   const hasGlobalAnnouncement = globalAnnouncement.message.trim().length > 0
-  cacheTag(cacheTags.settings)
 
   setRequestLocale(locale)
 
