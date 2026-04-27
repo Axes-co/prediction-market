@@ -40,6 +40,8 @@ export async function updateEventVisibilityAction(
     revalidatePath('/[locale]/admin/events', 'page')
     updateTag(cacheTags.eventsList)
     updateTag(cacheTags.event(data.slug))
+    updateTag(cacheTags.sportsMenu)
+    updateTag(cacheTags.sitemap)
     for (const locale of SUPPORTED_LOCALES) {
       updateTag(cacheTags.mainTags(locale))
     }

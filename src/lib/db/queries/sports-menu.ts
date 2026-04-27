@@ -176,7 +176,7 @@ const getCachedSportsMenuRows = unstable_cache(
   ['sports-menu-items-v2'],
   {
     revalidate: 1800,
-    tags: [cacheTags.eventsList],
+    tags: [cacheTags.sportsMenu],
   },
 )
 
@@ -217,7 +217,7 @@ const getCachedActiveSportsCountRows = unstable_cache(
   ['sports-menu-active-count-rows-v4'],
   {
     revalidate: 300,
-    tags: [cacheTags.eventsList],
+    tags: [cacheTags.sportsMenu],
   },
 )
 
@@ -327,7 +327,7 @@ export async function getSportsCountsBySlugFromDb(vertical: SportsVertical = 'sp
 export const SportsMenuRepository = {
   async getMenuEntries(vertical: SportsVertical = 'sports'): Promise<QueryResult<SportsMenuEntry[]>> {
     'use cache'
-    cacheTag(cacheTags.eventsList)
+    cacheTag(cacheTags.sportsMenu)
 
     return runQuery(async () => {
       const rows = await getCachedSportsMenuRows()
@@ -341,7 +341,7 @@ export const SportsMenuRepository = {
 
   async getLayoutData(vertical: SportsVertical = 'sports'): Promise<QueryResult<SportsMenuLayoutData>> {
     'use cache'
-    cacheTag(cacheTags.eventsList)
+    cacheTag(cacheTags.sportsMenu)
 
     return runQuery(async () => {
       const [rows, activeCountRows] = await Promise.all([
@@ -367,7 +367,7 @@ export const SportsMenuRepository = {
 
   async resolveCanonicalSlugByAlias(alias: string): Promise<QueryResult<string | null>> {
     'use cache'
-    cacheTag(cacheTags.eventsList)
+    cacheTag(cacheTags.sportsMenu)
 
     return runQuery(async () => {
       const resolver = await getSportsSlugResolverFromDb()
@@ -381,7 +381,7 @@ export const SportsMenuRepository = {
 
   async getLandingHref(vertical: SportsVertical = 'sports'): Promise<QueryResult<string | null>> {
     'use cache'
-    cacheTag(cacheTags.eventsList)
+    cacheTag(cacheTags.sportsMenu)
 
     return runQuery(async () => {
       const rows = await getCachedSportsMenuRows()
@@ -396,7 +396,7 @@ export const SportsMenuRepository = {
 
   async getFuturesHref(vertical: SportsVertical = 'sports'): Promise<QueryResult<string | null>> {
     'use cache'
-    cacheTag(cacheTags.eventsList)
+    cacheTag(cacheTags.sportsMenu)
 
     return runQuery(async () => {
       const rows = await getCachedSportsMenuRows()

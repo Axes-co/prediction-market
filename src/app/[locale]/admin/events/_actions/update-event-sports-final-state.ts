@@ -68,6 +68,7 @@ export async function updateEventSportsFinalStateAction(
     revalidatePath('/[locale]/admin/events', 'page')
     updateTag(cacheTags.eventsList)
     updateTag(cacheTags.event(data.slug))
+    updateTag(cacheTags.sportsMenu)
 
     return {
       success: true,
