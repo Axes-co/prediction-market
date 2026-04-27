@@ -116,12 +116,6 @@ interface ProcessMarketResult {
   eventIdForCacheInvalidation: string | null
   changed: boolean
   listAffectingChange: boolean
-  /**
-   * True when this market's processing produced a change to the public URL
-   * set (a new event was created). Used to scope sitemap invalidation to
-   * runs that actually altered the crawlable URL list, rather than every
-   * status flip.
-   */
   urlSetChanged: boolean
 }
 
@@ -129,13 +123,13 @@ interface ProcessEventResult {
   eventId: string
   eventChanged: boolean
   listAffectingChange: boolean
-  /** See {@link ProcessMarketResult.urlSetChanged}. */
   urlSetChanged: boolean
 }
 
 interface ProcessMarketDataResult {
   eventIdForStatusUpdate: string
   marketChanged: boolean
+  urlSetChanged: boolean
 }
 
 const PNL_CONDITIONS_PAGE_QUERY = `
@@ -424,6 +418,7 @@ async function syncMarkets(allowedCreators: Set<string>, options: SyncOptions): 
       }
       if (changedEventIds.length > 0) {
         shouldInvalidateListCache = true
+        shouldInvalidateSitemap = true
       }
       eventIdsNeedingStatusUpdate.clear()
     }
@@ -446,6 +441,7 @@ async function syncMarkets(allowedCreators: Set<string>, options: SyncOptions): 
     }
     if (changedEventIds.length > 0) {
       shouldInvalidateListCache = true
+      shouldInvalidateSitemap = true
     }
     eventIdsNeedingStatusUpdate.clear()
   }
@@ -598,7 +594,7 @@ async function processMarket(
     eventIdForCacheInvalidation: changed ? eventResult.eventId : null,
     changed,
     listAffectingChange: eventResult.listAffectingChange,
-    urlSetChanged: eventResult.urlSetChanged,
+    urlSetChanged: eventResult.urlSetChanged || marketResult.urlSetChanged,
   }
 }
 
@@ -1042,6 +1038,7 @@ async function processMarketData(
       event_id: marketsTable.event_id,
       is_resolved: marketsTable.is_resolved,
       updated_at: marketsTable.updated_at,
+      slug: marketsTable.slug,
     })
     .from(marketsTable)
     .where(eq(marketsTable.condition_id, market.id))
@@ -1068,6 +1065,7 @@ async function processMarketData(
     return {
       eventIdForStatusUpdate,
       marketChanged: false,
+      urlSetChanged: false,
     }
   }
 
@@ -1209,9 +1207,15 @@ async function processMarketData(
     await processOutcomes(market.id, metadata.outcomes)
   }
 
+  const incomingSlug = String(metadata.slug ?? '').trim()
+  const previousSlug = (existingMarket?.slug ?? '').trim()
+  const urlSetChanged = (!marketAlreadyExists && incomingSlug.length > 0)
+    || (marketAlreadyExists && incomingSlug !== previousSlug)
+
   return {
     eventIdForStatusUpdate,
     marketChanged: true,
+    urlSetChanged,
   }
 }
 
