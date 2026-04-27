@@ -141,7 +141,6 @@ function revalidateGeneralSettingsPaths() {
   revalidatePath('/[locale]/admin/theme', 'page')
   revalidatePath('/[locale]/admin/market-context', 'page')
   revalidatePath('/[locale]/tos', 'page')
-  revalidatePath('/[locale]', 'layout')
 }
 
 async function syncGeoblockSettings() {

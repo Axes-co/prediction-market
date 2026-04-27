@@ -3,7 +3,7 @@ import type { PlatformCategorySidebarItem, PlatformNavigationChild } from '@/lib
 import { createHash } from 'node:crypto'
 import { and, asc, count, desc, eq, exists, ilike, inArray, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
-import { cacheTag, revalidatePath } from 'next/cache'
+import { cacheTag } from 'next/cache'
 import { DEFAULT_LOCALE, NON_DEFAULT_LOCALES } from '@/i18n/locales'
 import { cacheTags } from '@/lib/cache-tags'
 import { resolveCategorySidebarData } from '@/lib/category-sidebar-config'
@@ -913,8 +913,6 @@ export const TagRepository = {
       return { data: null, error: visibleCountsError }
     }
 
-    revalidatePath('/')
-
     const row = selectResult[0]
     const formattedData: AdminTagRow = {
       id: row.id,
@@ -1018,8 +1016,6 @@ export const TagRepository = {
       }
     }
 
-    revalidatePath('/')
-
     return { error: null }
   },
 
@@ -1106,8 +1102,6 @@ export const TagRepository = {
         error: translationError,
       }
     }
-
-    revalidatePath('/')
 
     return {
       data: translationsByTagId.get(tagId) ?? {},

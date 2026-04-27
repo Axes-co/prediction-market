@@ -98,6 +98,6 @@ describe('updateThemeSettingsAction', () => {
     expect(JSON.parse(savedLight?.value || '{}')).toEqual({ primary: '#112233' })
     expect(JSON.parse(savedDark?.value || '{}')).toEqual({ primary: '#445566' })
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/[locale]/admin/theme', 'page')
-    expect(mocks.revalidatePath).toHaveBeenCalledWith('/[locale]', 'layout')
+    expect(mocks.revalidatePath).not.toHaveBeenCalledWith('/[locale]', 'layout')
   })
 })

@@ -160,7 +160,7 @@ describe('updateGeneralSettingsAction', () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/[locale]/admin/theme', 'page')
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/[locale]/admin/market-context', 'page')
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/[locale]/tos', 'page')
-    expect(mocks.revalidatePath).toHaveBeenCalledWith('/[locale]', 'layout')
+    expect(mocks.revalidatePath).not.toHaveBeenCalledWith('/[locale]', 'layout')
   })
 
   it('saves image-mode settings when an image path already exists', async () => {

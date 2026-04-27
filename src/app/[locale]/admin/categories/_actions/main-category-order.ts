@@ -27,7 +27,6 @@ export interface UpdateMainCategoryOrderResult {
 
 function revalidateCategoryCaches(userId: string) {
   revalidatePath('/[locale]/admin/categories', 'page')
-  revalidatePath('/[locale]', 'layout')
   updateTag(cacheTags.adminCategories)
   updateTag(cacheTags.eventsList)
   updateTag(cacheTags.events(userId))

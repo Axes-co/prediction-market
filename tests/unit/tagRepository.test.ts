@@ -539,6 +539,6 @@ describe('tagRepository.updateMainCategoriesDisplayOrder', () => {
 
     expect(result.error).toBeNull()
     expect(mocks.runQuery).toHaveBeenCalledTimes(1)
-    expect(mocks.revalidatePath).toHaveBeenCalledWith('/')
+    expect(mocks.revalidatePath).not.toHaveBeenCalled()
   })
 })

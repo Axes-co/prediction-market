@@ -93,7 +93,6 @@ export async function updateCategoryAction(
     }
 
     revalidatePath('/[locale]/admin/categories', 'page')
-    revalidatePath('/[locale]', 'layout')
     revalidatePath('/[locale]/event/[slug]', 'page')
     revalidatePath('/[locale]/event/[slug]/[market]', 'page')
     updateTag(cacheTags.adminCategories)

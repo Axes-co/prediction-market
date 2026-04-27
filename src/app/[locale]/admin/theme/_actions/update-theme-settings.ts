@@ -59,7 +59,6 @@ export async function updateThemeSettingsAction(
   }
 
   revalidatePath('/[locale]/admin/theme', 'page')
-  revalidatePath('/[locale]', 'layout')
 
   return { error: null }
 }

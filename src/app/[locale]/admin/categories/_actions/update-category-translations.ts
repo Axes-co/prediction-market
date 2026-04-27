@@ -64,7 +64,6 @@ export async function updateCategoryTranslationsAction(
     }
 
     revalidatePath('/[locale]/admin/categories', 'page')
-    revalidatePath('/[locale]', 'layout')
     updateTag(cacheTags.adminCategories)
     updateTag(cacheTags.eventsList)
     updateTag(cacheTags.events(currentUser.id))
