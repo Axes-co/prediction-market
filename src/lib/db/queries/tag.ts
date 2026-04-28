@@ -329,6 +329,7 @@ export const TagRepository = {
   async getMainTags(locale: SupportedLocale = DEFAULT_LOCALE): Promise<MainTagsResult> {
     'use cache'
     cacheTag(cacheTags.mainTags(locale))
+
     const { data: mainTagsResult, error } = await runQuery(async () => {
       const result = await db
         .select({

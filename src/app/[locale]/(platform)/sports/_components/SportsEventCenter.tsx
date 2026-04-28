@@ -91,6 +91,7 @@ export default function SportsEventCenter({
   marketContextEnabled = false,
   sportSlug,
   sportLabel,
+  faqItems,
   initialMarketSlug = null,
   initialMarketViewKey = null,
   vertical = 'sports',
@@ -1571,7 +1572,7 @@ export default function SportsEventCenter({
               marketContextEnabled={marketContextEnabled}
               mode="page"
             />
-            <EventTabs event={heroCard.event} user={user ?? null} />
+            <EventTabs event={heroCard.event} user={user ?? null} faqItems={faqItems} />
           </div>
         </section>
 
