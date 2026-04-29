@@ -3,6 +3,25 @@ import type { OrderBookSummaryResponse } from '@/types/EventCardTypes'
 const CLOB_BASE_URL = process.env.CLOB_URL
 const MAX_LIMIT_PRICE = 99.9
 const PRICE_EPSILON = 1e-8
+const CLOB_FETCH_TIMEOUT_MS = process.env.NODE_ENV === 'development' ? 1500 : 4000
+
+/**
+ * Sides accepted by the Polymarket CLOB price endpoints (`/prices`,
+ * `/last-trades-prices`). The contract requires one entry per (token, side)
+ * pair: BUY returns the best ask, SELL returns the best bid. Kuest's CLOB
+ * follows the same Polymarket spec, so this shape is universal.
+ */
+export const CLOB_BOOK_SIDES = ['BUY', 'SELL'] as const
+
+export type ClobBookSide = (typeof CLOB_BOOK_SIDES)[number]
+
+/**
+ * Build the sided body for `/prices` and `/last-trades-prices`. Pass the
+ * unique token ids; the helper expands each into BUY + SELL entries.
+ */
+export function buildClobPriceQueryEntries(tokenIds: string[]): { token_id: string, side: ClobBookSide }[] {
+  return tokenIds.flatMap(tokenId => CLOB_BOOK_SIDES.map(side => ({ token_id: tokenId, side })))
+}
 
 export function getClobBaseUrl() {
   if (!CLOB_BASE_URL) {
@@ -19,6 +38,7 @@ export async function fetchClobJson<T>(path: string, body: unknown): Promise<T> 
       'Accept': 'application/json',
       'Content-Type': 'application/json',
     },
+    signal: AbortSignal.timeout(CLOB_FETCH_TIMEOUT_MS),
     body: JSON.stringify(body),
   })
 

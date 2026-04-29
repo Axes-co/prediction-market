@@ -6,6 +6,27 @@ import { Redis } from '@upstash/redis'
 // ---------------------------------------------------------------------------
 
 let redisInstance: Redis | null = null
+const REDIS_OPERATION_TIMEOUT_MS = process.env.NODE_ENV === 'development' ? 750 : 2000
+
+async function withRedisTimeout<T>(operation: Promise<T>): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error('Redis operation timed out.'))
+        }, REDIS_OPERATION_TIMEOUT_MS)
+      }),
+    ])
+  }
+  finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+    }
+  }
+}
 
 /**
  * Returns a shared Redis client. Supports both Upstash standard env vars
@@ -69,7 +90,7 @@ export async function withCache<T>(
 
   if (redis) {
     try {
-      const cached = await redis.get<T>(key)
+      const cached = await withRedisTimeout(redis.get<T>(key))
       if (cached !== null && cached !== undefined) {
         return cached
       }
@@ -87,7 +108,7 @@ export async function withCache<T>(
 
   if (redis && isCacheable) {
     try {
-      await redis.set(key, data, { ex: ttlSeconds })
+      await withRedisTimeout(redis.set(key, data, { ex: ttlSeconds }))
     }
     catch {
       // Redis write failed — not critical, data is already returned
@@ -113,7 +134,7 @@ export async function invalidateCache(...keys: string[]): Promise<void> {
   }
 
   try {
-    await redis.del(...keys)
+    await withRedisTimeout(redis.del(...keys))
   }
   catch {
     // Non-fatal — the key will expire via TTL anyway
@@ -133,15 +154,15 @@ export async function invalidateCacheByPrefix(prefix: string): Promise<void> {
   try {
     let cursor = 0
     do {
-      const [nextCursorRaw, keys] = await redis.scan(cursor, {
+      const [nextCursorRaw, keys] = await withRedisTimeout(redis.scan(cursor, {
         match: `${prefix}*`,
         count: 100,
-      })
+      }))
       cursor = typeof nextCursorRaw === 'string'
         ? Number.parseInt(nextCursorRaw, 10)
         : Number(nextCursorRaw)
       if (keys.length > 0) {
-        await redis.del(...keys)
+        await withRedisTimeout(redis.del(...keys))
       }
     } while (cursor !== 0)
   }

@@ -9,6 +9,7 @@ import { and, asc, count, desc, eq, exists, ilike, inArray, or, sql } from 'driz
 import { cacheTag } from 'next/cache'
 import { DEFAULT_LOCALE } from '@/i18n/locales'
 import { cacheTags } from '@/lib/cache-tags'
+import { buildClobPriceQueryEntries } from '@/lib/clob'
 import { OUTCOME_INDEX } from '@/lib/constants'
 import { getSportsSlugResolverFromDb } from '@/lib/db/queries/sports-menu'
 import { bookmarks } from '@/lib/db/schema/bookmarks/tables'
@@ -209,6 +210,12 @@ function resolveMarketDisplayPrice(
   return resolveOutcomeDisplayPrice(primaryOutcome) ?? 0.5
 }
 
+// Safety belt against undici socket-pool exhaustion. The per-origin pool
+// serves ~6 parallel fetches and queues the rest. A 15s ceiling keeps
+// degraded conditions from blocking RSC suspense indefinitely while
+// still leaving room for queued requests to drain.
+const CLOB_BATCH_FETCH_TIMEOUT_MS = 15_000
+
 async function fetchPriceBatch(endpoint: string, tokenIds: string[]): Promise<FetchPriceBatchResult> {
   try {
     const response = await fetch(endpoint, {
@@ -217,9 +224,8 @@ async function fetchPriceBatch(endpoint: string, tokenIds: string[]): Promise<Fe
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
-      body: JSON.stringify(tokenIds.map(tokenId => ({
-        token_id: tokenId,
-      }))),
+      body: JSON.stringify(buildClobPriceQueryEntries(tokenIds)),
+      signal: AbortSignal.timeout(CLOB_BATCH_FETCH_TIMEOUT_MS),
     })
 
     if (!response.ok) {
@@ -238,6 +244,12 @@ async function fetchPriceBatch(endpoint: string, tokenIds: string[]): Promise<Fe
 }
 
 async function fetchLastTradePrices(tokenIds: string[]): Promise<Map<string, number>> {
+  // Dev-only short-circuit to keep the home-page RSC async tree small enough
+  // to avoid vercel/next.js#87772 (visitAsyncNode infinite recursion).
+  if (process.env.NODE_ENV === 'development') {
+    return new Map()
+  }
+
   const uniqueTokenIds = Array.from(new Set(tokenIds.filter(Boolean)))
 
   if (!uniqueTokenIds.length) {
@@ -254,7 +266,8 @@ async function fetchLastTradePrices(tokenIds: string[]): Promise<Map<string, num
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
-      body: JSON.stringify(uniqueTokenIds.map(tokenId => ({ token_id: tokenId }))),
+      body: JSON.stringify(buildClobPriceQueryEntries(uniqueTokenIds)),
+      signal: AbortSignal.timeout(CLOB_BATCH_FETCH_TIMEOUT_MS),
     })
 
     if (!response.ok) {
@@ -311,6 +324,12 @@ function applyPriceBatch(
 }
 
 async function fetchOutcomePrices(tokenIds: string[]): Promise<Map<string, OutcomePrices>> {
+  // Dev-only short-circuit to keep the home-page RSC async tree small enough
+  // to avoid vercel/next.js#87772 (visitAsyncNode infinite recursion).
+  if (process.env.NODE_ENV === 'development') {
+    return new Map()
+  }
+
   const uniqueTokenIds = Array.from(new Set(tokenIds.filter(Boolean)))
 
   if (uniqueTokenIds.length === 0) {
@@ -330,15 +349,27 @@ async function fetchOutcomePrices(tokenIds: string[]): Promise<Map<string, Outco
       break
     }
 
-    if (batchResult.data) {
-      applyPriceBatch(batchResult.data, priceMap, missingTokenIds)
+    // If the whole batch failed (network error / timeout / non-2xx), do NOT
+    // retry per-token. Per-token retry against the same endpoint just
+    // amplifies the flood: a 100-token batch becomes 100 parallel fetches,
+    // undici's per-origin socket pool serves ~6 in parallel and queues the
+    // rest, the queued ones time out before they get a turn, and the next
+    // batch repeats the same pattern. This was the actual cause of the
+    // home-page 60-90s+ render hangs (RSC suspense never resolved).
+    if (!batchResult.data) {
+      continue
     }
+
+    applyPriceBatch(batchResult.data, priceMap, missingTokenIds)
 
     const batchMissingTokenIds = batch.filter(tokenId => missingTokenIds.has(tokenId))
     if (batchMissingTokenIds.length === 0) {
       continue
     }
 
+    // Only fall through to per-token retries when the batch *partially*
+    // succeeded — i.e. some tokens were missing from the response payload
+    // but the request itself worked.
     const tokenResults = await Promise.allSettled(
       batchMissingTokenIds.map(tokenId => fetchPriceBatch(endpoint, [tokenId])),
     )
@@ -948,7 +979,14 @@ function eventResource(
     enable_neg_risk: Boolean(event.enable_neg_risk),
     neg_risk_augmented: Boolean(event.neg_risk_augmented),
     neg_risk: Boolean(event.neg_risk),
+    show_all_outcomes: Boolean(event.show_all_outcomes),
     neg_risk_market_id: event.neg_risk_market_id || undefined,
+    gamma_event_id: typeof event.gamma_event_id === 'number' ? event.gamma_event_id : null,
+    comment_count: Number(event.comment_count ?? 0),
+    restricted: Boolean(event.restricted),
+    liquidity_clob: event.liquidity_clob != null ? Number(event.liquidity_clob) : null,
+    featured: Boolean(event.featured),
+    featured_order: typeof event.featured_order === 'number' ? event.featured_order : null,
     status: (event.status ?? 'draft') as Event['status'],
     rules: event.rules || undefined,
     series_slug: event.series_slug ?? null,

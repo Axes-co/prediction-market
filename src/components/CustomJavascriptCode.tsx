@@ -192,21 +192,23 @@ function useCustomJavascriptCodeExecution(locale: string, codes: CustomJavascrip
     [activeCodes],
   )
   const previousActiveCodeSignatureRef = useRef<string | null>(null)
+  const executedActiveCodeSignatureRef = useRef<string | null>(null)
   const [interactionSignature, setInteractionSignature] = useState<string | null>(null)
 
   useEffect(function reloadOnCodeChange() {
     const previousActiveCodeSignature = previousActiveCodeSignatureRef.current
     previousActiveCodeSignatureRef.current = activeCodeSignature
+    const executedActiveCodeSignature = executedActiveCodeSignatureRef.current
 
     if (previousActiveCodeSignature === null) {
       return
     }
 
-    if (previousActiveCodeSignature === activeCodeSignature) {
+    if (previousActiveCodeSignature === activeCodeSignature || executedActiveCodeSignature === null) {
       return
     }
 
-    if (!hasExecutedCustomJavascriptCode()) {
+    if (!hasExecutedCustomJavascriptCode() || executedActiveCodeSignature === activeCodeSignature) {
       return
     }
 
@@ -221,6 +223,7 @@ function useCustomJavascriptCodeExecution(locale: string, codes: CustomJavascrip
     function handleInteraction() {
       setInteractionSignature(activeCodeSignature)
       executeCustomJavascriptCodes(activeCodes)
+      executedActiveCodeSignatureRef.current = activeCodeSignature
     }
 
     window.addEventListener('pointerdown', handleInteraction, { once: true, passive: true })

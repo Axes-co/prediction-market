@@ -7,6 +7,9 @@ import { EventRepository } from '@/lib/db/queries/event'
 import { filterHomeEvents, HOME_EVENTS_PAGE_SIZE } from '@/lib/home-events'
 
 const HOME_EVENTS_QUERY_BATCH_SIZE = 128
+// Dev cap to avoid vercel/next.js#87772: visitAsyncNode infinite recursion when
+// large RSC async result trees blow Turbopack's dev runtime stack.
+const HOME_EVENTS_DEV_QUERY_CAP = 32
 
 interface ListHomeEventsPageOptions {
   bookmarked: boolean
@@ -52,6 +55,8 @@ async function loadHomeEventCandidates({
 
   const targetOffset = Math.max(0, offset)
   const targetVisibleCount = targetOffset + HOME_EVENTS_PAGE_SIZE
+  const isDev = process.env.NODE_ENV === 'development'
+  const batchSize = isDev ? HOME_EVENTS_DEV_QUERY_CAP : HOME_EVENTS_QUERY_BATCH_SIZE
   let rawOffset = 0
   const accumulatedEvents: Event[] = []
 
@@ -66,7 +71,7 @@ async function loadHomeEventCandidates({
       frequency,
       status,
       offset: rawOffset,
-      limit: HOME_EVENTS_QUERY_BATCH_SIZE,
+      limit: batchSize,
       locale,
       sportsSportSlug,
       sportsSection,
@@ -97,11 +102,15 @@ async function loadHomeEventCandidates({
       }
     }
 
-    if (batch.length < HOME_EVENTS_QUERY_BATCH_SIZE) {
+    if (batch.length < batchSize) {
       break
     }
 
-    rawOffset += HOME_EVENTS_QUERY_BATCH_SIZE
+    if (isDev) {
+      break
+    }
+
+    rawOffset += batchSize
   }
 
   return {
