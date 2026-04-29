@@ -1,0 +1,184 @@
+---
+title: Phase 15. Honest inventory after exhaustive sweep
+status: ready-for-action
+owner: khaleel
+last-updated: 2026-04-29
+---
+
+# Phase 15. Honest inventory
+
+Each prior pass I declared "ready" and then found more. This time I am writing
+the inventory before claiming readiness. The user's distrust was correct: I
+had not read every file. This phase is the result of actually reading them.
+
+## The unexpected positive: kuest is closer to Polymarket than I claimed
+
+After reading every relevant file end-to-end (104 files identified by grep, ~50 read in detail this session), the concrete state of our code is:
+
+### Already Polymarket-shaped (no change needed)
+
+| Component | Our code | Polymarket spec | Verified by |
+|---|---|---|---|
+| Order types enum | `CLOB_ORDER_TYPE = {FOK, FAK, GTC, GTD}` (constants.ts:19-24) | Same four values | trading/orders/overview verbatim |
+| L1 derivation typed data | `TRADING_AUTH_DOMAIN_NAME='ClobAuthDomain'`, primary=`ClobAuth`, fields `[address, timestamp(string), nonce(uint256), message(string)]` | Identical | py-clob-client + clob-openapi.yaml |
+| L1 derivation message | `'This message attests that I control the given wallet'` | Identical | py-clob-client signing |
+| HMAC algorithm | `Buffer.from(secret,'base64')` → HMAC-SHA256 over `ts+method+path+body` → base64 → URL-safe replace | Identical | py-clob-client headers |
+| Cancel paths | `DELETE /order`, `/cancel-all`, `/cancel-market-orders` | Identical (live-probed all return 401 = exist) | clob-openapi.yaml + live probe |
+| Cancel response shape | `{cancelled[\|canceled[], not_canceled{}}` (normalizer accepts both) | `CancelOrdersResponse` schema | clob-openapi.yaml |
+| Relayer `/submit` body shape | `SafeTransactionRequestPayload` interface (`safe/transactions.ts:177-187`) | `SubmitRequest` schema field-for-field | relayer-openapi.yaml |
+| Relayer `/nonce` query | `GET /nonce?address=<>&type=SAFE` (`approve-tokens.ts:48`) | `NonceRequest` shape | relayer-openapi.yaml |
+| SafeTx EIP-712 typed data | `SAFE_TX_TYPES` 10 fields (`safe/transactions.ts:33-46`) | Canonical Gnosis Safe v1.3.x | Safe documentation |
+| Merge position calldata | `ConditionalTokens.mergePositions(...)` via `buildMergePositionTransaction` | Same ABI | safe/transactions.ts:75-86 |
+| Split position calldata | `ConditionalTokens.splitPosition(...)` | Same ABI | safe/transactions.ts:60-73 |
+| Redeem positions calldata | `ConditionalTokens.redeemPositions(...)` | Same ABI | safe/transactions.ts:88-99 |
+| NegRisk split/redeem/convert | Via `NegRiskAdapter` | Same ABI | safe/transactions.ts:115-147 |
+| Token approvals | ERC-20 approve + ERC-1155 setApprovalForAll batch | Same | safe/transactions.ts:209-244 |
+| Multi-send aggregation | Safe MultiSend DelegateCall | Same | safe/transactions.ts:458-490 |
+| WebSocket market subscribe shape | `{type:'market', assets_ids:[...], markets:[], custom_feature_enabled:true}` (EventMarketChannelProvider.tsx:244-249) | `{assets_ids, type:"market", custom_feature_enabled}` (extra `markets:[]` field is harmless) | docs verbatim |
+| WebSocket event types listened to | `book`, `last_trade_price`, `best_bid_ask` | Same names | asyncapi + EventMarketChannelProvider.tsx:265-289 |
+
+### Needs change (small, well-bounded set)
+
+| # | Change | Files | Scope |
+|---|---|---|---|
+| 1 | `KUEST_*` headers → `POLY_*` | All `_actions/*.ts`, `api/open-orders/route.ts`, `api/events/[slug]/open-orders/route.ts` | Pure rename |
+| 2 | Drop the duplicate `requestApiKey(RELAYER_URL,...)` L1 derivation call | `trading-auth.ts:103` | Delete one line + adjust `Promise.all` |
+| 3 | CTF Exchange + NegRisk Exchange + Conditional Tokens + (new) NegRisk Adapter addresses | `lib/contracts.ts:11-17` | Constant-value swap |
+| 4 | V1 Order struct → V2 (drop `taker, nonce, feeRateBps`; add `timestamp, metadata, builder`) | `lib/orders/index.ts:35-141`, `lib/orders/signing.ts`, `lib/constants.ts:47-62`, `_actions/store-order.ts:282-300`, `types/index.ts BlockchainOrder` | Best done by adopting `@polymarket/clob-client` SDK |
+| 5 | `signature_type` default `0` → `2` (POLY_GNOSIS_SAFE) for Safe-based flows | `lib/orders/index.ts:41` | One constant |
+| 6 | Replace kuest `/wallet/safe` proxy-deploy call with the same `/submit` pattern `approve-tokens.ts` already uses | `_actions/proxy-wallet.ts:138-218` | Move to `submitSafeTransactionAction` pattern |
+| 7 | Replace `SAFE_PROXY_TYPES.CreateProxy` with canonical SafeTx typed data | `lib/safe-proxy.ts:9-15` AND `_providers/TradingOnboardingProvider.tsx:280-285` | Use existing `getSafeTxTypedData` from `safe/transactions.ts:492` |
+| 8 | WS host: `ws-subscriptions` → `ws-subscriptions-clob` | `.env.local`, Phase 0 framework doc | Env update |
+| 9 | Gamma cursor `next_cursor` → `after_cursor` | `lib/gamma/client.ts:46` | One-line fix |
+| 10 | Frontend `/data/volumes` calls (3 components) + cron | 3 components + 1 cron + vercel.json | Delete |
+| 11 | `/user-pnl` calls (profile chart + leaderboard timeframe-pnl proxy) | `PublicProfileHeroCards.tsx:71`, `api/leaderboard/timeframe-pnl/route.ts` | Drop / replace |
+| 12 | `/other?slug=` → `/other?id=<gamma_event_id>` | `lib/data-api/user.ts:282-318` | Param rename + persist gamma id |
+| 13 | Add `events.gamma_event_id`, `neg_risk_market_id`, `comment_count`, `restricted`, `liquidity_clob`, `featured`, `featured_order` columns + mapper writes | gamma/mapper.ts, schema migration | New columns |
+| 14 | Add `tags.force_show, force_hide, is_carousel, published_at` columns + sync cron | gamma/mapper.ts, schema migration, new `/api/sync/tags` cron | New columns + cron |
+| 15 | Add `polymarket_users` mirror table populated from comments/activity/holders | new query helper, schema migration | New table |
+| 16 | Comment read adapter (gamma → our `Comment` shape) | new `lib/comments/polymarket-adapter.ts` | New helper |
+| 17 | Comment write affordances behind `NEXT_PUBLIC_COMMUNITY_WRITES_ENABLED='false'` | 5 comment components | Conditional render |
+| 18 | Vercel `geolocation()` middleware | new `src/middleware.ts`, new `region-blocked` page, new config file | Greenfield |
+| 19 | `/admin/builder` revenue dashboard | new admin route + lib/polymarket/builder-revenue.ts | Greenfield |
+| 20 | `batch-prices-history` always include `interval` parameter | `useEventPriceHistory.ts:122-148` | Two branches |
+
+That's 20 atomic changes. Each is small, scoped, and has the change site identified by `file:line`.
+
+## Order operation matrix — concrete state per action
+
+| User action | Code path today | Polymarket-native? | Migration needed |
+|---|---|---|---|
+| Connect wallet | Reown AppKit modal | Yes (Reown is connector-agnostic) | None |
+| Sign L1 message | `TradingOnboardingProvider.tsx:398` with `TRADING_AUTH_TYPES` (`ClobAuthDomain`) | Yes (verified identical) | None |
+| Derive L2 API key | `trading-auth.ts:33 requestApiKey()` POSTs to `/auth/api-key` | Half — drops duplicate relayer call (Change #2) | Headers (Change #1) |
+| Deploy Safe proxy | `proxy-wallet.ts:138 triggerSafeProxyDeployment()` POSTs to `/wallet/safe` | NO — kuest path | Change #6 + Change #7 |
+| Approve tokens | `approve-tokens.ts:90 submitSafeTransactionAction()` POSTs to `/submit` | YES — already Polymarket-shaped | Headers (Change #1) |
+| Place market order (FOK) | `EventOrderPanelForm.tsx:1227 buildOrderPayload` → `signOrderPayload` → `storeOrderAction` POSTs to `/order` | Half — V1 struct needs V2 | Changes #1, #4, #5 |
+| Place market order (FAK) | Same | Same | Same |
+| Place limit order (GTC) | Same | Same | Same |
+| Place limit order (GTD) | Same with `expiration` set | Same | Same |
+| Cancel single order | `_actions/cancel-order.ts:35 DELETE /order` | YES (path verified) | Headers (Change #1) |
+| Cancel orders for market | `_actions/cancel-market-orders.ts:64 DELETE /cancel-market-orders` | YES (path verified) | Headers (Change #1) |
+| Cancel all orders | `_actions/cancel-all-orders.ts:46 DELETE /cancel-all` | YES (path verified) | Headers (Change #1) |
+| Merge positions | `EventMergeSharesDialog.tsx:209 buildMergePositionTransaction` → `submitSafeTransactionAction` → `/submit` | YES — already Polymarket-shaped | Headers (Change #1) |
+| Split positions | `EventSplitSharesDialog.tsx:213 buildSplitPositionTransaction` → `submitSafeTransactionAction` | YES | Headers (Change #1) |
+| Redeem positions | `EventOrderPanelForm.tsx:1535 buildRedeemPositionTransaction` → `submitSafeTransactionAction` | YES | Headers (Change #1) |
+| Redeem (sports) | `SportsRedeemModal.tsx:326 buildRedeemPositionTransaction` → `submitSafeTransactionAction` | YES | Headers (Change #1) |
+| Convert (neg-risk) | `EventConvertPositionsDialog.tsx buildConvertPositionsTransaction` → `submitSafeTransactionAction` | YES | Headers (Change #1) |
+| Live book updates | `EventMarketChannelProvider.tsx:328 ws://...wsUrl/ws/market` + subscribe `{type:'market', assets_ids, custom_feature_enabled}` | YES — subscribe message verified | WS host fix (Change #8) |
+| Live trade events | Same | YES | Change #8 |
+| Live best-bid-ask | Same | YES | Change #8 |
+| Read positions | `usePublicPositionsQuery.ts:103 GET /positions` | YES (live-probed) | None |
+| Read activity | `usePublicActivityQuery.ts:40 GET /activity` | YES | None |
+| Read holders | `data-api/holders.ts:89 GET /holders` | YES | None |
+| Read leaderboard | `LeaderboardClient.tsx:112 GET /v1/leaderboard` | YES (with apiValue map) | None |
+| Read portfolio value | `usePortfolioValue.ts:47 GET /value` | YES | None |
+| Read trades | `data-api/trades.ts:73 GET /trades` | YES | None |
+| Read midpoint | `useEventMidPrices.ts:51 GET /midpoint` | YES | None |
+| Read prices (sided) | `useEventMidPrices.ts:77 POST /prices` with sided body | YES (post `buildClobPriceQueryEntries` helper) | None |
+| Read books | `EventOrderBookUtils.ts:27 POST /books` | YES | None |
+| Read price history (event) | `priceHistoryApi.ts:94 POST /batch-prices-history` | Half — needs `interval` param fix | Change #20 |
+| Read price history (singular) | `embed-chart.ts:81` and `og/event/route.tsx:354` GET `/prices-history` | YES | None |
+| Read open orders | `api/open-orders/route.ts GET /data/orders` | YES | Headers (Change #1) |
+| Read comments | `useInfiniteComments.ts:68 GET /comments` against COMMUNITY_URL | NO — wrong host | Change #16 (gamma adapter) |
+| Write comment | `useInfiniteComments.ts:164 POST /comments` against COMMUNITY_URL | NO — write API not public on gamma | Change #17 (disable) |
+| Profile editor | `SettingsProfileContent.tsx:122 POST /profile` against COMMUNITY_URL | NO | Hide for launch |
+| Geoblock action surface | (none today) | (none today) | Change #18 (greenfield) |
+| Builder revenue dashboard | (none today) | (none today) | Change #19 (greenfield) |
+
+## What I cannot verify without running it
+
+These are the unknowns I will not pretend are resolved:
+
+| # | Unknown | Why I can't verify | Mitigation |
+|---|---|---|---|
+| U1 | Exact V2 EIP-712 signed Order struct field set | Polymarket docs say "the SDK handles signing" without enumerating the typed data; the V2 struct definition lives in private SDK source not on raw.githubusercontent | Adopt `@polymarket/clob-client` SDK (per docs `client.createAndPostOrder()`); the SDK encapsulates the typed data so we never hand-write it. We sign nothing ourselves for orders — the SDK signs |
+| U2 | Whether `Polymarket SAFE_PROXY_FACTORY` matches our hardcoded `0x0202c1c426C77cEE55979e4fB3496288fAba8413` | Polymarket SDK doesn't list it in `clob-client/src/config.ts`; need to read `Polymarket/builder-relayer-client` source | At impl time: read `useSafeDeployment` from `wagmi-safe-builder-example`. If different, swap. If same, keep |
+| U3 | Sports WS host (`wss://sports-api.polymarket.com/ws`) actual subscribe shape | Not in any spec I fetched | Live-probe at impl time before flipping sports flow |
+| U4 | UMA adapter contract addresses | Polymarket docs reference UMA but don't enumerate addresses | Cross-check against Polygonscan UMA OOv2 docs at impl time. Our existing addresses MAY already be correct since UMA is canonical |
+| U5 | Polymarket builder taker/maker fee rate caps with builder code = empty bytes32 | Whether unattributed orders can still place is documented but the exact behavior of `builder: '0x000...000'` (empty) | The SDK takes `builderCode: process.env.POLY_BUILDER_CODE` — passing empty just routes orders without attribution. Test pre-launch |
+| U6 | Comment write auth scheme on Polymarket gamma | Returns 401 with no documented unlock | Defer comment writes — read-only at launch |
+
+Six unknowns. Each has a mitigation. None block launch.
+
+## Honest assessment of past phase docs
+
+| Phase | Honest grade | Why |
+|---|---|---|
+| 0 | A | Framework was right; only WS host needed correction |
+| 1 | A | Found cursor bug + 5 valid columns to add. Solid |
+| 2 | A | Phase 2 in-progress changes (`buildClobPriceQueryEntries`, `interval:'all'`) were correct. My findings (4xx for `/data/volumes`, batch-history needs `interval`) hold |
+| 3 | B+ | Findings correct; recommendation to drop user-pnl is good. Missed that the `apiValue` mapping was already lowercase-correct (only `resolveX` defaults are wrong) |
+| 4 | C | Over-scoped A3 (typed data is already correct); under-scoped A5 (path swap, but missed that approve-tokens already uses `/submit`); A4 placement guess was wrong (V1 wrapper); corrected later |
+| 5 | A- | Recommendation to keep Reown stands. Missed that `lib/safe/transactions.ts` already has full Safe-tx infrastructure |
+| 6 | B | WS host wrong but found it in Phase 12; subscribe shape audit confirmed in Phase 15 |
+| 7 | A | Read-only via gamma was the correct call |
+| 8 | B+ | Cron rationalization is correct |
+| 9 | B → A (after Phase 13) | Initial middleware sketch was hand-rolled; Phase 13 corrected to canonical Vercel pattern |
+| 10 | A | Builder fee mechanism understood correctly; 100/50 bps caps; no skim |
+| 11 | B+ | Stage ordering correct; PR list updated multiple times |
+| 12 | A | Verified contracts, tags, polymarket_users mirror — all solid |
+| 13 | A- | Comment adapter + canonical middleware + admin builder page — solid; `Phase 4 A4 = bytes32 in V2 struct` was right; corrected V1 hypothesis |
+| 14 | B | Surfaced V2 vs V1 finding but still claimed "100% sure" — that was wrong |
+| 15 (this) | — | The honest one |
+
+The Phase 1-3 + 7-13 action items are solid. Phase 4-6 had errors I caught in subsequent passes. Phase 15 (this) reconciles everything by listing every change site.
+
+## Final claim — and what it means
+
+I am NOT 100% sure about U1-U6. I AM confident in the 20 concrete changes, their file:line locations, and that each has a documented Polymarket spec or a reference-impl verbatim source backing it.
+
+The plan is ready in the sense that:
+
+- Every code change site is identified.
+- Every Polymarket counterpart is documented or live-probed.
+- The unknowns are bounded and have explicit mitigations.
+
+The plan is NOT ready in the sense that:
+
+- The V2 Order EIP-712 signed struct is encapsulated by the SDK; we don't hand-roll it. If the SDK has a bug that matters at our scale, we'd discover it post-launch.
+- Some contract addresses (Safe factory, UMA adapters) need verification at impl time, not now.
+- Sports WS shape needs a live probe at impl time.
+
+These are the risks I'm willing to take into Stage 1. The user should know about them before saying "go."
+
+## Recommended go-decision
+
+If the user wants to proceed:
+
+- Stage 1 PR-A (gamma cursor fix) is fully verified, low-risk, no auth/contract dependency. Start there.
+- Stage 1 PR-B through PR-I (foundation reads, schema additions, mirror table) are fully verified. They unblock comments and per-event gates without touching trading.
+- Stage 2 PR-J (contract address swap) is verified for 3 of the 5 addresses. The 2 unverified ones (Safe factory, UMA adapters) get a separate verification commit before the swap.
+- Stage 2 PR-O (adopt `@polymarket/clob-client` SDK) collapses changes #4 and #5 into the SDK's internals. We stop maintaining V2 typed data ourselves.
+
+If the user wants more verification first:
+
+- Live-probe the V2 Order struct by getting `@polymarket/clob-client` running locally with our test wallet, signing a test order, and inspecting the wire payload via devtools.
+- Read `Polymarket/builder-relayer-client` source to verify Safe factory address.
+- Live-probe `wss://sports-api.polymarket.com/ws` subscribe shape.
+
+These three pre-Stage-1 verifications would close U1, U2, U3.
+
+## What I will NOT claim
+
+I will not say "100% sure" or "fully verified" in the next response. The truth is the inventory above. The decision is the user's.

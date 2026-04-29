@@ -1,0 +1,140 @@
+---
+title: Phase 8. Cron jobs + admin sync routes
+status: ready-for-action
+owner: khaleel
+last-updated: 2026-04-29
+---
+
+# Phase 8. Cron jobs + admin sync routes
+
+## Scope
+
+Rationalize the five Vercel crons (`vercel.json:4-25`) and the admin-facing
+sync/management routes under `src/app/[locale]/admin/api/`. Decide kept,
+repointed, or deleted for each. This phase doesn't introduce new cron
+behaviour — it cleans up after Phases 1-7 land.
+
+Out of scope: writing new cron logic for builder fees collection (Phase 10),
+or for community comment ingestion (Phase 7 if we ever sync comments locally).
+
+## Code reading log
+
+| File | Cron schedule | Source | Phase 8 disposition |
+|---|---|---|---|
+| `src/app/api/sync/gamma/route.ts` | `*/10 * * * *` | Polymarket gamma keyset | **Keep**. Phase 1 fixes the cursor bug; this becomes the canonical event/market sync. |
+| `src/app/api/sync/events/route.ts` | `*/5 * * * *` | Goldsky `pnl-subgraph` (Polygon CTF) | **Demote schedule** to `*/30 * * * *`. Phase 1 finding 5 says it's not affected by env swap, but it overlaps with gamma (which already covers active markets at 10-min cadence) and adds load. The subgraph's value is filling on-chain CTF detail gamma doesn't surface (resolution timestamps, payout values, etc.). |
+| `src/app/api/sync/volume/route.ts` | `*/10 * * * *` | `${CLOB_URL}/data/volumes` (404 on Polymarket) | **Delete** (Phase 1 A2 / Phase 2 A3). |
+| `src/app/api/sync/resolution/route.ts` | `*/5 * * * *` | Goldsky `resolution-subgraph` | **Keep**. Reads UMA OOv2 timeline; works against the same on-chain contracts Polymarket uses. |
+| `src/app/api/sync/translations/route.ts` | `0 */6 * * *` | OpenRouter LLM | **Keep**. Backend-agnostic; translates DB-stored event copy into our 18 locales. |
+| `src/app/api/sync/event-creations/route.ts` | (no cron) | `${CREATE_MARKET_URL}` (kuest CYOM) | **Defer**. CYOM (create-your-own-market) flows are not part of the Polymarket builder model in v1; users create markets via Polymarket's official flow. Out of launch scope. |
+
+| Admin route | Purpose | Phase 8 disposition |
+|---|---|---|
+| `src/app/[locale]/admin/api/event-creations/allowed-creators/route.ts` | Manages who can create events. Now supports `site` + `wallet` + `gamma_api` source types per the recent in-progress changes. | **Keep**. The new `gamma_api` source type ingests from a configured gamma URL — useful for whitelisting creator profiles whose markets we mirror. |
+| `src/app/[locale]/admin/api/event-creations/route.ts` | List, create, update event-creation requests. | **Keep with kuest dependency removed**. CYOM flow that talks to `CREATE_MARKET_URL` is feature-flagged off in `next.config.ts`. |
+| `src/app/[locale]/admin/api/event-creations/ai/route.ts` | LLM-driven event metadata generation. | **Keep**. OpenRouter-based, backend-agnostic. |
+| `src/app/[locale]/admin/api/event-creations/signers/route.ts` | Manages signer allowlist for CYOM. | **Keep**. Same deferral note as event-creations route. |
+| `src/app/[locale]/admin/api/event-creations/[id]/route.ts` | Per-row read/update/delete. | **Keep**. |
+| `src/app/[locale]/admin/api/event-creations/[id]/assets/route.ts` | Asset upload (S3). | **Keep**. |
+| `src/app/[locale]/admin/api/categories/route.ts` | Category CRUD. | **Keep**. |
+| `src/app/[locale]/admin/api/main-tags/route.ts` | Main-tag CRUD. | **Keep**. |
+| `src/app/[locale]/admin/api/openrouter-models/route.ts` | Translation model preferences. | **Keep**. |
+| `src/app/[locale]/admin/api/users/route.ts` | User management. | **Keep**. Backend-agnostic (talks to our own DB). |
+| `src/app/[locale]/admin/api/events/route.ts` and `events/check-slug/route.ts` | Event search/check from admin UI. | **Keep**. |
+
+## Findings
+
+### Finding 1. The cron map after Phases 1-7 is mostly unchanged; only `volume` is deleted
+
+**Claim.** Of the five existing crons, three are unaffected by the env switch (events, resolution, translations), one is deleted (volume), and one is fixed and kept (gamma).
+
+**Evidence.** Phase 1 finding 5; Phase 2 A2/A3.
+
+**Impact.** Phase 8 mostly involves deletions and schedule tweaks rather than rewrites.
+
+**Confidence.** High.
+
+### Finding 2. Admin routes are insulated from the migration
+
+**Claim.** The admin API directory talks to our own Postgres; with one exception (CYOM creator that posts to `CREATE_MARKET_URL`), nothing changes.
+
+**Evidence.** Routes listed in code reading log; all reference `OrderRepository`, `EventRepository`, `UserRepository`, etc. — never CLOB / data-api / relayer / community.
+
+**Impact.** No work in Phase 8 for admin routes beyond hiding the CYOM submit button (Phase 4 A5 covers the relayer side; CYOM-specific signer flow can stay disabled).
+
+**Confidence.** High.
+
+### Finding 3. The `gamma_api` allowed-creator source type adds new complexity worth documenting
+
+**Claim.** The recent in-progress change to `allowed-creators/route.ts` adds a `gamma_api` source type alongside `site` and `wallet`. This means an admin can paste a gamma URL (e.g. `https://gamma-api.polymarket.com`) and the app pulls the creator wallets that source provides.
+
+**Evidence.** `git diff src/app/[locale]/admin/api/event-creations/allowed-creators/route.ts` shows the discriminated union extension.
+
+**Impact.** Useful for the migration: lets us point the activity feed and creator-allowlist at the Polymarket gamma source by configuration rather than code change.
+
+**Confidence.** High.
+
+### Finding 4. The `events` cron's overlap with gamma is small; demoting cadence is sufficient
+
+**Claim.** `events/route.ts` reads Goldsky's pnl-subgraph for on-chain CTF metadata that gamma doesn't always surface (e.g. exact `resolved_at` block timestamps, raw payout values for resolved conditions). It does NOT compete with gamma for active-market discovery — gamma is faster there. So we don't need to delete `events` cron, just lower its frequency.
+
+**Evidence.** `events/route.ts:26-45` and the subgraph URL.
+
+**Impact.** Lower compute cost. No data quality regression.
+
+**Confidence.** Medium — needs a final read of the cron's body to confirm what fields it writes that gamma also writes.
+
+## Action items
+
+### A1. Delete the `/api/sync/volume` cron (P0 — restated from Phase 1 A2)
+
+- **Change.** Delete the directory and its `vercel.json` entry.
+- **Files.** `src/app/api/sync/volume/`, `vercel.json:13-15`.
+- **Dependencies.** Phase 1 A2 / Phase 2 A3.
+
+### A2. Lower `/api/sync/events` cron cadence to `*/30 * * * *` (P1)
+
+- **Change.** Edit `vercel.json:4-7` to `*/30 * * * *`.
+- **Why.** Reduces redundant on-chain sync. Gamma already handles 10-min market discovery; the subgraph is filling tail metadata.
+- **Test.** After 24h, verify resolution timestamps and payout values are still being populated for newly resolved markets. If not, restore to `*/5`.
+- **Files.** `vercel.json`.
+- **Dependencies.** None.
+
+### A3. Hide CYOM submit UI when `CREATE_MARKET_URL` is not configured (P1)
+
+- **Change.** In the admin event-creations form (`AdminCreateEventForm.tsx`), check `process.env.CREATE_MARKET_URL` and render a "CYOM is disabled during the Polymarket migration" notice when empty/missing.
+- **Why.** Avoid shipping a button that posts to a 404.
+- **Files.** `AdminCreateEventForm.tsx` and the form's submit action.
+- **Dependencies.** None.
+
+### A4. Document the cron map in CLAUDE.md (P2)
+
+- **Change.** Add a section to `CLAUDE.md` listing the active crons and their schedules. Not a feature change; a visibility win for future maintainers.
+- **Files.** `CLAUDE.md`.
+- **Dependencies.** A1, A2.
+
+### A5. Consider adding a builder-trades sync cron for Phase 10's revenue dashboard (P3, post-launch)
+
+- **Change.** New cron `/api/sync/builder-trades` that polls
+  `clob.polymarket.com/builder/trades?builderCode=$POLY_BUILDER_CODE` on a
+  10-min cadence and writes to a `builder_trades` table for the revenue
+  dashboard. Required by Phase 10.
+- **Files.** New cron file. New schema migration. Phase 10 owns this.
+- **Dependencies.** Phase 4 A4 (builder code is being attached), Phase 10
+  schema design.
+
+## Risks
+
+1. **A2 demotion may starve the resolution cron.** If `events` and `resolution` were tightly coupled (one populating before the other reads), demoting `events` could delay resolution data. Mitigation: read `resolution/route.ts` before merging A2 to confirm independence.
+
+2. **Admin routes are exposed at `/admin/api/*` paths.** Make sure they remain auth-gated post-migration; Phase 5's auth changes don't accidentally remove the admin gate.
+
+## Status when phase is closed
+
+Phase 8 is closed when:
+
+- [ ] A1 merged.
+- [ ] A2 merged and observed for 24h.
+- [ ] A3 merged. Admin form shows the notice when CYOM is disabled.
+- [ ] A4 merged.
+- [ ] A5 deferred to Phase 10.

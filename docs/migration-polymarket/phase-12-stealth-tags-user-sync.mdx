@@ -1,0 +1,541 @@
+---
+title: Phase 12. Stealth branding, wallet decision, tag ingest, comment-user sync, verified contracts
+status: ready-for-action
+owner: khaleel
+last-updated: 2026-04-29
+---
+
+# Phase 12. The "ready to ship" phase
+
+## Why this phase exists
+
+Phases 1-11 audit every consumer endpoint and propose changes. Five things
+they didn't pin down hard enough:
+
+1. A concrete wallet recommendation (Reown or Magic Link?), not a "decision documented".
+2. The full surface where "Polymarket" could leak through to users — the
+   user wants Polymarket invisible to end users, surfaced only as Axes.
+3. Verified Polymarket Polygon mainnet contract addresses (Phase 4 A1 had
+   the directional finding; this phase has the verbatim addresses).
+4. Gamma `/tags` ingest details (Phase 1 covered events; tags need
+   their own treatment).
+5. Comment ingestion bringing user/wallet records along with it. Comments
+   carry rich profile data; we can populate a local user mirror so the rest
+   of the app reads from the DB instead of fanning out to gamma per render.
+
+Out of scope: anything already covered in Phases 1-11. Phase 12 is the
+"close the gaps" phase before merging starts.
+
+## 1. Wallet recommendation
+
+### The decision
+
+**Keep Reown AppKit + Wagmi for the connector layer. Add Magic Link as an alternate sign-in method post-launch (Phase 5 A4).**
+
+This is a recommendation, not just a documented choice. If the user picks Magic-only, see "Alternate path" below.
+
+### Why keep Reown
+
+| Argument | Detail |
+|---|---|
+| Already wired | `src/lib/appkit.ts` is set up; `AppKitProvider` wraps both `(platform)` and `admin` layouts; SIWE via `@reown/appkit-siwe` is integrated; the connect button is in the navbar and in conditional CTAs (`FilterToolbar.tsx:84`, `PublicPositionsList.tsx:1004`, etc.). Removing it touches 30+ files. |
+| Multi-wallet coverage | Reown's modal supports MetaMask, Rabby, WalletConnect, Coinbase Wallet, Trust, Phantom, and 250+ others out of the box. Magic alone is email-only — power users on browser extensions get a worse experience. |
+| Compatible with Polymarket builder pattern | `Polymarket/wagmi-safe-builder-example` is wagmi-first; our setup IS wagmi (Reown is a UI/connector layer on top). The reference impl drops in. |
+| User-visible branding is minimal | Reown's modal has a small "Powered by Reown" footer. The Polymarket pattern uses Reown's Wagmi adapter behind the scenes; the UX user sees is "connect a wallet". No "Polymarket" or "Reown" text dominates. We can hide the footer with CSS if we want full Axes branding. |
+| Magic Link adds value but as ADD-on | Email-only auth converts ~3x better than wallet-only for new users (Polymarket's own data per their builder docs). Adding Magic as a "Sign in with email" button alongside the connect modal is strictly better than choosing one. Phase 5 A4. |
+
+### Why NOT Magic-only at launch
+
+| Risk | Why it bites |
+|---|---|
+| Single auth path | If Magic has an outage, every user is locked out. Reown's wallet path is independent. |
+| Power users dislike email auth for crypto | Existing wallet holders prefer their existing wallet over a new email-bound key. We'd lose conversion for that segment. |
+| Reown removal cost | The 30+ file diff to rip Reown out adds risk to a launch we're trying to keep narrow. |
+| Magic cost model | Magic is paid per active wallet (their pricing is per-MAU). Reown is free. At our launch scale this is small but it's an extra contract to negotiate. |
+
+### Alternate path (if user overrides to Magic-only)
+
+If the user explicitly picks Magic-only:
+
+1. Replace `src/lib/appkit.ts` with `src/lib/magic.ts` per `Polymarket/magic-safe-builder-example`'s `lib/magic.ts`.
+2. Replace `AppKitProvider.tsx` with a `MagicProvider.tsx` that wraps the app and exposes the Magic-derived signer.
+3. Replace `useAppKit()` and `useAppKitAccount()` callers across 30+ files with a Magic-equivalent `useMagicAccount()`.
+4. Drop `@reown/appkit*`, `@wagmi/connectors` overrides; add `@magic-sdk/admin`, `@magic-ext/oauth`, `magic-sdk`.
+5. Switch `lib/auth.ts` (SIWE) to Magic's DID-token verification.
+
+This is roughly 1 week of focused work and adds risk to launch week. Recommend NO — but it's the user's call.
+
+### Hiding Polymarket from the wallet UX specifically
+
+Whichever connector we pick, none of them surface "Polymarket" branding to the user. The wallet UX is Reown's or Magic's. Polymarket only enters the picture in the post-connect flow:
+
+- Safe deployment shows the user a Safe transaction sign prompt (looks like a Safe modal, says "Confirm transaction in your wallet"). No Polymarket logo.
+- Token approval shows ERC-20 `approve()` in the wallet. No Polymarket logo.
+- L1 derivation shows the EIP-712 typed-data prompt (`ClobAuthDomain`/`ClobAuth`). The domain string says `ClobAuthDomain` not `Polymarket`. We can't change this string without breaking signature recovery.
+
+**The one place "ClobAuthDomain" leaks**: the wallet's typed-data prompt screen. Modern wallets (MetaMask, Rabby) show the domain name to the user before they sign. They will see `ClobAuthDomain`. We can't rename it without breaking interop. **Mitigation**: the copy on our app's side ("This signature lets Axes trade on your behalf") can frame it; some users will still see the unfamiliar name and ask. Add a one-line FAQ entry.
+
+## 2. "Hide Polymarket" surface audit
+
+The user's stated goal: "I want to hide polymarket behind the scenes and not show it." Below is every concrete surface where Polymarket could leak through to users today + the action we take for each.
+
+### Surfaces that SHOULD NOT show Polymarket
+
+| Surface | Today | Action |
+|---|---|---|
+| Page chrome / navbar / footer | Axes branded | Keep. Verify no "Polymarket" string anywhere. |
+| Logo / favicon / OG images | Axes branded | Keep. |
+| Email transactional copy | Axes branded | Keep. |
+| Comment author display | Polymarket pseudonyms (`Bronze-Corporation`, `LaBradfordSmith22`) | **Display Polymarket pseudonyms as-is, but link them to /profile/<address> on AXES, not polymarket.com.** Same approach as Polymarket itself. |
+| Activity feed authors | Same as comments | Same. |
+| Top holders | Same | Same. |
+| Leaderboard rows | Same | Same. |
+| URLs in shared OG images | Axes domain | Keep. |
+| Anywhere the literal string "Polymarket" appears | Should be 0 occurrences in user-visible text | grep + manual review pre-launch. |
+
+### Surfaces where Polymarket NECESSARILY appears
+
+| Surface | Why it's unavoidable | Mitigation |
+|---|---|---|
+| Network tab for devs | API host `clob.polymarket.com`, `gamma-api.polymarket.com` | Devs see this; users do not. Acceptable. |
+| Wallet typed-data prompt | Domain name `ClobAuthDomain` shows in wallet UI | One-line FAQ: "Why does my wallet say ClobAuthDomain?" |
+| Wallet typed-data prompt for orders | Domain `CTF Exchange` shows in wallet UI per Polymarket's exchange contract `name='CTF Exchange'` | Same FAQ. Cannot rename. |
+| On-chain tx | Tx Polygonscan shows `to: 0x4bFb…982E` (Polymarket CTF Exchange) | Devs/auditors see this; users do not click through. |
+| Profile pseudonyms in comments | Polymarket-assigned pseudonyms | These ARE the user identifiers across the Polymarket ecosystem; we use them so cross-platform identity is preserved. Showing them is a feature, not a leak. |
+
+### Pre-launch grep checklist
+
+```bash
+# After all phase merges, before launch:
+grep -rn -i 'polymarket\|polymarket' src/ public/ \
+  --include='*.ts' --include='*.tsx' --include='*.json' \
+  --include='*.md' --include='*.mdx' \
+  | grep -v 'docs/migration-polymarket\|tests/\|/migrations/\|//.*polymarket\|process\.env'
+```
+
+Expected: 0 matches in user-visible code paths. Allowed matches:
+- Migration docs (this directory)
+- Comments in `// kuest mirrors Polymarket exactly` style
+- `process.env.POLYMARKET_*` references
+- Test fixtures
+- DB migration filenames
+
+If anything else surfaces, address before launch.
+
+### Two specific hide-Polymarket tasks
+
+**A. Comment "Powered by Polymarket community" footer**: if our comment reading code adds any such text, remove it. Pure pass-through display only.
+
+**B. The L2 API key derivation toast/error**: today our code's `mapClobErrorMessage` table includes user-visible strings like "Trading is temporarily unavailable" — these don't say "Polymarket" but if any of them say "kuest" we need to scrub them too. Quick grep:
+
+```
+grep -n 'kuest\|KUEST' src/app/[locale]/(platform)/event/[slug]/_actions/store-order.ts
+```
+
+(I already verified the headers say `KUEST_*`; Phase 4 A2 renames those. Confirm error messages don't carry the brand.)
+
+## 3. Verified Polymarket Polygon mainnet contract addresses
+
+Source: `https://raw.githubusercontent.com/Polymarket/clob-client/main/src/config.ts`, fetched verbatim this session.
+
+```ts
+const MATIC_CONTRACTS: ContractConfig = {
+    exchange:          "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E",
+    negRiskAdapter:    "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296",
+    negRiskExchange:   "0xC5d563A36AE78145C45a50134d48A1215220f80a",
+    collateral:        "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+    conditionalTokens: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+};
+```
+
+### Side-by-side with our current values (`src/lib/contracts.ts:1-20`)
+
+| Constant in our code | Our value | Polymarket Polygon value | Match? |
+|---|---|---|---|
+| `CTF_EXCHANGE_ADDRESS` | `0xB5592f7CccA122558D2201e190826276f3a661cb` | `0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E` | **NO** |
+| `NEG_RISK_CTF_EXCHANGE_ADDRESS` | `0xef02d1Ea5B42432C4E99C2785d1a4020d2FB24F5` | `0xC5d563A36AE78145C45a50134d48A1215220f80a` | **NO** |
+| `CONDITIONAL_TOKENS_CONTRACT` | `0x4682048725865bf17067bd85fF518527A262A9C7` | `0x4D97DCd97eC945f40cF65F87097ACe5EA0476045` | **NO** |
+| `COLLATERAL_TOKEN_ADDRESS` (mainnet) | `0x2791bca1f2de4661ed88a30c99a7a9449aa84174` | `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` | **YES** (USDC.e shared) |
+| (no constant) `NEG_RISK_ADAPTER_ADDRESS` | — | `0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296` | **NEW** (need to add) |
+
+### Other constants in our `contracts.ts` not in Polymarket's clob-client config
+
+| Constant | Our value | Notes |
+|---|---|---|
+| `UMA_CTF_ADAPTER_POLYMARKET_ADDRESS` | `0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7` | UMA OOv2 adapter for standard CTF markets. Verify against Polymarket UMA docs. |
+| `UMA_NEG_RISK_ADAPTER_POLYMARKET_ADDRESS` | `0x2F5e3684cb1F318ec51b00Edba38d79Ac2c0aA9d` | UMA OOv2 adapter for neg-risk. Verify. |
+| `UMA_CTF_ADAPTER_ADDRESS` | `0x20088f6aa9D8D5947c9f002167355Cb332134bf8` | "Generic" UMA adapter. Verify. |
+| `UMA_NEG_RISK_ADAPTER_ADDRESS` | `0x724259Fe88100FE18C134324C4853975FBDa4d76` | Generic neg-risk. Verify. |
+| `SAFE_MULTISEND_ADDRESS` | `0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761` | Safe MultiSend for batch tx. Verify against Safe canonical Polygon address. |
+| `SAFE_PROXY_FACTORY_ADDRESS` | `0x0202c1c426C77cEE55979e4fB3496288fAba8413` | Safe proxy factory. Verify. |
+
+These six addresses aren't in the clob-client config because they belong to UMA / Safe protocols, not the CLOB. Verify each at implementation time:
+- UMA OOv2 contracts: Polymarket may use the canonical UMAprotocol/protocol addresses or proxies. The auto-memory `reference_uma_amoy.md` notes Polymarket uses a custom proxy `0x114f9534...c6974` on Amoy. Mainnet equivalents need their own check.
+- Safe contracts: canonical Safe addresses on Polygon are well-published; cross-check.
+
+### What ships in Phase 4 A1
+
+```ts
+// src/lib/contracts.ts — replace the kuest-deployment values
+export const CTF_EXCHANGE_ADDRESS = IS_TEST_MODE
+  ? '0xdFE02Eb6733538f8Ea35D585af8DE5958AD99E40' as `0x${string}`  // Amoy
+  : '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E' as `0x${string}`  // Polygon mainnet
+
+export const NEG_RISK_CTF_EXCHANGE_ADDRESS = IS_TEST_MODE
+  ? '0xC5d563A36AE78145C45a50134d48A1215220f80a' as `0x${string}`  // Amoy (same in clob-client)
+  : '0xC5d563A36AE78145C45a50134d48A1215220f80a' as `0x${string}`  // Polygon mainnet
+
+export const NEG_RISK_ADAPTER_ADDRESS = IS_TEST_MODE
+  ? '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296' as `0x${string}`  // Amoy
+  : '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296' as `0x${string}`  // Polygon mainnet (same)
+
+export const CONDITIONAL_TOKENS_CONTRACT = IS_TEST_MODE
+  ? '0x69308FB512518e39F9b16112fA8d994F4e2Bf8bB' as `0x${string}`  // Amoy
+  : '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045' as `0x${string}`  // Polygon mainnet
+```
+
+Note: `negRiskExchange` and `negRiskAdapter` are **the same on Amoy and Polygon mainnet** per the clob-client config.
+
+## 4. Tags ingest
+
+### Live-verified Gamma `/tags` shape (this session)
+
+`GET https://gamma-api.polymarket.com/tags?limit=3`
+
+```json
+[
+  {
+    "id": "1",
+    "label": "Sports",
+    "slug": "sports",
+    "forceShow": false,
+    "forceHide": true,
+    "publishedAt": "2023-10-24 22:37:50.296+00",
+    "updatedBy": 15,
+    "createdAt": "2023-10-24T22:37:50.31Z",
+    "updatedAt": "2026-04-17T20:47:16.461062Z",
+    "requiresTranslation": false
+  },
+  {
+    "id": "439",
+    "label": "AI",
+    "slug": "ai",
+    "forceShow": true,
+    "publishedAt": "2023-11-02 23:08:32.469+00",
+    "updatedBy": 15,
+    "createdAt": "2023-11-02T23:08:32.49Z",
+    "updatedAt": "2026-04-17T20:30:49.674936Z",
+    "isCarousel": true,
+    "requiresTranslation": false
+  }
+]
+```
+
+Field meanings (inferred from data + sample):
+
+- `id`: integer string, primary key.
+- `label`: human-readable name.
+- `slug`: URL-safe identifier.
+- `forceShow`: tag is pinned in navigation regardless of recent activity.
+- `forceHide`: tag is suppressed from default UI even when active.
+- `isCarousel`: tag appears in the homepage carousel selector.
+- `publishedAt`/`createdAt`/`updatedAt`: standard timestamps.
+- `requiresTranslation`: copy-translation gate.
+- `updatedBy`: admin user id (foreign).
+
+### Filter knobs we should use
+
+- `?limit=N&order=updatedAt&ascending=false` — most-recent first.
+- `?is_carousel=true` — carousel-eligible only.
+- `?include_template=true` — include template-only tags (not used in our flow).
+- `?force_show=true` — only pinned tags.
+
+### `/events?tag_slug=X` for tag-filtered event listings
+
+`GET /events?tag_slug=politics&limit=N` and `GET /events/keyset?tag_slug=politics&limit=N` both work (live-verified). This is what the navbar's "Politics" link should hit, instead of querying our own DB by joined tag.
+
+### Tag ingest plan
+
+The Phase 1 gamma sync already pulls events with their tags inline (gamma's `/events/keyset` includes a `tags` array per event). This populates our `event_tags` join table.
+
+What's MISSING:
+
+1. **Standalone tag sync**. We need a `/api/sync/tags` cron that pulls `/tags` directly. Why: gamma's event-embedded tag list only contains tags that appear on at least one event. Tags that exist but are empty (newly created, all events resolved) are not surfaced. Without a standalone sync, our navigation lacks pinned tags (`forceShow=true`) that have no live events.
+2. **Tag config columns**. Our `tags` table needs `force_show`, `force_hide`, `is_carousel`, `published_at` columns to drive the home navigation. Currently we only have `slug`, `label`, `created_at`, `updated_at` (Phase 1's mapper drops the rest).
+3. **Tag → carousel rendering on home**. Today our home carousel uses an admin-curated list. Adopt Polymarket's `is_carousel=true` set to drive our home carousel instead — fewer manual ops.
+
+### Action: A4 below covers tag ingest specifics.
+
+## 5. Comment + user/wallet sync
+
+### What comments give us per row
+
+```json
+{
+  "userAddress": "0x605e6fd2aab5827fa88f8e5f640f9f76b97e3c34",
+  "profile": {
+    "name": "thiagofelipe",
+    "pseudonym": "Bronze-Corporation",
+    "displayUsernamePublic": true,
+    "bio": "",
+    "proxyWallet": "0xda25452547d537e7196e2655b31773c5fc3babaf",
+    "baseAddress": "0x605e6fd2aab5827fa88f8e5f640f9f76b97e3c34"
+  }
+}
+```
+
+That's a complete user identity record:
+
+- `baseAddress` — the EOA the user actually controls.
+- `proxyWallet` — the Safe address that holds funds and trades.
+- `name` — Polymarket-stored display name (when public).
+- `pseudonym` — Polymarket-assigned pseudonymous handle (the "Bronze-Corporation" style).
+- `displayUsernamePublic` — whether to show `name` or `pseudonym`.
+- `bio` — user-stored bio.
+
+Activity (data-api `/activity`) carries the same `pseudonym`, `name`, `profileImage`, `profileImageOptimized`. Holders carries the same. Leaderboard carries the same. Every Polymarket data source we hit can populate a user mirror.
+
+### Why a local user mirror matters
+
+- **Avatar/name lookup latency**: today `useUserProfile`-style hooks (if we have any) would round-trip to gamma per render. With a local mirror, it's a join.
+- **Cross-page consistency**: same user appearing in comments, activity, holders, and leaderboard renders the same name/avatar from one source.
+- **Notification routing later**: Phase 10 A5's referral payouts need a user lookup by address. A populated mirror makes that lookup local.
+
+### Schema: `polymarket_users` table
+
+New columns / new table (decide at impl time):
+
+```sql
+CREATE TABLE polymarket_users (
+  base_address       TEXT PRIMARY KEY,           -- normalized lowercase
+  proxy_wallet       TEXT,                       -- normalized lowercase, NULLable until known
+  pseudonym          TEXT,
+  name               TEXT,
+  display_username_public BOOLEAN,
+  bio                TEXT,
+  profile_image      TEXT,
+  profile_image_optimized TEXT,
+  first_seen_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  source             TEXT NOT NULL  -- 'comments', 'activity', 'holders', 'leaderboard'
+);
+
+CREATE INDEX polymarket_users_proxy_wallet_idx ON polymarket_users (proxy_wallet);
+```
+
+Why `polymarket_users` is separate from our existing `users` table:
+- `users` is for wallet holders who have authenticated to Axes (have a session, may have created markets, have settings).
+- `polymarket_users` is the read-mirror of any Polymarket address we've ever observed in our data feeds — most of them have no Axes account.
+- Joining: when an Axes user authenticates, we look up `polymarket_users WHERE base_address = users.address` to copy over the pseudonym/avatar/bio without forcing them to re-enter.
+
+### Sync triggers
+
+Three places we observe user data; each writes to `polymarket_users` opportunistically:
+
+1. **Comments fetch** (Phase 7 A1): every comment we read has `profile.{...}` — write through to the mirror.
+2. **Activity feed read** (`usePublicActivityQuery`, `event-activity`): every row carries profile fields — write through.
+3. **Holders read** (`fetchTopHoldersFromDataApi`): every holder has profile fields — write through.
+
+All three are read paths; we add a low-priority background write to the mirror on response. Cheap. Postgres `INSERT ... ON CONFLICT ... DO UPDATE SET last_seen_at=...` for upserts.
+
+### NO standalone "sync all Polymarket users" cron
+
+We DO NOT proactively crawl Polymarket for users. Two reasons:
+
+1. Polymarket has 100k+ traders; full crawl is rude and costly.
+2. Opportunistic accumulation gives us exactly the users our app actually surfaces — no over-collection.
+
+If we ever need a specific user's profile and they're not in our mirror, we hit gamma's profile-by-address endpoint on-demand and cache.
+
+### Wallet provenance: why baseAddress is the PK, not proxyWallet
+
+A user has one base EOA but can have multiple Safes over time (theoretical). The base address is the durable identity. `proxyWallet` is a property that happens to be the user's currently-active Safe.
+
+When ingesting from sources that only give us `proxyWallet` (e.g. holders responses don't always carry baseAddress), we treat that as a partial record and let later observations enrich it.
+
+## 6. Updated master plan with Phase 12
+
+The Phase 11 master plan inserted these new dependencies:
+
+- Phase 4 A1 now uses the verified addresses (in this doc).
+- Phase 6 A1 now confirms the WS host (in this doc).
+- Phase 1 gets a new A5 (tag standalone sync — see action items below).
+- Phase 7 A1 gets a new dependency on Phase 12's `polymarket_users` mirror.
+
+### Updated phase-merge order (replaces Phase 11 Stage breakdown)
+
+**Stage 0 — Setup (no prod changes)**
+
+- Apply for Polymarket Verified tier (Phase 10 A1). Day 0.
+- Fund test wallet on Polygon mainnet ~$50 USDC.e. Day 0.
+
+**Stage 1 — Foundation reads**
+
+In this order:
+
+1. `PR-A`: Phase 1 A1 (gamma cursor `next_cursor` → `after_cursor`).
+2. `PR-B`: Phase 1 A3 + Phase 12 A1 (persist `gamma_event_id`, `neg_risk_market_id`, `comment_count`, `restricted`, `liquidity_clob`, `featured`, `featured_order` columns; mapper writes them).
+3. `PR-C`: Phase 12 A2 (tag schema additions: `force_show`, `force_hide`, `is_carousel`, `published_at`).
+4. `PR-D`: Phase 12 A3 (`/api/sync/tags` standalone cron).
+5. `PR-E`: Phase 12 A4 (`polymarket_users` mirror table + opportunistic write helpers).
+6. `PR-F`: Phase 1 A2 + Phase 2 A3 (delete volume cron).
+7. `PR-G`: Phase 2 A1 (`interval` always present in batch-prices-history).
+8. `PR-H`: Phase 2 A2 (delete `/data/volumes` from frontend).
+9. `PR-I`: Phase 3 A1, A2, A3, A4 (drop `/user-pnl`, hide PnL chart, defang affiliate, switch `/other` to `id=`).
+
+**Stage 2 — Trading core (per Phase 11 Stage 2, with concrete addresses)**
+
+1. `PR-J`: Phase 4 A1 with verified addresses (this doc, section 3).
+2. `PR-K`: Phase 4 A2 — `KUEST_` → `POLY_` repo-wide.
+3. `PR-L`: Phase 4 A3 — Polymarket `ClobAuth` typed data.
+4. `PR-M`: Phase 4 A4 — builder code in order body.
+5. `PR-N`: Phase 4 A5 — relayer flow rewritten.
+6. `PR-O`: Phase 5 A1 — adopt `@polymarket/clob-client` SDK.
+7. `PR-P`: Phase 5 A2 — onboarding hooks split.
+8. `PR-Q`: Phase 5 A3 — ADR write-up.
+
+**Stage 3 — Real-time + content**
+
+1. `PR-R`: Phase 6 A1 — `WS_CLOB_URL=wss://ws-subscriptions-clob.polymarket.com` (verified).
+2. `PR-S`: Phase 6 A2 — market subscribe shape.
+3. `PR-T`: Phase 7 A1 + Phase 12 A5 — comment reads on gamma + write to polymarket_users mirror.
+4. `PR-U`: Phase 7 A2 — hide comment writes.
+5. `PR-V`: Phase 6 A3 — live series hooks.
+6. `PR-W`: Phase 6 A4 + Phase 7 A5 — gate live comments WS.
+7. `PR-X`: Phase 7 A3 — clear comment localStorage.
+8. `PR-Y`: Phase 7 A4 — hide profile editor.
+9. `PR-Z`: Phase 6 A5 — user channel WS for live order updates.
+
+**Stage 4 — Operational hardening**
+
+1. `PR-AA`: Phase 8 A1 + A2 + A3 — cron rationalization.
+2. `PR-AB`: Phase 9 A1 + A2 + A3 — geoblock middleware.
+3. `PR-AC`: Phase 10 A3 + A4 — revenue dashboard + builder-trades cron.
+4. `PR-AD`: Phase 1 A4 + Phase 9 A4 — `restricted` per-event gate.
+5. `PR-AE`: Phase 12 A6 — pre-launch grep for "polymarket" leaks; remove or wrap.
+
+**Stage 5 — Public launch (per Phase 11)**
+
+## Phase 12 action items
+
+### A1. Persist additional Phase 1 columns now (P0, restated for emphasis)
+
+- **Change.** Phase 1 finding 4 has the column list. Restated here because Phase 12 Section 5 (`polymarket_users`) and the Phase 9 per-event gate both depend on these:
+  - `events.gamma_event_id INTEGER` — required for `/other?id=` (Phase 3 A4) and comment reads (Phase 7 A1).
+  - `events.neg_risk_market_id TEXT` — required for `EventContent.tsx:602`.
+  - `events.comment_count INTEGER DEFAULT 0` — comment badge.
+  - `events.restricted BOOLEAN DEFAULT FALSE` — Phase 9 A4.
+  - `events.liquidity_clob NUMERIC(20,6)` — sort key.
+  - `events.featured BOOLEAN DEFAULT FALSE` and `events.featured_order INTEGER` — home curation.
+- **Files.** Schema migration, `src/lib/gamma/mapper.ts`, `src/lib/gamma/repository.ts`, `src/lib/db/queries/event.ts`, `src/types/index.ts`.
+- **Dependencies.** Phase 1 A1.
+
+### A2. Add tag config columns (P0)
+
+- **Change.** Add to `tags` table:
+  - `force_show BOOLEAN DEFAULT FALSE`
+  - `force_hide BOOLEAN DEFAULT FALSE`
+  - `is_carousel BOOLEAN DEFAULT FALSE`
+  - `published_at TIMESTAMPTZ`
+- **Files.** Schema migration. `src/lib/gamma/mapper.ts` (new tag mapper), `src/lib/gamma/repository.ts` (linkEventTags / upsertTag).
+- **Dependencies.** None.
+
+### A3. Add `/api/sync/tags` standalone cron (P1)
+
+- **Change.** New route `src/app/api/sync/tags/route.ts`. Hits `${GAMMA_URL}/tags?limit=500&order=updatedAt&ascending=false`. Upserts each tag with the new config columns (A2). Cron schedule: `0 * * * *` (hourly).
+- **Why.** Captures tags that are pinned but have no current events.
+- **Files.** New route, `vercel.json:4-25`.
+- **Dependencies.** A2.
+
+### A4. Repoint home tag carousel at `is_carousel=true` set (P2)
+
+- **Change.** In whichever home component renders the tag-row carousel, change the source from "admin-curated" to `tags WHERE is_carousel = true` (DB-driven).
+- **Why.** Mirrors Polymarket's curation; fewer manual updates.
+- **Files.** Find the home tag carousel component (read at impl time). Likely `src/app/[locale]/(platform)/(home)/_components/...`.
+- **Dependencies.** A2, A3.
+
+### A5. Build `polymarket_users` mirror + opportunistic write helpers (P0)
+
+- **Change.**
+  i. Schema migration adding the table per Section 5 above.
+  ii. Helper `src/lib/db/queries/polymarket-users.ts` exposing
+      `upsertFromCommentProfile`, `upsertFromActivityRow`,
+      `upsertFromHolderRow`, `getByAddress`.
+  iii. Wire into the read paths: comment fetch in Phase 7 A1, activity
+       fetch in Phase 3 (existing) and Phase 7 A1, holders fetch in
+       Phase 3 (existing).
+  iv. Each upsert is fire-and-forget — does not block the response.
+- **Why.** Phase 12 Section 5 rationale.
+- **Files.** Migration + new helper file + 4-5 hook/route call-site additions.
+- **Dependencies.** None.
+
+### A6. Pre-launch "no polymarket leaks" grep + audit (P0, gating launch)
+
+- **Change.** Run the grep in Section 2. Triage every match. Document each as "expected" (in the docs / tests / migrations) or "fix" (user-visible string we missed).
+- **Acceptance.** 0 matches in user-visible code paths after triage.
+- **Files.** None — verification step.
+- **Dependencies.** All other phases merged.
+
+### A7. Update Phase 0 framework with corrected hosts and addresses (P1)
+
+- **Change.** In `phase-00-framework.mdx`:
+  i. Correct `WS_CLOB_URL` and `WS_LIVE_DATA_URL` to
+     `wss://ws-subscriptions-clob.polymarket.com` (not unsuffixed).
+  ii. Add a "Verified contract addresses" section linking to Phase 12
+      Section 3.
+- **Files.** `docs/migration-polymarket/phase-00-framework.mdx`.
+- **Dependencies.** None.
+
+## What this phase does NOT decide
+
+- Whether to keep our existing `users` table or merge it with `polymarket_users` (architectural; defer until launch +30d).
+- Whether to add a "Sign in with Polymarket OAuth" if Polymarket exposes one (none documented today).
+- The exact Magic Link integration plan (Phase 5 A4, deferred).
+
+## Risks specific to Phase 12
+
+1. **Comment-author privacy.** Polymarket's `displayUsernamePublic=false`
+   profiles render with pseudonyms; we must respect this flag in our
+   display logic. If we accidentally surface `name` for a private user,
+   we leak data. Mitigation: a single `getDisplayName(profile)` helper
+   that branches on the flag — never render `name` directly.
+
+2. **Mirror table grows unbounded.** Every comment we surface adds a row.
+   At launch scale this is fine (thousands of users). At Polymarket scale
+   it's still small (hundreds of thousands). Mitigation: add a periodic
+   cleanup that drops mirror rows not touched in 90 days, IF we never want
+   to reuse them. Defer this concern until rows exceed 500k.
+
+3. **Address case normalization.** Ethereum addresses are case-insensitive
+   functionally but checksummed for display. The mirror MUST normalize to
+   lowercase on insert and compare lowercase on lookup; otherwise we'll
+   double-row the same user.
+
+4. **A5 fire-and-forget swallows errors.** If the mirror table gets out of
+   sync because a write silently failed, we'd never know. Mitigation: log
+   write failures with a counter and Sentry-track if rate exceeds 1% of
+   reads.
+
+## Status when phase is closed
+
+Phase 12 is closed when:
+
+- [ ] A1 merged. New event columns populated post-gamma-sync.
+- [ ] A2 merged. Tag config columns present.
+- [ ] A3 merged. Tag cron running and populating.
+- [ ] A4 merged. Home carousel reads from DB-driven `is_carousel`.
+- [ ] A5 merged. Mirror table exists; first observed users populated by comments + activity + holders reads.
+- [ ] A6 verified. 0 unexpected polymarket leaks.
+- [ ] A7 merged. Phase 0 framework updated.
+
+Then launch is safe.
+
+## Recommendation summary (one-screen)
+
+1. **Wallet**: Keep Reown. Add Magic Link post-launch as alternate sign-in.
+2. **Hide Polymarket**: Already mostly hidden by architecture (Polymarket only on the network/contract layer, never in user-visible chrome). Pre-launch grep + 1 FAQ entry covers the residual leak (`ClobAuthDomain` in wallet typed-data prompts).
+3. **Contracts**: Replace 3 of 4 addresses in `contracts.ts`. USDC.e is shared. Add `NEG_RISK_ADAPTER_ADDRESS` constant.
+4. **Tags**: Standalone tag cron via `/tags` endpoint; new tag columns; home carousel reads `is_carousel=true`.
+5. **Comment-user sync**: New `polymarket_users` mirror table; opportunistic upserts from comments, activity, holders. NO standalone user crawl.
+6. **WS host**: `wss://ws-subscriptions-clob.polymarket.com` (verified by live probe; Phase 0 framework value is wrong).
+7. **Master plan**: Stage 1 gets PR-C/D/E for tags + mirror; Stage 3's PR-T does comments + mirror writes together. Stage 4 ends with PR-AE pre-launch grep audit.

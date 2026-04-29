@@ -1,0 +1,523 @@
+---
+title: Phase 13. Final sweep — comments UI mapping, Vercel geoblock pattern, fee mechanism, admin wallet
+status: ready-for-action
+owner: khaleel
+last-updated: 2026-04-29
+---
+
+# Phase 13. Final sweep
+
+## Why this phase exists
+
+User pressed for 100% coverage. Four areas Phases 1-12 didn't fully nail:
+
+1. **Comments UI**: Phase 7 confirmed gamma supplies the read shape, but didn't enumerate the field-by-field mapping into our existing `Comment` interface and the 11 components that consume it.
+2. **Geoblock**: Phase 9 had a hand-rolled middleware sketch using `request.geo`. The current Vercel-canonical pattern is `geolocation()` from `@vercel/functions`, demonstrated in `vercel/examples/edge-middleware/geolocation-country-block`.
+3. **Fee mechanism + builder code in EIP-712**: Phase 4 Finding 4 left the builder-code-placement question open. New evidence resolves it: builder code is part of the V2 Order struct (signed). And builder fees flow natively through Polymarket — no separate skim needed.
+4. **Admin: configure builder wallet/fee from the dashboard**: Phase 10 mentioned `polymarket.com/settings?tab=builder` for fee configuration but didn't plan the mirror admin surface inside Axes.
+
+This is the gap-closing phase. Phase 14 is launch.
+
+## 1. Comments UI: field-by-field mapping into our existing components
+
+### Our `Comment` interface (`src/types/index.ts:265-281`)
+
+```ts
+export interface Comment {
+  id: string
+  content: string
+  user_id: string
+  username: string
+  user_avatar: string
+  user_address: string
+  user_proxy_wallet_address?: string | null
+  user_created_at?: string
+  likes_count: number
+  replies_count: number
+  created_at: string
+  is_owner: boolean
+  user_has_liked: boolean
+  positions?: CommentPosition[]
+  recent_replies?: Comment[]
+}
+```
+
+### Polymarket's `/comments` response (live-probed, Phase 7)
+
+```json
+{
+  "id": "2856275",
+  "body": "France to win !",
+  "parentEntityType": "Event",
+  "parentEntityID": 30615,
+  "userAddress": "0x605e6fd…",
+  "createdAt": "2026-04-28T23:47:39.842333Z",
+  "updatedAt": "2026-04-28T23:47:51.869699Z",
+  "profile": {
+    "name": "thiagofelipe",
+    "pseudonym": "Bronze-Corporation",
+    "displayUsernamePublic": true,
+    "bio": "",
+    "proxyWallet": "0xda2545…",
+    "baseAddress": "0x605e6fd…"
+  },
+  "reportCount": 0,
+  "reactionCount": 0
+}
+```
+
+### Adapter table
+
+| Our field | Source from Polymarket | Notes |
+|---|---|---|
+| `id` | `id` | direct |
+| `content` | `body` | rename |
+| `user_id` | `userAddress` | use the EOA as the stable id |
+| `username` | `profile.displayUsernamePublic ? profile.name : profile.pseudonym` | branch on the flag — never expose `name` for private profiles |
+| `user_avatar` | `profile.profileImageOptimized || profile.profileImage` | (fields exist in activity/holders responses; verify present in comments — if missing, fall back to a deterministic gravatar-style image from `userAddress`) |
+| `user_address` | `userAddress` | the EOA |
+| `user_proxy_wallet_address` | `profile.proxyWallet` | direct |
+| `user_created_at` | `profile.createdAt` if present | likely missing — leave undefined |
+| `likes_count` | `reactionCount` | rename |
+| `replies_count` | (not in list response) | **derive at fetch time**: query gamma for `?parent_entity_type=Comment&parent_entity_id=<id>&limit=0` once per parent comment OR just hide the count and let the Replies button always render |
+| `created_at` | `createdAt` | direct ISO |
+| `is_owner` | client computes `userAddress === current_user.address` | client-side check |
+| `user_has_liked` | (not in public response) | **always `false` for launch** — Polymarket exposes per-user reaction state only with auth headers; we don't have those for read-only mode |
+| `positions` | (not in gamma response) | **drop** — don't render positions indicator on Polymarket-sourced comments. Hide the `EventCommentPositionsIndicator` component when `comment.positions` is empty |
+| `recent_replies` | second gamma query: `GET /comments?parent_entity_type=Comment&parent_entity_id=<id>&limit=3&order=createdAt&ascending=false` | one extra fetch per parent comment that has `replies_count > 0` |
+
+### Components and what changes per component
+
+| Component | Reads field | Phase 13 change |
+|---|---|---|
+| `EventCommentItem.tsx` | `username`, `user_avatar`, `content`, `created_at`, `likes_count`, `is_owner` | No change. Adapter already feeds the right keys. |
+| `EventCommentContent.tsx` | `content` | No change. |
+| `EventCommentLikeForm.tsx` | `user_has_liked`, `likes_count`, write a like | **Disable on Polymarket build** (no public reaction API). Render the like count read-only. Remove the like button or show it as disabled. |
+| `EventCommentReplyForm.tsx` | (write a reply) | **Disable** — same write-auth gap as comments themselves. |
+| `EventCommentMenu.tsx` | (delete + report) | **Disable** — same. |
+| `EventCommentDeleteForm.tsx` | (delete write) | **Disable**. |
+| `EventCommentReplyItem.tsx` | nested comment shape | No change — adapter handles nested comments same way. |
+| `EventCommentsLoadMoreReplies.tsx` | calls reply fetch | Repoint to `gamma /comments?parent_entity_type=Comment&parent_entity_id=<id>` per the recent_replies note above. |
+| `EventCommentForm.tsx` | (top-level write) | **Disable** — show the "Comments are read-only during the Polymarket migration" notice from Phase 7 A2. |
+| `EventCommentPositionsIndicator.tsx` | `positions[]` | Hide when `positions` is empty (which is always, on Polymarket). Component still exists; it just no-ops. |
+| `SlideCommentMarquee.tsx` (home) | reads `useHeroComments` | No change — feed format matches the adapter. |
+
+### Comment write — explicit decision for launch
+
+**Read-only at launch.** Hide all write affordances behind `process.env.NEXT_PUBLIC_COMMUNITY_WRITES_ENABLED === 'true'` (default `'false'` post-cutover). When/if Polymarket exposes a public write endpoint, we set the flag. When/if we stand up our own community service later, same.
+
+This is more conservative than Phase 7 A2 (which gated on `COMMUNITY_URL.includes('axes.co')`); the env-var approach is cleaner because it doesn't conflate hostname with capability.
+
+### A new helper file: `src/lib/comments/polymarket-adapter.ts`
+
+```ts
+import type { Comment } from '@/types'
+
+interface PolymarketCommentProfile {
+  name?: string
+  pseudonym?: string
+  displayUsernamePublic?: boolean
+  bio?: string
+  proxyWallet?: string
+  baseAddress?: string
+  profileImage?: string
+  profileImageOptimized?: string
+}
+
+interface PolymarketComment {
+  id: string
+  body: string
+  parentEntityType: 'Event' | 'Comment'
+  parentEntityID: number
+  userAddress: string
+  createdAt: string
+  updatedAt?: string
+  profile: PolymarketCommentProfile
+  reportCount?: number
+  reactionCount?: number
+}
+
+export function adaptPolymarketComment(
+  raw: PolymarketComment,
+  currentUserAddress: string | null,
+): Comment {
+  const profile = raw.profile ?? {}
+  const username = profile.displayUsernamePublic
+    ? profile.name?.trim() || profile.pseudonym || raw.userAddress
+    : profile.pseudonym || raw.userAddress
+  const avatar = profile.profileImageOptimized || profile.profileImage || ''
+
+  return {
+    id: raw.id,
+    content: raw.body,
+    user_id: raw.userAddress,
+    username,
+    user_avatar: avatar,
+    user_address: raw.userAddress,
+    user_proxy_wallet_address: profile.proxyWallet ?? null,
+    likes_count: raw.reactionCount ?? 0,
+    replies_count: 0,                  // hydrated separately when we fetch replies
+    created_at: raw.createdAt,
+    is_owner: Boolean(
+      currentUserAddress
+      && raw.userAddress.toLowerCase() === currentUserAddress.toLowerCase()
+    ),
+    user_has_liked: false,             // no public per-user reaction API
+    positions: [],                     // not on gamma
+    recent_replies: undefined,
+  }
+}
+```
+
+This adapter goes in Phase 7 A1's PR and feeds every comment hook + `useHeroComments`.
+
+## 2. Geoblock — Vercel-canonical pattern
+
+### Verbatim from Vercel docs (this session)
+
+> Vercel deployments automatically provide three geolocation headers:
+>
+> - `X-Vercel-IP-Country` — the 2-letter country code of the IP sending the request.
+> - `X-Vercel-IP-Country-Region` — the ISO 3166-2 region code associated to the IP.
+> - `X-Vercel-IP-City` — the city name associated to the IP.
+
+> The `@vercel/functions` package provides a `geolocation()` helper that returns location information for an incoming request with properties including city, country, latitude, longitude, and region.
+
+### Verbatim from `vercel/examples/edge-middleware/geolocation-country-block/middleware.ts`
+
+```ts
+import { geolocation } from '@vercel/functions'
+import type { NextRequest } from 'next/server'
+
+const BLOCKED_COUNTRY = 'AT'
+
+export default function middleware(req: NextRequest) {
+  const country = geolocation(req).country || 'US'
+
+  if (country === BLOCKED_COUNTRY) {
+    return new Response('Blocked for legal reasons', { status: 451 })
+  }
+  return new Response(`Greetings from ${country}, where you are not blocked.`)
+}
+```
+
+### Decisions for our middleware
+
+- **Use `geolocation()` from `@vercel/functions`** rather than `request.geo` (which still works but is deprecated in favor of the helper).
+- **Default to `'US'` on missing country** so the block fails CLOSED for the most-restricted jurisdiction (matches the Vercel example's choice). But also recognize this means devs developing locally will be region-blocked unless they bypass the middleware in dev.
+- **Skip middleware in development** by checking `process.env.NODE_ENV === 'development'` at the top.
+- **HTTP status 451** ("Unavailable For Legal Reasons") — matches the Vercel example, semantically correct.
+
+### Updated middleware spec for Phase 9 A1 (replaces the hand-rolled sketch)
+
+```ts
+// src/middleware.ts
+import { geolocation } from '@vercel/functions'
+import { NextResponse, type NextRequest } from 'next/server'
+import { RESTRICTED_COUNTRIES } from '@/config/region-blocks'
+
+export const config = {
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)',
+  ],
+}
+
+export default function middleware(request: NextRequest) {
+  if (process.env.NODE_ENV === 'development') {
+    return NextResponse.next()
+  }
+
+  const { country } = geolocation(request)
+  const resolvedCountry = country || 'US'  // fail closed
+
+  if (RESTRICTED_COUNTRIES.has(resolvedCountry)) {
+    // Read-only paths still pass; only the action surface is blocked.
+    if (isReadOnlyPath(request.nextUrl.pathname)) {
+      return NextResponse.next()
+    }
+    const url = request.nextUrl.clone()
+    url.pathname = `/${request.nextUrl.locale ?? 'en'}/region-restricted`
+    const response = NextResponse.rewrite(url)
+    response.headers.set('x-axes-region-block', resolvedCountry)
+    return response
+  }
+
+  return NextResponse.next()
+}
+
+function isReadOnlyPath(pathname: string) {
+  return (
+    pathname === '/'
+    || pathname.startsWith('/event/')
+    || pathname.startsWith('/leaderboard')
+    || pathname.startsWith('/activity')
+    || pathname.startsWith('/api/og/')
+    || pathname.startsWith('/sitemap')
+    || /^\/[a-z]{2}(?:\/(event|leaderboard|activity)|$)/.test(pathname)  // locale prefixes
+  )
+}
+```
+
+```ts
+// src/config/region-blocks.ts
+export const RESTRICTED_COUNTRIES = new Set([
+  // OFAC
+  'CU', 'IR', 'KP', 'SD', 'SY', 'RU', 'BY',
+  // Polymarket policy
+  'US', 'JP', 'BE', 'SG',
+  // Update from Polymarket TOS at launch eve (Phase 9 A5)
+])
+```
+
+### Why `request.headers.get('x-vercel-ip-country')` is also OK
+
+The headers are set automatically; you can read them directly without `geolocation()`. `geolocation()` is a thin wrapper that reads those headers and returns a typed object. Either works; `geolocation()` is the maintained API.
+
+### Vercel `next.config.ts` `vercel.json` notes
+
+Middleware in Next.js App Router doesn't need anything in `vercel.json`. It runs on the Edge runtime by default. The `matcher` config controls which paths trigger it.
+
+### Test plan for Phase 9 A1 (concrete)
+
+```bash
+# Local sim with curl + headers
+curl -H 'x-vercel-ip-country: US' http://localhost:3000/portfolio
+# Expected: 200 with /region-restricted page rendered
+
+curl -H 'x-vercel-ip-country: GB' http://localhost:3000/portfolio
+# Expected: 200 with /portfolio page rendered
+
+curl -H 'x-vercel-ip-country: US' http://localhost:3000/event/some-slug
+# Expected: 200 with /event/some-slug rendered (read-only path)
+
+# Production check via Vercel preview deploy
+# (Vercel doesn't accept x-vercel-ip-country override on production — it sets the header itself)
+```
+
+### Action item: Phase 9 A1 supersedes — use the canonical pattern above.
+
+## 3. Builder code in V2 Order struct + fee mechanism
+
+### Updated finding from Polymarket fee docs (this session)
+
+Verbatim quotes that resolve Phase 4 Finding 4:
+
+> "Builders attach `builderCode` directly to orders—no separate fee field in the order body. The code becomes part of the signed V2 order struct and appears in onchain `OrderFilled` events for attribution and settlement."
+
+> "Builder fees never replace platform fees — they're always additive."
+
+> "Collected builder fees are distributed to the wallet associated with your builder profile."
+
+### What this means concretely
+
+1. **The current 12-field `EIP712_TYPES.Order` (`src/lib/constants.ts:47-62`) is the V1 struct.** V2 adds the builder field. To attach builder code, we sign a V2 Order, not V1.
+2. **The exchange address `0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E` may or may not be V2.** The Polymarket TS clob-client `config.ts` exposes a single `exchange:` per chain; if their SDK supports builder attribution then this IS V2. Live test ahead of impl.
+3. **Domain `name` may have changed.** V2 may keep `'CTF Exchange'` or change to something like `'CTF Exchange V2'`. Get from on-chain `eip712Domain()` view function or the SDK.
+4. **No separate fee skim in our app.** Polymarket calculates platform fee + builder fee at match time, settles on-chain, accrues to our `POLYMARKET_BUILDER_ADDRESS`. We do not need to do anything in our code beyond:
+   - Set `feeRateBps` on the user's order (this is the protocol fee, Polymarket-level)
+   - Attach `builderCode` (this is what triggers builder fee accrual at our configured rate)
+   - Configure our `builder_taker_fee_bps` and `builder_maker_fee_bps` once via Polymarket builder dashboard
+
+### V2 Order struct fields (UNVERIFIED — verify at impl time)
+
+Hypothesized V2 struct (most likely):
+
+```ts
+Order: [
+  { name: 'salt',          type: 'uint256' },
+  { name: 'maker',         type: 'address' },
+  { name: 'signer',        type: 'address' },
+  { name: 'taker',         type: 'address' },
+  { name: 'tokenId',       type: 'uint256' },
+  { name: 'makerAmount',   type: 'uint256' },
+  { name: 'takerAmount',   type: 'uint256' },
+  { name: 'expiration',    type: 'uint256' },
+  { name: 'nonce',         type: 'uint256' },
+  { name: 'feeRateBps',    type: 'uint256' },
+  { name: 'side',          type: 'uint8'   },
+  { name: 'signatureType', type: 'uint8'   },
+  // V2 additions:
+  { name: 'builder',       type: 'address' },  // OR bytes32 — verify
+  { name: 'builderFeeRateBps', type: 'uint256' }, // optional, may not exist if fees come from server-side config
+]
+```
+
+Sources to verify against at impl time:
+
+- `Polymarket/exchange-tools-ts` repo's order builder
+- `Polymarket/py-order-utils` model file (404'd in my probes; may have moved)
+- The on-chain V2 contract's `eip712Domain()` and `Order` struct via Polygonscan
+- The clob-client's `postOrder` implementation that does the actual signing
+
+### Action item: Phase 4 A4 — REVISE
+
+Original Phase 4 A4 was "Add `builderCode` to the JSON body next to `order/orderType/owner`". **That's wrong.** Revised:
+
+> **Phase 4 A4 (revised):** Add the builder field to `EIP712_TYPES.Order` and include it in `signOrderPayload`'s message struct. Also update the verifying contract address if V2 is at a different address than the V1 we're currently mis-signing for. Confirm the exact field name and type by reading `Polymarket/exchange-tools-ts/orders/...` at impl time.
+
+### Fee dashboard / our admin
+
+Where the rates are set: `polymarket.com/settings?tab=builder`. We do this once, after Verified-tier approval (Phase 10 A1). The rates persist on Polymarket's side; our app just attaches `builderCode` and Polymarket does the math.
+
+**No code change in our `_actions/store-order.ts` for fee math.** We do not need to compute fees or skim funds. The fee math is:
+
+```
+notional = takerAmount  (or makerAmount, depending on side)
+builder_fee = notional × builder_taker_fee_bps / 10000
+```
+
+…performed entirely by Polymarket. The user pays. We receive. Done.
+
+## 4. Admin: builder wallet + fee configuration UI
+
+### What we need on /admin
+
+A new admin route `/admin/builder` that mirrors what `polymarket.com/settings?tab=builder` does, scoped to our team. Fields:
+
+| Field | Editable? | Storage | Reads from |
+|---|---|---|---|
+| Builder code (bytes32) | Read-only | env var `POLYMARKET_BUILDER_CODE` | env |
+| Builder wallet address | Read-only | env var `POLYMARKET_BUILDER_ADDRESS` | env |
+| Builder API key | Read-only / masked | env var `POLYMARKET_BUILDER_API_KEY` | env |
+| Builder taker fee (bps) | Read-only display | Polymarket builder dashboard | live API call to `clob.polymarket.com/builder/profile` (TBD endpoint) |
+| Builder maker fee (bps) | Read-only display | same | same |
+| Lifetime builder revenue | Read-only display | `clob.polymarket.com/builder/trades` aggregated | Phase 10 A4 cron |
+| Today's builder revenue | Read-only display | same | same |
+| Top earning markets (last 7d) | Read-only display | aggregated from builder-trades table | Phase 10 A4 cron |
+
+**Important: fees are NOT editable from our /admin.** They're set via Polymarket's dashboard. Our /admin DISPLAYS the current values (read from Polymarket) so admins can see what's active without leaving Axes.
+
+If the user wants editable-from-Axes fees, that's an extra layer:
+1. Add an admin-only "Update fees" form in `/admin/builder`.
+2. The form POSTs to a new server action `updateBuilderFees({takerBps, makerBps})`.
+3. The server action calls Polymarket's builder API endpoint that updates the rate (if such an endpoint exists publicly — the docs imply config goes through the dashboard UI; an HTTP API for it isn't documented).
+4. If no public endpoint, we emit a deeplink `https://polymarket.com/settings?tab=builder` and let the admin click through.
+
+**Recommendation: read-only display, deeplink to Polymarket for edits.** Saves us from reverse-engineering an undocumented endpoint.
+
+### What this admin page also surfaces
+
+A "test our builder code" tool: an admin clicks a button that places a tiny test order using the test wallet, and the page shows the trade arriving in our builder revenue table. This is the Phase 4 A8 live test, productized.
+
+### Action item: A1 below.
+
+## 5. Comments WS — once more, clarified
+
+Already covered in Phase 6 A4 + Phase 7 A5. Restating for clarity: **disable the live comments WS unconditionally for launch**. Polled refresh (every 30s) is good enough for a launch-week user count. Re-enable when we have a write-capable comment backend.
+
+## Phase 13 action items
+
+### A1. Build the `/admin/builder` admin page (P1, post Phase 4)
+
+- **Change.**
+  i. New route at `src/app/[locale]/admin/builder/page.tsx`. Server component.
+  ii. Reads env vars for code/address/API key (display). Reads Polymarket builder revenue via `lib/polymarket/builder-revenue.ts` (Phase 10 A3). Renders fee rates via the same lib (which queries Polymarket builder profile endpoint).
+  iii. Adds nav entry under Admin sidebar.
+  iv. Includes a "Place test order" button that triggers Phase 4 A8 manually.
+- **Why.** Visibility for the team; reduces context-switch cost when checking revenue.
+- **Dependencies.** Phase 4 A4, Phase 10 A3, Phase 10 A4.
+
+### A2. Replace Phase 9 A1's middleware with the Vercel-canonical pattern (P0)
+
+- **Change.** Use the `geolocation()` helper + `RESTRICTED_COUNTRIES` Set + read-only path bypass + locale-aware redirect target. Code in Section 2 above.
+- **Why.** Aligns with Vercel's official pattern; trivially maintainable.
+- **Files.** `src/middleware.ts`, `src/config/region-blocks.ts`, `package.json` (add `@vercel/functions` if not already present).
+- **Dependencies.** None.
+
+### A3. Build `src/lib/comments/polymarket-adapter.ts` per Section 1 (P0)
+
+- **Change.** New file with `adaptPolymarketComment(raw, currentUserAddress)` per Section 1. Exported and consumed by `useInfiniteComments`, `useHeroComments`, `useCommentMetrics`, and the replies fetch.
+- **Why.** Field-by-field mapping centralized; avoids per-call-site adapter code.
+- **Dependencies.** Phase 7 A1.
+
+### A4. Disable comment WRITE + REACT + DELETE UI behind a feature flag (P0)
+
+- **Change.** Introduce `process.env.NEXT_PUBLIC_COMMUNITY_WRITES_ENABLED ?? 'false'`. In each of:
+  - `EventCommentForm.tsx` (top-level write input)
+  - `EventCommentReplyForm.tsx` (reply input)
+  - `EventCommentLikeForm.tsx` (like button)
+  - `EventCommentMenu.tsx` (delete + report dropdown)
+  - `EventCommentDeleteForm.tsx`
+
+  Render the affordance only when the flag is `'true'`. When `'false'`, render a passive read-only view with the migration notice on the top-level form.
+- **Why.** Cleaner than checking `COMMUNITY_URL.includes('axes.co')` (Phase 7 A2's approach). Decouples capability from URL.
+- **Files.** Five components above + `next.config.ts` (default the var to `'false'`).
+- **Dependencies.** None. Replaces Phase 7 A2's gating logic.
+
+### A5. Update Phase 4 A4 to put `builderCode` in the V2 Order EIP-712 struct (P0)
+
+- **Change.** Phase 4 A4 was wrong about field placement. Replace its body with:
+  i. Read `Polymarket/exchange-tools-ts` (or `py-order-utils` if reachable) to get the verbatim V2 Order struct.
+  ii. Update `EIP712_TYPES.Order` in `src/lib/constants.ts` to add the V2 fields.
+  iii. Update `signOrderPayload` in `src/lib/orders/signing.ts` to include the new fields in the message struct.
+  iv. Update `BlockchainOrder` type in `src/types/index.ts` if the new field needs surfacing in the order schema.
+  v. Verify the `verifyingContract` address — if Polymarket V2 is at a different address than V1, swap.
+- **Why.** Phase 13 §3 has the new evidence. Builder code is part of the signed payload.
+- **Dependencies.** Phase 4 A1.
+
+### A6. Document the "no fee skim needed" decision in an ADR (P2)
+
+- **Change.** New `docs/adr/0003-builder-fees-via-polymarket-no-custom-skim.md` documenting:
+  - Decision: We do NOT take a fee on top of Polymarket's builder fee mechanism.
+  - Rationale: Polymarket's builder fee model already routes our configured rates to our address; layering our own skim adds infrastructure cost (USDC accounting, withdrawal flow) for marginal benefit.
+  - Constraint: Maximum we can charge is 100 bps taker + 50 bps maker. If we ever want more, the design needs revisiting (separate skim).
+- **Why.** Prevents future "let's add a 25bps Axes fee on top" creep without reconsidering the architectural cost.
+- **Files.** `docs/adr/0003-...`.
+- **Dependencies.** Phase 10 A2 (fees actually configured).
+
+### A7. Drop `lib/community-auth.ts` from the production bundle when writes are disabled (P3)
+
+- **Change.** When `NEXT_PUBLIC_COMMUNITY_WRITES_ENABLED='false'`, the auth helpers are dead code. Lazy-load them only inside the write-form components so they tree-shake out of the build for read-only deploys.
+- **Why.** ~5KB of bundle; not critical but tidy.
+- **Files.** `community-auth.ts` (no change; just import sites lazy-load).
+- **Dependencies.** A4.
+
+## Updated master plan (Phase 13 inserts)
+
+The Phase 12 Stage breakdown gets these inserts:
+
+- **Stage 1, after PR-E** (`polymarket_users` mirror): add **PR-EE**: Phase 13 A3 (`polymarket-adapter.ts`).
+- **Stage 2, replacing PR-M**: Phase 13 A5 supersedes Phase 4 A4. Same PR slot; expanded scope (V2 Order struct, builder field in signed payload).
+- **Stage 3, PR-T** (comments + mirror): also lands Phase 13 A4 (write disable flag).
+- **Stage 4, replacing PR-AB**: Phase 13 A2 supersedes Phase 9 A1's middleware sketch.
+- **Stage 4, after PR-AC**: add **PR-ACC**: Phase 13 A1 (`/admin/builder` page).
+- **Stage 4, last**: add **PR-AD2**: Phase 13 A6 (ADR write-up).
+
+## Final 100% coverage check
+
+| Concern | Where addressed |
+|---|---|
+| Wallet decision (Reown vs Magic) | Phase 12 §1 — keep Reown, Magic post-launch |
+| Hide Polymarket from users | Phase 12 §2 — pre-launch grep + 1 FAQ entry for `ClobAuthDomain` wallet prompt |
+| Verified contract addresses | Phase 12 §3 — verbatim from clob-client config |
+| Tags ingest | Phase 12 §4 — `/tags` cron + carousel flag |
+| Comment-user sync | Phase 12 §5 — `polymarket_users` mirror table |
+| Comment field-by-field UI mapping | Phase 13 §1 — adapter + per-component changes |
+| Geoblock canonical pattern | Phase 13 §2 — `@vercel/functions` + 451 + read-only path bypass |
+| Fee mechanism + builder code in V2 Order | Phase 13 §3 — V2 struct + native fee distribution |
+| Admin builder page | Phase 13 §4 — `/admin/builder` read-only display |
+| Live testing plan | Phase 11 Stages 1-5 + Phase 4 A8 + Phase 13 A1 admin "test order" tool |
+
+Anything else I might still be missing — flagging proactively:
+
+1. **Sports markets**: Polymarket has a separate `wss://sports-api.polymarket.com/ws` channel (Phase 6). Our sports event pages depend on this. Phase 6 A3 covers it as a "case-by-case repoint" but we should explicitly confirm sports events render correctly post-cutover.
+2. **Notifications**: Push notifications / in-app notifications about your trades. Today: presumably driven by kuest WS. Polymarket exposes this via the user channel (`/ws/user`, Phase 6 A5). Notifications surface needs auditing — flagged for Phase 6 A5 acceptance test.
+3. **Sitemap**: We generate a sitemap from our DB events. Post-Phase 1, the DB has Polymarket events. Sitemap will mass-update. The cache architecture (`docs/adr/0001-...`) handles this; just verify after Phase 1 A1 the sitemap regenerates correctly with the larger event count.
+4. **Rate limits on Polymarket APIs**: We don't know Polymarket's rate limits. At launch with 1000 concurrent users, we could trip them. Plan: add a simple per-host `withCache` shim using our existing Upstash redis (already wired) for hot read endpoints (`/positions`, `/value`, `/v1/leaderboard`).
+5. **Markets that exist on kuest but not Polymarket**: Today our DB has 100 events from kuest. Post-Phase 1 A1, gamma sync replaces them. But existing user positions + open orders on kuest-only markets get orphaned. Migration strategy: pre-cutover, snapshot user state on kuest; offer a withdraw flow; then cut over with empty-position users. Flag for Phase 11 cutover.
+
+These five concerns are real but smaller than the main phases. They go into the cutover gate's "soak" checklist (Phase 11 Stage 5) rather than triggering a Phase 14.
+
+## Status when phase is closed
+
+Phase 13 is closed when:
+
+- [ ] A1 merged. `/admin/builder` page renders with revenue figures.
+- [ ] A2 merged. Middleware uses `geolocation()` + canonical pattern.
+- [ ] A3 merged. `polymarket-adapter.ts` exported and consumed.
+- [ ] A4 merged. Comment write affordances hidden behind the env flag.
+- [ ] A5 merged (alongside Phase 4 A1). V2 Order struct signed correctly.
+- [ ] A6 merged. ADR-0003 documented.
+- [ ] A7 deferred or merged.
+
+Then the plan is fully concrete. Phase 14 = launch.

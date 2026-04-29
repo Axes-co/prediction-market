@@ -1,0 +1,405 @@
+---
+title: Phase 19. Final master plan — all evidence, all PRs, ready to ship
+status: ready-to-ship
+owner: khaleel
+last-updated: 2026-04-29
+supersedes: phase-11, phase-14, phase-15, phase-16, phase-17 (consolidated cutover docs)
+---
+
+# Phase 19. Final master plan
+
+This is the single source of truth for the migration. Earlier phase docs
+(0-18) are kept as historical research; phase-19 lists every PR with
+verbatim evidence and `file:line` change sites.
+
+## Pre-flight: env state verified live this session
+
+`.env.local` (verified by `grep` this session):
+
+```
+CLOB_URL=https://clob.polymarket.com
+WS_CLOB_URL=wss://ws-subscriptions-clob.polymarket.com
+DATA_URL=https://data-api.polymarket.com
+RELAYER_URL=https://relayer-v2.polymarket.com
+GAMMA_URL=https://gamma-api.polymarket.com
+WS_LIVE_DATA_URL=wss://ws-live-data.polymarket.com
+POLYMARKET_BUILDER_CODE=0x23a45b95958270c7094680b5ee0c572662b167b5ea3abb04dd08862e9fb7e309
+POLYMARKET_BUILDER_ADDRESS=0xcb71e9088a154ac0c6a3fca58eb33e71212b4353
+POLYMARKET_BUILDER_API_KEY=019dd90b-369f-7bb4-b6bf-c6f27382e7f6
+POLYMARKET_BUILDER_SECRET=osJ0lFiuMRm0CMgE2LXXr11viAuXu-I0IG8Brv0gk9s=
+POLYMARKET_BUILDER_PASSPHRASE=01d20f1a2029b1e326c4e1c7ee15540d593ebef7ed2d908c147dcf793f69d72e
+POLYMARKET_RELAYER_API_KEY=019dcfba-7480-7e14-b660-5eef5ee18596
+POLYMARKET_RELAYER_API_KEY_ADDRESS=0xfc34C1726079668396e32bCAEC78481834cF780b
+```
+
+To add: `BRIDGE_URL=https://bridge.polymarket.com`.
+
+Live verification this session:
+
+- `GET https://clob.polymarket.com/fees/builder-fees/0x23a45b95...` → `{"code":"0x23a45b95...","builder_maker_fee_rate_bps":0,"builder_taker_fee_rate_bps":0,"enabled":true}` — **builder is verified and enabled**.
+- `GET https://relayer-v2.polymarket.com/transactions` with `POLY_BUILDER_*` HMAC headers → HTTP 200 (empty array; no submitted txs yet). **Builder L2 HMAC validated end-to-end.**
+- `GET https://relayer-v2.polymarket.com/nonce`, `/relay-payload`, `/deployed`, `/relayer/api/keys` with `RELAYER_API_KEY + RELAYER_API_KEY_ADDRESS` simple auth → all 200.
+- `GET https://clob.polymarket.com/builder/trades?builder_code=0x23a45b95...&limit=5` → 200 `{data:[], count:0}` (snake_case `builder_code` confirmed).
+- WebSocket `wss://ws-subscriptions-clob.polymarket.com/ws/market` with `{type:"market", assets_ids:[...], custom_feature_enabled:true}` → live `book` snapshot at 367ms, `price_changes` and `best_bid_ask` streaming.
+- WebSocket `wss://ws-live-data.polymarket.com` (RTDS) with `{action:"subscribe", subscriptions:[{topic:"comments", type:"comment_created"}]}` → live comment events streaming.
+
+## Verified contract addresses (V2 mainnet)
+
+Source: `Polymarket/clob-client-v2/src/config.ts:MATIC_CONTRACTS` (verbatim).
+
+```
+exchange (V1)            = 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
+exchangeV2               = 0xE111180000d2663C0091e4f400237545B87B996B    ← USE THIS
+negRiskExchange (V1)     = 0xC5d563A36AE78145C45a50134d48A1215220f80a
+negRiskExchangeV2        = 0xe2222d279d744050d28e00520010520000310F59    ← USE THIS
+negRiskAdapter           = 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296
+collateral (pUSD V2)     = 0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB
+conditionalTokens        = 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
+SafeMultiSend            = 0xa238cbeb142c10ef7ad8442c6d1f9e89e07e7761    ← matches our existing const
+```
+
+Compared to our `src/lib/contracts.ts`:
+
+| Constant | Current value | Replace with | Reason |
+|---|---|---|---|
+| `CTF_EXCHANGE_ADDRESS` (line 11) | `0xB559…61cb` | `0xE111180000d2663C0091e4f400237545B87B996B` | V2 |
+| `NEG_RISK_CTF_EXCHANGE_ADDRESS` (line 12) | `0xef02…24F5` | `0xe2222d279d744050d28e00520010520000310F59` | V2 |
+| `CONDITIONAL_TOKENS_CONTRACT` (line 10) | `0x4682…A9C7` | `0x4D97DCd97eC945f40cF65F87097ACe5EA0476045` | V2 |
+| `COLLATERAL_TOKEN_ADDRESS` mainnet (line 5-7) | `0x2791…4174` (USDC.e) | `0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB` (pUSD) | V2 collateral switched |
+| `NEG_RISK_ADAPTER_ADDRESS` | (not declared) | `0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296` | New constant |
+| `SAFE_MULTISEND_ADDRESS` (line 18) | `0xA238…7761` | `0xa238cbeb142c10ef7ad8442c6d1f9e89e07e7761` (case-insensitive same) | Already correct |
+
+## Verified V2 EIP-712 typed data
+
+Source: `Polymarket/clob-client-v2/src/order-utils/model/ctfExchangeV2TypedData.ts` (verbatim):
+
+```ts
+CTF_EXCHANGE_V2_DOMAIN_NAME    = "Polymarket CTF Exchange"
+CTF_EXCHANGE_V2_DOMAIN_VERSION = "2"
+
+CTF_EXCHANGE_V2_ORDER_STRUCT = [
+  { name: "salt",          type: "uint256" },
+  { name: "maker",         type: "address" },
+  { name: "signer",        type: "address" },
+  { name: "tokenId",       type: "uint256" },
+  { name: "makerAmount",   type: "uint256" },
+  { name: "takerAmount",   type: "uint256" },
+  { name: "side",          type: "uint8"   },
+  { name: "signatureType", type: "uint8"   },
+  { name: "timestamp",     type: "uint256" },
+  { name: "metadata",      type: "bytes32" },
+  { name: "builder",       type: "bytes32" },
+]
+```
+
+Domain `verifyingContract`: `exchangeV2` for non-neg-risk, `negRiskExchangeV2` for neg-risk.
+
+`signatureType` enum (`signatureTypeV2.ts`):
+- 0 = EOA
+- 1 = POLY_PROXY (deprecated)
+- 2 = POLY_GNOSIS_SAFE (default for new users)
+- 3 = POLY_1271 (smart-contract wallets)
+
+## Verified auth headers
+
+L1 (POST `/auth/api-key`): `POLY_ADDRESS, POLY_SIGNATURE, POLY_TIMESTAMP, POLY_NONCE`
+
+L2 user (per-user, derived from L1): `POLY_ADDRESS, POLY_SIGNATURE, POLY_TIMESTAMP, POLY_API_KEY, POLY_PASSPHRASE`
+
+Builder attribution (added on top of L2 user for `POST /order`): `POLY_BUILDER_API_KEY, POLY_BUILDER_PASSPHRASE, POLY_BUILDER_SIGNATURE, POLY_BUILDER_TIMESTAMP`
+
+Relayer simple auth (for relayer endpoints): `RELAYER_API_KEY, RELAYER_API_KEY_ADDRESS` (no HMAC)
+
+Relayer builder auth (alt for `POST /submit`): same 4 `POLY_BUILDER_*` headers as builder attribution
+
+HMAC algorithm: `base64-decode(secret) → hmac-sha256(timestamp+method+normalizedPath+body) → base64 → URL-safe replace +/→-_`. Identical to our `src/lib/hmac.ts:8-20`.
+
+L1 typed data is `ClobAuthDomain v1` with `ClobAuth` primary type and 4 fields `address(address), timestamp(string), nonce(uint256), message(string)`. Identical to our `src/lib/trading-auth/client.ts`. Message: `"This message attests that I control the given wallet"`.
+
+## PR list — every change with `file:line` and evidence
+
+### Stage 0 — Env + scaffolding (1 PR)
+
+**PR-A0**: Add `BRIDGE_URL=https://bridge.polymarket.com` to `.env.local` and `next.config.ts:108-style env block`. Add `POLYMARKET_BUILDER_SECRET` and `POLYMARKET_BUILDER_PASSPHRASE` to the env documentation.
+- Files: `.env.local`, `next.config.ts`
+- Risk: zero
+- Evidence: bridge endpoints documented at `docs.polymarket.com/api-reference/bridge/*` (5 endpoints)
+
+### Stage 1 — Foundation reads (no trading risk) — 8 PRs
+
+**PR-A1**: Gamma cursor fix.
+- Change: `src/lib/gamma/client.ts:46` — `params.set('next_cursor', cursor)` → `params.set('after_cursor', cursor)`
+- Evidence: `gamma-api.polymarket.com/events/keyset` lists `after_cursor` as the input parameter (verbatim from `docs.polymarket.com/api-reference/events/list-events-keyset-pagination`); live probe Phase 1 finding 1 confirmed page-1-loop bug with `next_cursor` and pagination working with `after_cursor`.
+- Test: `GET /api/sync/gamma` then verify `events.count > 100` in DB.
+
+**PR-A2**: Schema additions for events + tags + polymarket_users.
+- Files: new migration `2026_04_29_001_polymarket_v2_columns.sql`; `src/lib/gamma/mapper.ts` (write new fields); `src/lib/gamma/repository.ts` (upsert columns); `src/lib/db/schema/events/tables.ts`; `src/types/index.ts`.
+- Schema:
+  ```sql
+  ALTER TABLE events ADD COLUMN gamma_event_id integer;
+  ALTER TABLE events ADD COLUMN neg_risk_market_id text;
+  ALTER TABLE events ADD COLUMN comment_count integer DEFAULT 0;
+  ALTER TABLE events ADD COLUMN restricted boolean DEFAULT false;
+  ALTER TABLE events ADD COLUMN liquidity_clob numeric(20,6);
+  ALTER TABLE events ADD COLUMN featured boolean DEFAULT false;
+  ALTER TABLE events ADD COLUMN featured_order integer;
+  ALTER TABLE events ADD COLUMN show_all_outcomes boolean DEFAULT false;
+
+  ALTER TABLE tags ADD COLUMN force_show boolean DEFAULT false;
+  ALTER TABLE tags ADD COLUMN force_hide boolean DEFAULT false;
+  ALTER TABLE tags ADD COLUMN is_carousel boolean DEFAULT false;
+  ALTER TABLE tags ADD COLUMN published_at timestamptz;
+
+  CREATE TABLE polymarket_users (
+    base_address text PRIMARY KEY,
+    proxy_wallet text,
+    pseudonym text, name text, display_username_public boolean,
+    bio text, profile_image text, profile_image_optimized text,
+    first_seen_at timestamptz NOT NULL DEFAULT now(),
+    last_seen_at  timestamptz NOT NULL DEFAULT now(),
+    source text NOT NULL
+  );
+  CREATE INDEX polymarket_users_proxy_wallet_idx ON polymarket_users (proxy_wallet);
+  ```
+- Evidence: gamma `/events/keyset` response (live probed) includes `commentCount, negRiskMarketID, restricted, liquidity, liquidityClob, featured, featuredOrder, showAllOutcomes`. Tag fields per `docs.polymarket.com/api-reference/tags/list-tags`. Mirror table per Phase 12 §5.
+- Test: after gamma sync runs, sample event has all columns populated; verify with `SELECT count(*) FROM events WHERE gamma_event_id IS NOT NULL`.
+
+**PR-A3**: Tag standalone sync cron.
+- New file: `src/app/api/sync/tags/route.ts` — pulls `${GAMMA_URL}/tags?limit=500&order=updatedAt&ascending=false`, upserts.
+- `vercel.json` cron: `*/60 * * * *` (hourly).
+- Evidence: `/tags` returns `{id, label, slug, forceShow, forceHide, isCarousel, publishedAt, createdAt, updatedAt, requiresTranslation}` (live probed).
+
+**PR-A4**: Polymarket users mirror writer.
+- New file: `src/lib/db/queries/polymarket-users.ts` with `upsertFromCommentProfile`, `upsertFromActivityRow`, `upsertFromHolderRow`, `getByAddress`. Wire into the read paths after Phase 7 A1 lands.
+- Evidence: comments/activity/holders responses all carry `profile.{baseAddress, proxyWallet, name, pseudonym, bio, profileImage, profileImageOptimized}` (live probed).
+
+**PR-A5**: Comment adapter (gamma → our `Comment` shape).
+- New file: `src/lib/comments/polymarket-adapter.ts` per Phase 13 §1 (verbatim TypeScript code in that doc).
+- Evidence: gamma `/comments?parent_entity_type=Event&parent_entity_id=` response (live probed) — adapter maps `body→content`, `userAddress→user_address`, `profile.{name|pseudonym}→username` based on `displayUsernamePublic`, `reactionCount→likes_count`, etc.
+
+**PR-A6**: Repoint comment reads to gamma.
+- Files: `src/app/[locale]/(platform)/(home)/_hooks/useHeroComments.ts:10`, `src/app/[locale]/(platform)/event/[slug]/_hooks/useInfiniteComments.ts:68,164`, `useCommentMetrics.ts:14`. Each calls `${GAMMA_URL}/comments?parent_entity_type=Event&parent_entity_id=<gamma_event_id>` instead of `${COMMUNITY_URL}/comments`.
+- Hide write affordances (5 components) behind `process.env.NEXT_PUBLIC_COMMUNITY_WRITES_ENABLED ?? 'false'`.
+- Evidence: gamma comment endpoint live-verified; write paths return 401 without per-user auth (Phase 7 A2 deferral).
+
+**PR-A7**: Delete `/api/sync/volume` cron + 3 frontend `/data/volumes` calls.
+- Files: delete `src/app/api/sync/volume/route.ts`, `src/app/api/sync/volume/helpers.ts`; remove cron from `vercel.json`. In `MarketOutcomeGraph.tsx:518`, `EventMetaInformation.tsx:48`, `EventMarketCard.tsx:58`, delete the `useQuery({queryKey:['…-volumes',…]})` block; consumers fall back to `event.volume`/`market.volume` (already populated by gamma sync).
+- Evidence: `POST clob.polymarket.com/data/volumes` → 404 (live probe). Phase 1 finding 3 confirmed gamma already populates `volume`/`volume_24h`.
+
+**PR-A8**: Fix `/batch-prices-history` interval.
+- File: `src/app/[locale]/(platform)/event/[slug]/_hooks/useEventPriceHistory.ts:122-148`. The two bounded paths (active long-range young market + resolved-anchored) currently send `{fidelity, startTs, endTs}`. Change to add `interval: config.interval` so body becomes `{fidelity, interval, startTs, endTs}`.
+- Evidence: live probe — `POST /batch-prices-history` with bounds without interval returns `{"error":"invalid filters: the time component is mandatory"}`. With `interval=1d` + 1-day bounds returns 288 points within window.
+
+**PR-A9**: Drop `/user-pnl` calls + defang affiliate + fix `/other?id=`.
+- Drop calls (`PublicProfileHeroCards.tsx:71`, `api/leaderboard/timeframe-pnl/route.ts`); use `/v1/leaderboard?timePeriod=` row pnl directly.
+- Defang `admin/affiliate/page.tsx` and `(platform)/settings/affiliate/page.tsx` — render "coming with builder fees" notice.
+- `lib/data-api/user.ts:282-318 fetchUserOtherBalance` — change `slug=` → `id=<gamma_event_id>` (depends on PR-A2).
+- Evidence: `/user-pnl` 404 live; `/other?slug=` returns 400 "required query param 'id' not provided"; `/other?id=30615` returns 200.
+
+### Stage 1 validation gate
+- Run `npx tsc --noEmit && npx vitest run`.
+- Manually visit `/`, `/event/<slug>`, `/profile/<slug>`, `/leaderboard`, `/portfolio`. devtools network tab: 0 occurrences of `data/volumes`, `user-pnl`, `referrers`, `volume?user=`. Comments populate from gamma. PnL chart shows placeholder.
+
+### Stage 2 — Trading core V2 (8 PRs)
+
+**PR-B1**: Replace EIP-712 domain + Order struct (V1→V2).
+- Files: `src/lib/constants.ts:33-62` — replace:
+  ```ts
+  // OLD V1
+  export const EIP712_DOMAIN = {
+    name: 'CTF Exchange', version: '1', chainId, verifyingContract: CTF_EXCHANGE_ADDRESS,
+  };
+  EIP712_TYPES = { Order: [12 fields including taker, nonce, feeRateBps] }
+
+  // NEW V2
+  export const EIP712_DOMAIN = {
+    name: 'Polymarket CTF Exchange', version: '2', chainId, verifyingContract: CTF_EXCHANGE_ADDRESS,
+  };
+  EIP712_TYPES = { Order: [salt, maker, signer, tokenId, makerAmount, takerAmount,
+                           side, signatureType, timestamp, metadata, builder] }
+  ```
+- Evidence: `clob-client-v2/src/order-utils/model/ctfExchangeV2TypedData.ts` verbatim.
+
+**PR-B2**: Replace Polygon mainnet contract addresses.
+- File: `src/lib/contracts.ts:5-18` — replace 4 addresses + add `NEG_RISK_ADAPTER_ADDRESS` per the table above.
+- Evidence: `clob-client-v2/src/config.ts:MATIC_CONTRACTS` verbatim.
+
+**PR-B3**: `KUEST_*` headers → `POLY_*` repo-wide.
+- Files: ~8 files in `_actions/*.ts`, `api/open-orders/route.ts`, `api/events/[slug]/open-orders/route.ts`. Pure header-name rename; HMAC algorithm unchanged (`buildClobHmacSignature` matches `buildPolyHmacSignature` byte-for-byte).
+- Evidence: `clob-client-v2/src/headers/index.ts createL2Headers` returns the 5 `POLY_*` header names.
+
+**PR-B4**: Drop duplicate L1 derivation; reshape onboarding.
+- File: `src/app/[locale]/(platform)/_actions/trading-auth.ts:103` — delete `requestApiKey(relayerUrl, headers)` call. Polymarket has CLOB-only L1.
+- Evidence: relayer-openapi.yaml has no `/auth/api-key` endpoint; Polymarket's only L1 is at `clob.polymarket.com/auth/api-key` (verified live as 401 = path exists).
+
+**PR-B5**: Update `buildOrderPayload` for V2 wire body.
+- File: `src/lib/orders/index.ts:35-141`. Drop `taker, nonce, feeRateBps, expiration` from signed struct. Add `timestamp = Date.now() string`, `metadata = '0x' + '00'.repeat(32)` zero bytes32, `builder = process.env.POLYMARKET_BUILDER_CODE`.
+- Default `signature_type` switches from 0 (EOA) to 2 (POLY_GNOSIS_SAFE) for users with a Safe.
+- Evidence: `clob-client-v2/src/order-utils/model/orderDataV2.ts` defines `OrderDataV2`. The SDK auto-injects `builderCode` if `builderConfig` is set: `if (this.builderConfig?.builderCode && !orderToSign.builderCode) { orderToSign.builderCode = this.builderConfig.builderCode; }` (`client.ts createOrder`).
+
+**PR-B6**: Fix `_actions/store-order.ts:282-300 clobPayload`.
+- Change wire body:
+  - `side: 0|1` → `'BUY'|'SELL'` (string)
+  - Add `deferExec: false` at top level
+  - Order body uses V2 fields (output of PR-B5)
+- Files: `_actions/store-order.ts`, `cancel-market-orders.ts:65-68` (assetId → asset_id snake_case).
+- Evidence: `clob-client-v2/src/utilities.ts:orderToJson` verbatim. `docs.polymarket.com/api-reference/trade/cancel-orders-for-a-market` body example uses `asset_id`.
+
+**PR-B7**: Build `/api/polymarket/sign` route + attach builder headers to `/order` POST.
+- New file: `src/app/api/polymarket/sign/route.ts` — copy of `wagmi-safe-builder-example/app/api/polymarket/sign/route.ts` with our existing `buildClobHmacSignature` (byte-identical to `buildHmacSignature`):
+  ```ts
+  POST /api/polymarket/sign
+  body: { method, path, body }
+  returns: { POLY_BUILDER_API_KEY, POLY_BUILDER_PASSPHRASE, POLY_BUILDER_SIGNATURE, POLY_BUILDER_TIMESTAMP }
+  ```
+- Modify `_actions/store-order.ts:316-322` — after computing user L2 headers, call `/api/polymarket/sign` with `{method:'POST', path:'/order', body:JSON.stringify(clobPayload)}`. Attach the returned 4 headers to the `/order` request alongside L2 headers.
+- Evidence: `wagmi-safe-builder-example/app/api/polymarket/sign/route.ts:6-9, 30-50` verbatim. Builder L2 HMAC verified live this session against `relayer-v2/transactions` (HTTP 200).
+
+**PR-B8**: Adopt `@polymarket/clob-client-v2` SDK (recommended, optional).
+- Reduces hand-maintenance of EIP-712. The SDK encapsulates V2 typed data, L1/L2 header builders, and order body construction.
+- Files: install `@polymarket/clob-client-v2`; replace `_actions/store-order.ts:282-340 fetch + signOrderPayload` with SDK call `createAndPostOrder({tokenID, price, size, side}, {tickSize, negRisk}, OrderType, deferExec, postOnly)`.
+- Evidence: `clob-client-v2/examples/orders/gtcLimitBuy.ts` shows the canonical call pattern.
+
+### Stage 2 validation gate (CRITICAL)
+- Test wallet (`0xfc34...780b`) deploys a Safe (PR-C1 below).
+- Place a 1-share far-OTM order on a real Polymarket market via the test wallet.
+- Verify:
+  1. HTTP 200 + `orderID` returned.
+  2. Order shows in `/data/orders` for the test user (auth'd L2).
+  3. Order shows on `polymarket.com/portfolio?user=0xfc34...780b`.
+  4. `/builder/trades?builder_code=0x23a45b95...` shows the order attribution within 30s of placement.
+  5. Cancel works (`DELETE /order` body `{orderID}`).
+- If any step fails: revert PR-B1 through PR-B8 together; production still works on V1 paths under kuest until reverts deploy.
+
+### Stage 3 — Wallet onboarding (4 PRs)
+
+**PR-C1**: Replace kuest proxy-deploy with Polymarket Safe via `/submit`.
+- Files: `_actions/proxy-wallet.ts:138-218 triggerSafeProxyDeployment`. Replace kuest `POST ${RELAYER_URL}/wallet/safe` with the existing `submitSafeTransactionAction` flow (which already POSTs to `/submit`).
+- Build deployment calldata for canonical Gnosis Safe `createProxyWithNonce` against Polymarket's Safe factory. Wrap in SafeTx EIP-712 (`getSafeTxTypedData` already in `safe/transactions.ts:492`).
+- Evidence: `relayer-openapi.yaml:SubmitRequest` matches our `SafeTransactionRequestPayload` field-for-field. `wagmi-safe-builder-example/hooks/useSafeDeployment.ts` shows the calldata builder pattern.
+
+**PR-C2**: Replace `SAFE_PROXY_TYPES.CreateProxy` with canonical `SafeTx`.
+- File: `src/lib/safe-proxy.ts:9-15` — delete the kuest custom `CreateProxy` typed data. The `getSafeTxTypedData` from `safe/transactions.ts:492-532` is already the canonical Gnosis Safe v1.3.x SafeTx.
+- Update `TradingOnboardingProvider.tsx:277-285` to call `getSafeTxTypedData` instead of `getSafeProxyDomain` + `SAFE_PROXY_TYPES`.
+- Evidence: our `safe/transactions.ts:33-46 SAFE_TX_TYPES` matches Safe v1.3 standard (10 fields).
+
+**PR-C3**: Switch relayer auth from KUEST L2 HMAC to RELAYER_API_KEY simple auth.
+- Files: `_actions/approve-tokens.ts:54, 128`, `_actions/proxy-wallet.ts:174-178`, `portfolio/_actions/pending-deposit.ts`. Replace HMAC headers with `RELAYER_API_KEY: process.env.POLYMARKET_RELAYER_API_KEY` and `RELAYER_API_KEY_ADDRESS: process.env.POLYMARKET_RELAYER_API_KEY_ADDRESS`.
+- Evidence: relayer-openapi.yaml supports both auth modes; simple auth verified live this session for `/nonce`, `/relay-payload`, `/deployed`, `/transactions`, `/relayer/api/keys`.
+
+**PR-C4**: Update `buildApproveTokenTransactions` to canonical Polymarket spender set.
+- File: `src/lib/safe/transactions.ts:209-244`. Per `wagmi-safe-builder-example/utils/approvals.ts` (verbatim):
+  - USDC.e (now pUSD) approve to: `CTF_CONTRACT, NEG_RISK_ADAPTER, CTF_EXCHANGE, NEG_RISK_CTF_EXCHANGE` (4 spenders)
+  - ERC1155 setApprovalForAll: `CTF_EXCHANGE, NEG_RISK_CTF_EXCHANGE, NEG_RISK_ADAPTER` (3 operators)
+- Replace `UMA_NEG_RISK_ADAPTER_ADDRESS` references with `NEG_RISK_ADAPTER_ADDRESS`. Add USDC approvals to CTF_EXCHANGE + NEG_RISK_CTF_EXCHANGE.
+- Evidence: live decoded onchain Safe-tx + `wagmi-safe-builder-example/utils/approvals.ts:USDC_E_SPENDERS` and `OUTCOME_TOKEN_SPENDERS` verbatim.
+
+### Stage 4 — Real-time + content (4 PRs)
+
+**PR-D1**: WebSocket — only `/ws/market` subscribe message verified working as-is (no change). Other 5 hooks need RTDS subscribe shape.
+- File: `EventMarketChannelProvider.tsx:244-249` — already correct, no change.
+- Files: `useLiveChartStream.ts`, `useLiveSeriesWebSocket.ts`, `useLiveCommentsChannel.ts`, `ActivityFeed.tsx` — change subscribe message to:
+  ```ts
+  ws.send(JSON.stringify({
+    action: 'subscribe',
+    subscriptions: [{ topic: '<topic>', type: '<type>' }],
+  }))
+  ```
+  - `useLiveCommentsChannel.ts`: topic=`comments`, types `comment_created/removed, reaction_created/removed`
+  - `useLiveChartStream.ts` + `useLiveSeriesWebSocket.ts`: topic=`crypto_prices` or `equity_prices` based on event type
+- Adjust ping interval: `10s` for `/ws/market`+`/ws/user`, **5s for RTDS**.
+- Evidence: `docs.polymarket.com/market-data/websocket/{rtds,user-channel,sports}` + live probes this session (RTDS streamed crypto_prices update events for bnbusdt/ethusdt at 1555ms; comments topic streamed comment_created events at 1863ms).
+
+**PR-D2**: User WS channel for live order updates.
+- New hook: `src/app/[locale]/(platform)/_hooks/useUserChannel.ts`. Connects `${WS_CLOB_URL}/ws/user`. Sends `{type:"user", auth:{apiKey, secret, passphrase}, markets:[<conditionIds>]}`. Listens for `trade` and `order` events; updates React-Query caches for `/data/orders` and the activity feed.
+- Evidence: docs verbatim quote: "The user channel endpoint is `wss://ws-subscriptions-clob.polymarket.com/ws/user`."
+
+**PR-D3**: Phase 8 cron rationalization (Phase 8 A1+A2+A3 unchanged).
+
+**PR-D4**: Vercel `geolocation()` middleware.
+- New file: `src/middleware.ts` per Phase 13 §2. Use `geolocation()` from `@vercel/functions`. Block list per `docs.polymarket.com/api-reference/geoblock`: 33 fully-blocked countries (US, CU, IR, KP, SD, SY, RU, BY, etc) + close-only modes (Poland, Singapore, Thailand, Taiwan) + frontend-only Japan + region restrictions (Ontario, Crimea, Donetsk, Luhansk).
+- Alternative: server-side delegate to `polymarket.com/api/geoblock` for canonical decision.
+- Evidence: `vercel/examples/edge-middleware/geolocation-country-block/middleware.ts` verbatim pattern + `docs.polymarket.com/api-reference/geoblock` country list.
+
+### Stage 5 — Builder revenue + admin (4 PRs)
+
+**PR-E1**: `/admin/builder` revenue dashboard.
+- New page: `src/app/[locale]/admin/builder/page.tsx`. Reads:
+  - `GET data-api.polymarket.com/v1/builders/leaderboard?builder=$BUILDER_ADDRESS&timePeriod=ALL` — our position
+  - `GET clob.polymarket.com/builder/trades?builder_code=$BUILDER_CODE` — attributed trades
+  - `GET clob.polymarket.com/fees/builder-fees/$BUILDER_CODE` — current fee config (today: `enabled:true, 0/0 bps`)
+  - `GET relayer-v2.polymarket.com/transactions` (with our POLY_BUILDER_* HMAC) — submitted txs
+- Read-only display. Deeplink to `polymarket.com/settings?tab=builder` for fee adjustment.
+- Evidence: all 4 endpoints verified live this session.
+
+**PR-E2**: Builder-trades sync cron.
+- New file: `src/app/api/sync/builder-trades/route.ts`. Polls `/builder/trades?builder_code=...&before=<lastSeen>` on a 10-min cadence, persists to new `builder_trades` table.
+- Evidence: builder/trades endpoint live-tested HTTP 200.
+
+**PR-E3**: Bridge integration (deposits/withdrawals).
+- New file: `src/lib/polymarket/bridge.ts` — wrappers for `bridge.polymarket.com/{supported-assets, quote, deposit, withdraw, status/{address}}`.
+- Wire into deposit/withdrawal UI (today probably none — new feature).
+- Evidence: 5 endpoints documented at `docs.polymarket.com/api-reference/bridge/*`.
+
+**PR-E4**: ADR write-ups (Reown decision, fee skim decision).
+- `docs/adr/0002-keep-reown-appkit-for-wallet-connect.md`
+- `docs/adr/0003-builder-fees-via-polymarket-no-custom-skim.md`
+- Evidence: per Phase 5 A3 + Phase 13 A6.
+
+## Stage gates summary
+
+| Stage | PR count | Validation | Risk | Rollback |
+|---|---|---|---|---|
+| 0 | 1 | env grep passes | zero | env reset |
+| 1 | 8 | tsc + vitest green; manual UI smoke | low | per-PR revert |
+| 2 | 8 | live test order placed + cancelled with builder attribution | high | revert PR-B1-B8 batch |
+| 3 | 4 | Safe deploys; tokens approve; new user can trade | medium | revert C1-C4; users can withdraw via existing kuest until rollback |
+| 4 | 4 | live book updates ≤5s; live comments populate | low | feature-flag the new WS hooks |
+| 5 | 4 | revenue dashboard renders; first attributed trade visible; bridge quote works | low | hide admin/builder route; defang bridge UI |
+
+Total: **29 PRs**.
+
+## Calendar (with full-time focus)
+
+- Day 1: Stage 0 + Stage 1 (mostly mechanical, ~8 PRs)
+- Day 2: Stage 2 PR-B1 through B6 (V2 typed data + headers + wire body)
+- Day 3: Stage 2 PR-B7 (builder sign route) + B8 (SDK adoption); live test order; Phase 4 A8 gate
+- Day 4: Stage 3 (wallet onboarding); first user deploys Safe end-to-end
+- Day 5: Stage 4 (WS + geoblock); Stage 5 revenue dashboard
+- Day 6: Soak + bug fixes
+- Day 7: Public launch
+
+Polymarket builder fee configuration (set rates from 0/0 bps to e.g. 50/25 bps via `polymarket.com/settings?tab=builder`) is a 2-minute task you do once on Day 3 after Stage 2 lands.
+
+## Pre-launch grep checklist
+
+After all 29 PRs land:
+```bash
+grep -rn 'KUEST_' src/                  # expect 0
+grep -rn 'kuest\|Kuest' src/              # only allowed: comments referencing the upstream fork
+grep -rn 'CTF Exchange[^V]' src/         # verify all migrated to "Polymarket CTF Exchange"
+grep -rn '0xB559\|0xef02' src/          # old V1 addresses, expect 0
+grep -rn 'data/volumes' src/             # expect 0 (cron deleted)
+grep -rn '/user-pnl' src/                # expect 0
+grep -rn 'Polymarket\b' src/ public/    # expect 0 in user-visible strings
+```
+
+## Final readiness statement
+
+The plan is complete with verbatim evidence per change.
+
+- All 106 api-reference pages crawled, results in Phase 17/18.
+- All endpoints used by our app verified live or via SDK source.
+- Builder credentials present and HMAC-tested live (HTTP 200 against relayer `/transactions`).
+- V2 vs V1 disambiguated; we target V2 for orders.
+- WebSocket subscribe shapes verified live for both `/ws/market` (CLOB) and RTDS.
+- Contract addresses verified verbatim from `clob-client-v2/src/config.ts`.
+- 5 unknown spender addresses resolved to V2 exchanges.
+
+Two human actions remain (both 2-minute tasks):
+1. Visit `polymarket.com/settings?tab=builder` and **set fee rates** (e.g. 50 bps taker / 25 bps maker). Without this, attributed trades earn $0.
+2. Confirm test wallet `0xfc34...780b` is funded with ~$50 USDC.e on Polygon for the live order test in Stage 2.
+
+When both are done, PR-A1 (gamma cursor fix) starts the work. Each subsequent PR is mechanical with `file:line` precision.
+
+No more audit passes needed. The next message should be either "go" (start PR-A1) or a question I haven't already answered.

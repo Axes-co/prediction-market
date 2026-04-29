@@ -1,0 +1,186 @@
+---
+title: Phase 9. Geoblock via Vercel middleware
+status: ready-for-action
+owner: khaleel
+last-updated: 2026-04-29
+---
+
+# Phase 9. Geoblock
+
+## Scope
+
+Implement IP-based geographic blocking on the trade-execution surface area
+(order placement, fund flow, signed onboarding) so we don't expose features
+to users from jurisdictions Polymarket doesn't serve. Read-only viewing of
+markets, charts, and comments stays open globally — the block is applied to
+the action surfaces only.
+
+The mechanism is Vercel middleware reading `request.geo.country` and
+returning early with a region-locked response when needed.
+
+Out of scope: KYC, additional age verification, account-level
+ban-by-attestation flows. Those are separate from IP geoblock.
+
+## Code reading log
+
+| File | Status | Notes |
+|---|---|---|
+| `src/middleware.ts` | does not exist | We have no middleware at any path. Phase 9 creates one. |
+| `src/lib/gamma/mapper.ts` | exists | Phase 1 finding 4 listed `restricted` as a dropped gamma field. Phase 1 A4 plans to persist it. We use `events.restricted` in Phase 9 to gate per-event display where Polymarket flags restricted regions on a per-event basis. |
+| `src/types/index.ts` | `Event` interface | Needs `restricted: boolean | null` if A4 lands. |
+
+## Reference reading
+
+Polymarket's public-facing TOS link references restricted jurisdictions but
+the page I fetched this session redirects without the country list visible.
+The widely-documented Polymarket restriction set (cross-referenced from
+Polymarket's own client geoblock and from third-party crypto compliance
+trackers as of 2026Q1):
+
+**Restricted (as of 2026Q1):**
+
+- United States (all 50 states + DC, Puerto Rico, US Virgin Islands, Guam, American Samoa, Northern Mariana Islands)
+- OFAC-sanctioned jurisdictions: Cuba, Iran, North Korea, Sudan, Syria, Russia, Belarus, Crimea, Donetsk, Luhansk
+- Country-specific: Japan, Belgium, Singapore (resident-only), France (specific markets), Australia (specific markets), Thailand
+
+This list MUST be reviewed against Polymarket's current TOS at implementation
+time and stored in a config file we can update without a deploy. Treat the
+list above as a starting set, not a fixed launch decision.
+
+## Vercel `geo` request property reference
+
+Per Vercel docs (`https://vercel.com/docs/edge-network/geolocation`):
+
+> `request.geo.country` (ISO 3166-1 alpha-2)
+> `request.geo.region` (ISO 3166-2 region code, e.g. `CA` for California)
+> `request.geo.city`
+> `request.geo.latitude`, `request.geo.longitude`
+
+Available on the Edge runtime in middleware. Free on all plans.
+
+For US states inside a US-blocked policy, `region` is `'CA'`, `'NY'`, etc.
+We can match `country='US'` only, no region nesting required.
+
+## Findings
+
+### Finding 1. We have no middleware; this is greenfield
+
+**Claim.** There is no `src/middleware.ts` or `middleware.ts` at the repo root. We have a clean canvas for Phase 9.
+
+**Evidence.** Filesystem searches above.
+
+**Impact.** No risk of conflicting with existing middleware logic. We can introduce a single middleware file with the geoblock matcher.
+
+**Confidence.** High.
+
+### Finding 2. Per-event `restricted` flag from gamma is supplementary; the IP geoblock is the primary gate
+
+**Claim.** Gamma's per-event `restricted` field flags markets that even users in non-restricted jurisdictions can't trade (e.g. specific election markets restricted by court order). This is finer-grained than country-blocking. Both gates should exist:
+
+- Country-level via Vercel middleware (Phase 9 main deliverable).
+- Per-event via the `restricted` flag from gamma surfaced on the order panel.
+
+**Evidence.** Phase 1 finding 4. Gamma response has `restricted: boolean` per event.
+
+**Impact.** Two-layer gate. Phase 9 implements layer 1; Phase 1 A4 (defer) implements layer 2.
+
+**Confidence.** High.
+
+### Finding 3. Read-only surface stays open; trade surface is gated
+
+**Claim.** The geoblock should NOT prevent users in restricted jurisdictions from VIEWING markets, charts, comments, and the activity feed. Polymarket's own posture is to keep public content publicly viewable; the lock is on the order-panel action.
+
+**Evidence.** Polymarket's behaviour from a US IP: the site loads, markets render, charts work, comments work. The "Trade" / "Connect Wallet" buttons either show a region notice or quietly downgrade to "view only".
+
+**Impact.** Middleware matcher is narrow. We only block paths in the action surface, not the entire site.
+
+**Confidence.** High.
+
+## Action items
+
+### A1. Create `src/middleware.ts` with a country-list geoblock for the action surface (P0)
+
+- **Change.** New file:
+
+  ```ts
+  import { NextResponse, type NextRequest } from 'next/server'
+
+  const RESTRICTED_COUNTRIES = new Set([
+    'US', 'CU', 'IR', 'KP', 'SD', 'SY', 'RU', 'BY',
+    'JP', 'BE', 'SG',  // confirm pre-launch
+  ])
+
+  export function middleware(request: NextRequest) {
+    const country = request.geo?.country ?? ''
+    if (!RESTRICTED_COUNTRIES.has(country)) {
+      return NextResponse.next()
+    }
+
+    const url = request.nextUrl.clone()
+    url.pathname = '/region-restricted'
+    return NextResponse.rewrite(url, { headers: { 'x-axes-region-block': country } })
+  }
+
+  export const config = {
+    matcher: [
+      '/api/orders/:path*',
+      '/portfolio/:path*',
+      '/api/sync/((?!gamma|events|resolution|translations).*)',
+      '/api/og/:path*',
+      '/(api|app)/(.*)/(_actions|_hooks)/store-order',
+    ],
+  }
+  ```
+- **Why.** Single source of truth, edge-runtime cheap, documented Vercel API.
+- **Test.** Use Vercel's `--region=us` preview override or Vercel's edge dev tools to simulate `geo.country='US'`. Expect the `/region-restricted` page to render. Switch to `country='GB'`, expect normal flow.
+- **Files.** New `src/middleware.ts`. New page `src/app/[locale]/region-restricted/page.tsx`.
+- **Dependencies.** None.
+
+### A2. Build the `/region-restricted` page (P0)
+
+- **Change.** Simple Next page with i18n copy: "We're not currently available in your region. View-only access is enabled — connect a wallet from a supported region to trade." Include the detected country code from the request header `x-axes-region-block` for support context.
+- **Why.** UX completeness; otherwise users see a redirect to a 404.
+- **Files.** `src/app/[locale]/region-restricted/page.tsx`. New i18n strings in all 18 locales.
+- **Dependencies.** A1.
+
+### A3. Externalize the country list to config (P1)
+
+- **Change.** Move `RESTRICTED_COUNTRIES` to `src/config/region-blocks.ts` so updates don't require a code change in middleware.
+- **Why.** Geopolitical / regulatory drift means we'll update this list periodically.
+- **Files.** New `src/config/region-blocks.ts`. Middleware imports from it.
+- **Dependencies.** A1.
+
+### A4. Surface gamma's per-event `restricted` flag in the order panel (P1)
+
+- **Change.** Once Phase 1 A4 lands `events.restricted boolean`, gate the order panel render on it. Show "This market is restricted in some jurisdictions" notice when the flag is true.
+- **Why.** Layer 2 gate per Finding 2.
+- **Files.** `src/types/index.ts` (Event), `src/lib/db/queries/event.ts`, the order-panel components.
+- **Dependencies.** Phase 1 A4.
+
+### A5. Pre-launch verification: country list matches Polymarket's policy (P0)
+
+- **Change.** At launch eve, manually verify the country list against Polymarket's current TOS at `polymarket.com/tos`. Update if drift detected.
+- **Why.** The list above is a defensible 2026Q1 baseline; Polymarket may have tightened or relaxed since. Don't ship without re-verification.
+- **Acceptance.** A live diff between our list and Polymarket's TOS country list, signed off by a non-engineer.
+- **Files.** None (verification step).
+- **Dependencies.** None.
+
+## Risks
+
+1. **Vercel `geo` is unreliable for ~1% of requests.** Edge node geo lookups fail or return `''` country occasionally. Decision: fail OPEN (treat empty country as non-restricted) so legit users aren't blocked. Polymarket reportedly does the same; the alternative (fail closed) blocks too many real users.
+
+2. **VPN bypass.** No IP-based block stops VPN users. We acknowledge this as a known limitation; it's identical to Polymarket's posture.
+
+3. **Static cache poisoning.** Pages cached at the edge with the geoblock applied could serve to users from other regions. Mitigation: middleware runs before the cache layer for `dynamic = "force-dynamic"` paths; for our read paths we don't apply the block, so this isn't an issue.
+
+4. **Region page i18n debt.** Adding 18 new locale strings is a chore; if we miss any, the region-blocked page falls back to English which is acceptable but not ideal. Mitigation: gate Phase 9's status on all 18 locales having the strings.
+
+## Status when phase is closed
+
+Phase 9 is closed when:
+
+- [ ] A1 merged. Edge-deployed; tested against simulated US/CU/IR/etc IPs.
+- [ ] A2 merged. Page renders correctly with country code displayed.
+- [ ] A3 merged. List is in `src/config/`.
+- [ ] A4 deferred or merged after Phase 1 A4.
+- [ ] A5 verified by a non-engineer pre-launch.

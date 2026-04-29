@@ -1,0 +1,294 @@
+---
+title: Phase 2. Pricing + charts (CLOB read-only)
+status: ready-for-action
+owner: khaleel
+last-updated: 2026-04-29
+---
+
+# Phase 2. Pricing + charts (CLOB read-only)
+
+## Scope
+
+Read paths from the frontend to the CLOB for everything price-shaped: book
+summaries, mid/bid/ask quotes, last trade prices, batch and singular price
+history, and the volume figure that backs the "$X Vol." line on cards and the
+chart header. This phase wires the frontend onto Polymarket's actual response
+contracts (now that `CLOB_URL=https://clob.polymarket.com`) without changing
+write paths.
+
+Out of scope here: order placement and signing (Phase 4), websockets that push
+incremental book updates (Phase 6), the spread display (touched only as a
+note), and any user-scoped read like positions or open orders (Phase 3).
+
+## Code reading log
+
+| File | Lines | What it does |
+|---|---|---|
+| `src/lib/clob.ts` | 1-89 | `buildClobPriceQueryEntries(tokenIds)` (new) expands each token into BUY+SELL entries. `fetchClobJson` POST helper. `fetchOrderBookSummary` (single-token wrapper around `/books`). `getRoundedCents(rawPrice, side)` rounds to 0.1¢ with bid floor / ask ceil. |
+| `src/app/[locale]/(platform)/event/[slug]/_hooks/useEventMidPrices.ts` | 1-145 | Posts to `/prices` with sided entries. Decodes `{tokenId: {BUY, SELL}}`. Also fans out N parallel `GET /midpoint?token_id=` requests. Composes `MarketQuote = {bid, ask, mid}`. |
+| `src/app/[locale]/(platform)/event/[slug]/_hooks/useEventLastTrades.ts` | 1-79 | Posts to `/last-trades-prices` with sided entries. Decodes `[{token_id, price, side}]`. Maps token→price→conditionId. |
+| `src/app/[locale]/(platform)/event/[slug]/_hooks/useEventPriceHistory.ts` | 1-336 | Owns the price-history fetch for the event chart. `buildTimeRangeFilters(range, createdAt, resolvedAt)` builds three branches: (a) ALL range, (b) active short-range, (c) resolved-anchored. Calls `fetchBatchPriceHistoryByTokenIds`. Also exposes `buildMarketTargets`. |
+| `src/app/[locale]/(platform)/event/[slug]/_utils/priceHistoryApi.ts` | 1-137 | Posts to `/batch-prices-history`. Body = `{markets[], interval?, fidelity, startTs?, endTs?}`. 20-token chunks. Has temporary `[HERO_CHART_DEBUG]` `console.debug` instrumentation at lines 90-93 and 105-108. |
+| `src/app/[locale]/(platform)/event/[slug]/_utils/EventOrderBookUtils.ts` | 1-200 | `fetchOrderBookSummaries(tokenIds)` calls `/books` with unsided `[{token_id}]` AND `/last-trades-prices` with sided entries (post-fix). Builds `OrderBookSnapshot` with bid/ask levels, spread, last trade. |
+| `src/app/[locale]/(platform)/event/[slug]/_hooks/useOrderBookSummaries.ts` | 1-16 | Thin React-Query wrapper. `staleTime: 10s`, `gcTime: 60s`, single retry. |
+| `src/app/[locale]/(platform)/event/[slug]/_types/EventOrderBookTypes.ts` | 1-69 | `OrderbookLevelSummary {price, size}`, `ClobOrderbookSummary {asset_id, bids, asks}`, `LastTradePriceEntry {token_id, price, side}`. |
+| `src/lib/clob-price.ts` | 1-9 | `normalizeClobMarketPrice` shim that delegates to `normalizeMarketPrice`. |
+| `src/lib/db/queries/event.ts` | 220-237, 239-279, 312-360 | Server-side hits to `/prices` and `/last-trades-prices` (uses `buildClobPriceQueryEntries`). Same shapes as the client hooks. |
+| `src/lib/embed-chart.ts` | 73-135 | Server-side fetch for embed widgets. Hits singular GET `/prices-history?market=&fidelity=&startTs=&endTs=`. Caches via `withCache`. |
+| `src/app/api/og/event/route.tsx` | 348-386 | OG image fetch for event share cards. Hits singular GET `/prices-history` with `{fidelity, startTs, endTs}` (no `interval`). |
+| `src/app/[locale]/(platform)/event/[slug]/_components/MarketOutcomeGraph.tsx` | 493-549 | `MarketOutcomeMetaInformation` posts to `/data/volumes` every 60s with `{include_24h:false, conditions:[{condition_id, token_ids}]}`. **404 on Polymarket.** |
+| `src/app/[locale]/(platform)/event/[slug]/_components/EventMetaInformation.tsx` | 30-80 | `useEventVolume` posts to `/data/volumes`. **Same 404.** |
+| `src/app/[locale]/(platform)/event/[slug]/_components/EventMarketCard.tsx` | 40-92 | `useMarketCardVolume` posts to `/data/volumes`. **Same 404.** |
+| `src/app/[locale]/(platform)/(home)/_components/HeroCarouselSlideChart.tsx` | 44-58, 354-367 | Hero carousel. Sports cards use `range='1D'`, all others use `'ALL'`. Has `[HERO_CHART_DEBUG]` `console.debug` instrumentation at line 357-366. |
+| `src/app/[locale]/(platform)/event/[slug]/_components/EventContent.tsx` | 508-512 | Chart visibility. Updated to also respect `event.show_all_outcomes` (so multi-market events with outcomes shown still get a chart). |
+
+## Polymarket reference reading log
+
+All quotes here come from live probes against `https://clob.polymarket.com`
+this session against the `2026-fifa-world-cup-winner-595` event (gamma
+`id=30615`, condition `0x7976...92`, YES token
+`4394372887385518214471608448209527405727552777602031099972143344338178308080`).
+
+| Probe | Verbatim response (truncated) |
+|---|---|
+| `POST /books` body `[{token_id: YES}]` | `[{ "market": "0x7976…", "asset_id": "4394…080", "timestamp": "1777452066984", "hash": "9fb2…", "bids": [{"price":"0.001","size":"4696653"}, …], "asks": […] }]` — array element shape exactly matches our `ClobOrderbookSummary`. |
+| `POST /prices` body `[{token_id}]` (UNSIDED) | `{"4394…080":{"SELL":"0.154"}}` — only SELL returned, no BUY. |
+| `POST /prices` body `[{token_id, side:"BUY"}, {token_id, side:"SELL"}]` (SIDED) | `{"4394…080":{"BUY":"0.153","SELL":"0.154"}}` — both sides present. |
+| `POST /last-trades-prices` body `[{token_id, side:"BUY"}, {token_id, side:"SELL"}]` | `[{"price":"0.154","side":"BUY","token_id":"4394…080"}]` — one entry returned for whichever side actually had the most recent trade. |
+| `GET /midpoint?token_id=YES` | `{"mid":"0.1535"}` — single string field. |
+| `GET /prices-history?market=YES&interval=1d&fidelity=5` | `{"history":[{"t":1777365904,"p":0.1535}, …]}` — 288 points for a 1d window. |
+| `GET /prices-history?market=YES&fidelity=30&startTs=&endTs=` (no interval) | 200 OK, returns 337 points within the window — singular GET tolerates startTs+endTs without `interval`. |
+| `POST /batch-prices-history` body `{markets, fidelity, startTs, endTs}` (no interval) | `{"error":"invalid filters: the time component is mandatory, please use 'startTs' and 'endTs' or 'interval'"}` — **batch endpoint REJECTS this shape, even though singular GET accepts it.** |
+| `POST /batch-prices-history` body `{markets, interval:"1w", fidelity:30}` (no bounds) | 200 OK, history keyed by token id, 337 points. |
+| `POST /batch-prices-history` body `{markets, interval:"1d", fidelity:5, startTs, endTs (1-day)}` | 200 OK, 288 points. First ts (1777365904) is INSIDE the window (start 1777365745) — bounds are honored when interval matches. |
+| `POST /batch-prices-history` body `{markets, interval:"all", fidelity:5, startTs, endTs (1-day)}` | 200 OK, 4194 points. First ts (1774774229) is OUTSIDE the start. **`interval=all` IGNORES startTs/endTs and returns full history.** |
+| `POST /batch-prices-history` body `{markets, interval:"1m", fidelity:5, startTs, endTs (1-day)}` | 200 OK, empty `history`. The interval filter and the bounds intersect to nothing when the interval is wider than the bound window. |
+| `GET /spread/<token_id>` | HTTP 404 "page not found" — singular path does not exist. |
+| `POST /spreads` body `[{token_id}]` | `{"4394…080":"0.001"}` — keyed by token id, value is decimal spread. |
+| `GET /trades?market=YES&limit=2` | HTTP 401 `{"error":"Unauthorized/Invalid api key"}` — public `/trades` requires L2 auth. (Surfaces in Phase 4.) |
+| `POST /data/volumes` body `{include_24h:false, conditions:[...]}` | HTTP 404 "page not found". (Same as Phase 1 for cron, but our frontend hits this URL too.) |
+
+## Findings
+
+### Finding 1. `/data/volumes` is also called from three frontend components, not just the cron
+
+**Claim.** The Phase 1 finding 2 only enumerated the cron (`sync/volume/route.ts:306`) for the broken `/data/volumes` POST. There are three more sites in the rendered app that hit the same dead URL every 60 seconds while a user is on the page.
+
+**Evidence.**
+
+- `src/app/[locale]/(platform)/event/[slug]/_components/MarketOutcomeGraph.tsx:518`
+  ```ts
+  const response = await fetch(`${process.env.CLOB_URL}/data/volumes`, {
+    method: 'POST', ...
+    body: JSON.stringify({ include_24h: false, conditions: volumeRequestPayload.conditions }),
+  })
+  ```
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventMetaInformation.tsx:48` — same pattern.
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventMarketCard.tsx:58` — same pattern.
+- Live probe (this session): `POST clob.polymarket.com/data/volumes` → HTTP 404 "page not found".
+- Each `useQuery` is configured with `staleTime: 60_000, refetchInterval: 60_000`, so each open event page makes 1 request/min that always 404s.
+
+**Impact.** The fallback path in each component is `event.volume` / `market.volume` (the gamma-populated DB column, which Phase 1 finding 3 confirmed already updates every 10 minutes). So the visible volume number is correct. But every client visiting an event page is opening 1 (or 2 for `MarketOutcomeGraph` rendered N times) failed network requests per minute. This produces console-network noise, fills server logs with 404 echoes, and devtools shows "trade-volumes" red entries for every visit.
+
+**Confidence.** High. Direct probe + three identical call sites in the source.
+
+### Finding 2. `/batch-prices-history` rejects bounded requests that omit `interval`; two of our three branches do exactly that
+
+**Claim.** Polymarket's `POST /batch-prices-history` requires `interval` regardless of whether `startTs`/`endTs` are present. The error string is misleading ("please use 'startTs' and 'endTs' or 'interval'") because all three of the bounded-without-interval shapes I tested were rejected. The matching singular `GET /prices-history` accepts startTs+endTs without `interval`, so the requirement is endpoint-specific.
+
+`useEventPriceHistory.ts` builds three filter shapes (after the in-progress ALL-range fix at lines 103-114). Two of those shapes still send bounds without `interval` and will fail on Polymarket:
+
+- Active markets, `isLongRange && ageSeconds < windowSeconds` (lines 124-128): emits `{fidelity, startTs, endTs}`.
+- Resolved markets, non-ALL range (lines 144-148): emits `{fidelity, startTs, endTs}`.
+
+**Evidence.**
+
+- Live probe (this session):
+  - `POST /batch-prices-history` body `{markets, fidelity:30, startTs, endTs}` → 400, error string above.
+  - `POST /batch-prices-history` body `{markets, fidelity:30}` → same error.
+  - `POST /batch-prices-history` body `{markets, interval:"1d", fidelity:5, startTs, endTs}` → 200, 288 points within bounds.
+- Code: `src/app/[locale]/(platform)/event/[slug]/_hooks/useEventPriceHistory.ts:122-148` (the two failing branches), and `src/app/[locale]/(platform)/event/[slug]/_utils/priceHistoryApi.ts:54-76` (`buildBatchPriceHistoryRequestBody`, which only passes through whatever `RangeFilters` contains).
+
+**Impact.** A user looking at a chart on either (a) a brand-new market younger than the selected long range or (b) any resolved market sees "Failed to fetch price history" thrown inside `fetchBatchPriceHistoryByTokenIds` (caught by the per-chunk try/catch at line 117), which empties the chart for that token. The fallback `[HERO_CHART_DEBUG]` `console.error` would surface this in dev. In production, the chart silently shows a flat line built from `lastKnownPrice`-only paths, or no data at all if no chunk succeeds.
+
+**Confidence.** High. Direct probe of every relevant body shape, source lines cited.
+
+### Finding 3. The new `buildClobPriceQueryEntries` helper is necessary, not stylistic
+
+**Claim.** `POST /prices` and `POST /last-trades-prices` on Polymarket return BUY-only or SELL-only data when called unsided (`[{token_id}]`). The new helper at `src/lib/clob.ts:21-23` that expands each token into both `{token_id, side:"BUY"}` and `{token_id, side:"SELL"}` is the only correct shape if the caller wants both sides.
+
+**Evidence.**
+
+- Live probe `POST /prices` body `[{"token_id":YES}]` → `{"YES":{"SELL":"0.154"}}`. BUY missing.
+- Live probe `POST /prices` body `[{token,"side":"BUY"},{token,"side":"SELL"}]` → `{"YES":{"BUY":"0.153","SELL":"0.154"}}`.
+- Existing call sites that consume both sides:
+  - `useEventMidPrices.ts:30-43` constructs midpoint from both BUY (best ask) and SELL (best bid). Without sided entries, BUY would be undefined, the midpoint would degrade to `bid` only, and the chance/odds derivation in `buildChanceByMarket` would skew low.
+  - `lib/db/queries/event.ts:295-307` consumes both sides for `OutcomePrices`.
+  - `EventOrderBookUtils.ts:28` reads BUY as last trade for buy and SELL for sell. Same logic.
+
+**Impact.** Without the helper (i.e. if someone reverts to `[{token_id}]`), event cards' midpoint, chance, and "Yes/No" highlights would visibly mismatch the order book by half the spread. This is the kind of regression that's easy to ship and hard to spot in QA because the numbers are still "near right".
+
+**Confidence.** High. Direct probe of both shapes against Polymarket production.
+
+### Finding 4. `/prices-history` (singular) and `/batch-prices-history` (batch) have different request contracts; embed and OG paths use the singular and are unaffected
+
+**Claim.** Singular GET `/prices-history?market=&fidelity=&startTs=&endTs=` accepts startTs+endTs without `interval`, returns the same `{history:[{t,p},…]}` shape, and is what `src/lib/embed-chart.ts:81` and `src/app/api/og/event/route.tsx:354` use. Both call sites work as-is on Polymarket.
+
+**Evidence.**
+
+- Live probe `GET /prices-history?market=YES&fidelity=30&startTs=…&endTs=…` → 200, 337 points.
+- Code: `embed-chart.ts:81-96` (server-side, used for embed widget), `route.tsx:348-386` (OG SVG generator).
+- Both wrap the call in `{ next: { revalidate: 60-300 } }` and a try/catch returning `[]` — failure mode is graceful even if the contract drifts.
+
+**Impact.** No action needed in Phase 2 for embeds or OG. We just want to be sure the divergence is documented so a future "consolidate everything onto batch" refactor doesn't accidentally break OG.
+
+**Confidence.** High.
+
+### Finding 5. `/spreads` works (POST) but `/spread/<token>` 404s; Polymarket exposes spread via batch only
+
+**Claim.** Polymarket has a `POST /spreads` endpoint (live-probed) that returns `{token_id: spread_string}` for a list of tokens. There is no singular `/spread/<id>` route. We currently derive spread on the client from `bestAsk - bestBid` in `buildOrderBookSnapshot` (`EventOrderBookUtils.ts:88-90`) and ignore the `summary?.spread` field that exists in `OrderBookSummaryResponse` (`EventOrderBookTypes.ts:36`). That's fine functionally but means we're computing something the server can give us authoritatively.
+
+**Evidence.**
+
+- Live probe `GET /spread/<token>` → 404.
+- Live probe `POST /spreads` body `[{token_id}]` → `{"4394…080":"0.001"}`.
+- Code: `EventOrderBookTypes.ts:36` declares the `spread` field but no consumer reads it from a response (`EventOrderBookUtils.ts:88-90` always derives locally).
+
+**Impact.** Low. Optional optimization for Phase 6 (when websockets push deltas — having server-confirmed spread avoids one source of drift). No Phase 2 action.
+
+**Confidence.** High.
+
+### Finding 6. Temporary debug instrumentation must be removed before tagging Phase 2 as shipped
+
+**Claim.** Two `[HERO_CHART_DEBUG]` blocks were added during Phase 2 in-progress work and are flagged as temporary in the source.
+
+**Evidence.**
+
+- `src/app/[locale]/(platform)/(home)/_components/HeroCarouselSlideChart.tsx:357-366`
+  ```ts
+  // [HERO_CHART_DEBUG] Temporary instrumentation — remove once charts confirmed.
+  if (typeof window !== 'undefined') {
+    console.debug('[HeroChart]', event.slug, { … })
+  }
+  ```
+- `src/app/[locale]/(platform)/event/[slug]/_utils/priceHistoryApi.ts:90-93, 105-108` — `console.debug('[priceHistory] POST', …)` and `console.error('[priceHistory] FAIL', …)`.
+
+**Impact.** Console noise in production, no functional issue. Trivial to remove.
+
+**Confidence.** High.
+
+### Finding 7. The `EventContent.shouldHideChart` guard now respects `show_all_outcomes`, but that flag is not yet persisted by the gamma sync
+
+**Claim.** `EventContent.tsx:510-512` was updated to `total_markets_count > 1 && !isNegRiskEnabled && !event.show_all_outcomes`. So the chart now appears on multi-market events that have `show_all_outcomes=true`. But the gamma mapper doesn't currently persist `showAllOutcomes` into our `events` table — Phase 1 finding 4 has it in the dropped list, and the migration `2026_04_28_002_events_show_all_outcomes.sql` (untracked, in git status) is presumably the column add.
+
+**Evidence.**
+
+- Code: `EventContent.tsx:510-512`.
+- Phase 1 finding 4: `showAllOutcomes` is in the "currently consumed by mapper" list, which contradicts the live mapper inspection. Re-reading `src/lib/gamma/mapper.ts` end-to-end is needed before claiming it's persisted. Migration filename `2026_04_28_002_events_show_all_outcomes.sql` strongly implies a new column.
+
+**Impact.** Until that migration ships and the mapper writes the column, `event.show_all_outcomes` reads `undefined`, so the new clause has no effect on existing events; chart visibility is unchanged from before. Once the column is populated, multi-market `show_all_outcomes=true` events will show the chart.
+
+**Confidence.** Medium. I haven't read the migration body or re-verified the mapper this turn — flagging for verification before A2 ships.
+
+## Action items
+
+### A1. Always include `interval` in `/batch-prices-history` bounded requests (P0)
+
+- **Change.** In `src/app/[locale]/(platform)/event/[slug]/_hooks/useEventPriceHistory.ts`:
+  - Lines 124-128 (active long-range, young market): add `interval: config.interval` so the body becomes `{fidelity, interval, startTs, endTs}`.
+  - Lines 144-148 (resolved-anchored): same — add `interval: config.interval`.
+  - Confirm the `RangeFilters` type at `priceHistoryApi.ts:6-11` already permits both `interval` and `startTs/endTs` together (it does).
+- **Why.** Polymarket rejects bounded-without-interval. With `interval` matching the range, bounds are honored (probe: 288 points within 1-day window for `interval=1d`).
+- **Test.**
+  1. Open a resolved event in dev (`/event/<resolved-slug>`). Switch ranges 1H/6H/1D/1W/1M and confirm chart populates each time.
+  2. Open a brand-new event (`age < 1w`) and switch range to `1W`. Confirm chart populates.
+  3. Add a unit test in `tests/unit/eventPriceHistoryFilters.test.ts` (new file) that exercises every branch of `buildTimeRangeFilters` and asserts `interval` is always one of `1h|6h|1d|1w|1m|all` whenever `startTs` is set.
+- **Files.** `src/app/[locale]/(platform)/event/[slug]/_hooks/useEventPriceHistory.ts`.
+- **Dependencies.** None.
+
+### A2. Decommission `/data/volumes` from the three frontend components (P0)
+
+- **Change.** In each of:
+  - `src/app/[locale]/(platform)/event/[slug]/_components/MarketOutcomeGraph.tsx` (`MarketOutcomeMetaInformation`)
+  - `src/app/[locale]/(platform)/event/[slug]/_components/EventMetaInformation.tsx` (`useEventVolume`)
+  - `src/app/[locale]/(platform)/event/[slug]/_components/EventMarketCard.tsx` (`useMarketCardVolume`)
+
+  Delete the `useQuery({ queryKey: ['…-volumes', …], … })` block and the surrounding `volumeRequestPayload` setup. Replace `resolvedVolume` with the static fallback (`event.volume` or `market.volume`) that's already the default branch.
+- **Why.** Endpoint is a hard 404 on Polymarket (live probe). The DB-populated `volume` column is already updated every 10 minutes by the gamma cron (Phase 1 finding 3). Per-page-view 1-RPM polling against a 404 buys nothing.
+- **Test.**
+  1. After deletion, open any event page; the volume figure should match the DB column (verify by sampling Supabase for the same event).
+  2. devtools network tab no longer contains any `data/volumes` entries.
+  3. Run `grep -r 'data/volumes' src/` — should return only the cron route until A3 deletes that too.
+- **Files.** Same three components above. No type changes needed (`event.volume` and `market.volume` already exist on `Event` and `Market`).
+- **Dependencies.** None. Independent of A1, A3.
+
+### A3. Delete the `/api/sync/volume` cron and its `vercel.json` entry (Phase 1 A2, restated)
+
+- **Change.** Already specified as Phase 1 A2. Deletion lands in this phase only if Phase 1 A2 hasn't merged yet. Moves here so Phase 2 can stand alone if Phase 1 is deferred.
+- **Files.** `src/app/api/sync/volume/route.ts`, `src/app/api/sync/volume/helpers.ts`, `vercel.json:13-15`.
+- **Dependencies.** None.
+
+### A4. Remove the `[HERO_CHART_DEBUG]` console instrumentation (P1, after A1 lands and is verified)
+
+- **Change.** Delete:
+  - `src/app/[locale]/(platform)/(home)/_components/HeroCarouselSlideChart.tsx:357-366` (the `console.debug('[HeroChart]', …)` block).
+  - `src/app/[locale]/(platform)/event/[slug]/_utils/priceHistoryApi.ts:90-93` (`console.debug('[priceHistory] POST', …)`).
+  - `src/app/[locale]/(platform)/event/[slug]/_utils/priceHistoryApi.ts:105-108` (`console.error('[priceHistory] FAIL', …)`).
+- **Why.** Source comments label them as temporary. They produce per-render console noise.
+- **Test.** Re-render a hero carousel and an event chart; confirm devtools console is clean.
+- **Files.** Two files above.
+- **Dependencies.** A1 should land first so we don't accidentally remove the only signal that A1 is broken.
+
+### A5. Verify `show_all_outcomes` end-to-end before counting Phase 2 closed (P1)
+
+- **Change (verification only, no code).**
+  1. Read `src/lib/db/migrations/2026_04_28_002_events_show_all_outcomes.sql` — confirm it adds `events.show_all_outcomes boolean default false`.
+  2. Re-read `src/lib/gamma/mapper.ts` end-to-end — confirm `showAllOutcomes` is mapped from `gammaEvent.showAllOutcomes` into the `MappedEvent`.
+  3. Re-read `src/lib/gamma/repository.ts` `upsertEvent` — confirm the new column is in the INSERT and UPDATE SET clauses.
+  4. Re-read `src/lib/db/queries/event.ts` `buildEventResource` — confirm `show_all_outcomes` is selected and surfaced.
+  5. Re-read `src/types/index.ts` `Event` — confirm `show_all_outcomes: boolean | null` exists.
+- **Why.** The chart-visibility branch in `EventContent.tsx:510-512` only behaves correctly if the column is populated and surfaced; without verification, A1's chart fixes might be tested against an event whose flag is silently null.
+- **Acceptance.** Document the result here under "Status when phase is closed".
+- **Dependencies.** None.
+
+### A6. Optional: consume server-computed spread from `POST /spreads` (P3, future)
+
+- **Change.** New helper `fetchSpreads(tokenIds)` in `src/lib/clob.ts`. New React-Query hook `useEventSpreads(tokenIds)`. Wire into `OrderBookSnapshot.spread` so it preferentially uses the server value when present, falling back to the local `bestAsk - bestBid` computation.
+- **Why.** Once Phase 6 brings websockets, having a server source of truth for spread reduces local-derivation drift between book updates and price updates.
+- **Defer.** Not in Phase 2's commit scope. Park for Phase 6.
+
+## Risks
+
+1. **A1 silent miss on a fourth filter shape.** `buildTimeRangeFilters` has three branches today. If a future range is added without going through the helper, it could re-introduce the bounded-no-interval bug. The proposed unit test in A1 sweeps every existing branch; we should keep that test as a regression guard rather than letting it become a one-shot.
+
+2. **A2 fallback arithmetic.** Each of the three components currently does `Number.isFinite(volumeFromApi) ? volumeFromApi : event.volume`. After A2, they should just use `event.volume` directly. Watch for components that do additional aggregation (`MarketOutcomeMetaInformation` totals across markets) where the previous code might have summed status-200 entries differently than the DB-populated single number. Fast check: pick one event and confirm displayed total matches `events.volume` column, not the per-market sum.
+
+3. **A1 widens the chart cache key surface.** Adding `interval` to bounded shapes changes the body hash if anyone is keying request caches by stringified body. Our React-Query key (`useEventPriceHistory:296`) keys on `range`, not body, so this is fine internally — but the upstream Cloudflare/Vercel CDN cache (if any) keys on URL only, and `/batch-prices-history` is POST so no CDN cache applies. No actual risk; flagging because this is the kind of thing that bites two phases later.
+
+4. **A4 removed too eagerly.** If A1 ships and the bounded path is still subtly broken (e.g. on a new event with no trade history at all), the removed instrumentation is exactly what would have surfaced the bug. Safer ordering: A1 → wait for at least one production deploy cycle → A4.
+
+## Status when phase is closed
+
+Phase 2 is closed when:
+
+- [ ] A1 merged. Charts populate correctly on (a) a resolved event across all 6 ranges, (b) a brand-new event on the 1W/1M ranges. Unit test in `tests/unit/eventPriceHistoryFilters.test.ts` is green and covers all `buildTimeRangeFilters` branches.
+- [ ] A2 merged. `grep 'data/volumes' src/` returns 0 hits in `src/app/` (cron deletion in A3 covers `src/app/api/sync/volume/`).
+- [ ] A3 merged or explicitly deferred to Phase 1 A2.
+- [ ] A4 merged after A1 has been live for at least one deploy cycle.
+- [ ] A5 verified. `show_all_outcomes` migration applied, mapper persists the field, type and resource builder surface it.
+
+Then move to Phase 3 (read-only user data), which depends on a working `/prices` and `/last-trades-prices` for portfolio and position screens.
+
+## Appendix. CLOB read-endpoint map after Phase 2
+
+| Endpoint | Method | Used by | Status post-Phase-2 |
+|---|---|---|---|
+| `/books` | POST | `EventOrderBookUtils.fetchOrderBookSummaries`, `clob.fetchOrderBookSummary` | Working as-is |
+| `/prices` | POST (sided) | `useEventMidPrices`, `db/queries/event.fetchOutcomePrices` | Working post-helper |
+| `/last-trades-prices` | POST (sided) | `useEventLastTrades`, `EventOrderBookUtils`, `db/queries/event.fetchLastTradePrices` | Working post-helper |
+| `/midpoint?token_id=` | GET | `useEventMidPrices.fetchMidpointByToken` | Working as-is |
+| `/batch-prices-history` | POST | `priceHistoryApi.fetchBatchPriceHistoryByTokenIds` (via `useEventPriceHistory`) | Working post-A1 |
+| `/prices-history` | GET | `embed-chart.fetchPriceHistoryFromClob`, `og/event/route.fetchMarketPriceHistory` | Working as-is |
+| `/spreads` | POST | (none yet) | Available for Phase 6 |
+| `/data/volumes` | POST | (none after A2) | Decommissioned |
+| `/spread/<id>` | GET | (never used) | Does not exist |

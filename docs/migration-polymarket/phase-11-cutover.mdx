@@ -1,0 +1,235 @@
+---
+title: Phase 11. Cutover plan + launch sequence
+status: ready-for-action
+owner: khaleel
+last-updated: 2026-04-29
+---
+
+# Phase 11. Cutover and launch
+
+## Scope
+
+Sequence the merges from Phases 1-10 into a deploy order that minimizes
+broken interim states, defines the validation gates between each step, and
+specifies the rollback path. This is the launch playbook.
+
+## Deploy ordering
+
+The order matters because some phases depend on data ingested by earlier
+phases, and some changes (e.g. CLOB `verifyingContract`) cannot be split
+across deploys without breaking trading mid-rollout.
+
+### Stage 0 — Preparation (no production changes)
+
+- All Phase 1-10 mdx docs reviewed and approved by the human reviewer.
+- `POLYMARKET_BUILDER_CODE`, `POLYMARKET_BUILDER_ADDRESS`,
+  `POLYMARKET_BUILDER_API_KEY`, `POLYMARKET_RELAYER_API_KEY`,
+  `POLYMARKET_RELAYER_API_KEY_ADDRESS` set in Vercel production env (already
+  set per Phase 0; verify post-build).
+- Polymarket builder Verified tier application submitted (Phase 10 A1).
+- Test wallet funded with ~$50 USDC.e on Polygon for live validation
+  rounds.
+
+### Stage 1 — Foundation (Phase 1, Phase 2, Phase 3 read-only fixes)
+
+Order:
+
+1. **PR-A**: Phase 1 A1 (gamma cursor fix). Forces a much larger initial
+   ingest; pre-warm by hitting `/api/sync/gamma?cursor=` manually a few
+   times before merging.
+2. **PR-B**: Phase 1 A3 (persist `gamma_event_id`, `neg_risk_market_id`,
+   `comment_count` columns + mapper). Required by later phases (Phase 3 A4
+   and Phase 7 A1 both need `gamma_event_id`).
+3. **PR-C**: Phase 1 A2 + Phase 2 A3 (delete `/api/sync/volume`).
+4. **PR-D**: Phase 2 A1 (always include `interval` for batch-prices-history).
+5. **PR-E**: Phase 2 A2 (decommission `/data/volumes` from 3 frontend
+   components).
+6. **PR-F**: Phase 3 A1 (drop `/user-pnl` calls). Removes the
+   `/api/leaderboard/timeframe-pnl` route.
+7. **PR-G**: Phase 3 A2 (hide profile PnL chart placeholder).
+8. **PR-H**: Phase 3 A3 (defang affiliate pages).
+9. **PR-I**: Phase 3 A4 (`fetchUserOtherBalance` uses gamma id).
+
+**Validation gate**: After PR-A through PR-I land, run the existing test
+suite (~507 unit tests). Manually test: home, event page, profile page,
+leaderboard, portfolio. None of these depend on trading. All should render
+without errors. devtools network tab should show no `data/volumes`,
+`user-pnl`, `referrers`, or `volume?user=` fetches.
+
+### Stage 2 — Trading core (Phase 4 + Phase 5)
+
+Order matters here. Don't merge any of these to main without merging the
+batch.
+
+1. **PR-J**: Phase 4 A1 (correct CTF Exchange contract addresses).
+2. **PR-K**: Phase 4 A2 (KUEST_ → POLY_ headers, repo-wide).
+3. **PR-L**: Phase 4 A3 (Polymarket-shaped L1 derivation `ClobAuth`).
+4. **PR-M**: Phase 4 A4 (builder code attached to order body).
+5. **PR-N**: Phase 4 A5 (relayer flow rewritten against
+   `relayer-v2.polymarket.com`).
+6. **PR-O**: Phase 5 A1 (adopt `@polymarket/clob-client` SDK).
+7. **PR-P**: Phase 5 A2 (onboarding hooks split out).
+
+**Validation gate (CRITICAL)**: Before marking Stage 2 done, run Phase 4 A8
+end-to-end: with the funded test wallet, place a real 1-share far-OTM order
+on Polymarket. Verify:
+  - Order accepted (200 + orderId returned)
+  - Order visible in `/open-orders` AND on `polymarket.com/portfolio` for
+    the same wallet
+  - Order shows our builder code in `clob.polymarket.com/builder/trades`
+  - Cancel flow works (order disappears from both)
+  - Repeat with a `negRisk=true` market
+
+**Rollback**: If Stage 2 fails on the live test, revert PR-J through PR-P
+together (they're a logical batch). Pre-PR-J production still works on
+kuest as long as `CLOB_URL` is also reverted in env.
+
+### Stage 3 — Real-time and content (Phase 6 + Phase 7)
+
+1. **PR-Q**: Phase 6 A1 (correct WS host).
+2. **PR-R**: Phase 6 A2 (market subscribe message aligned).
+3. **PR-S**: Phase 7 A1 (comment reads on gamma).
+4. **PR-T**: Phase 7 A2 (hide comment writes).
+5. **PR-U**: Phase 6 A4 + Phase 7 A5 (gate live comments WS off).
+6. **PR-V**: Phase 6 A3 (live series hooks repointed or feature-flagged).
+7. **PR-W**: Phase 6 A5 (user channel WS for live order updates).
+8. **PR-X**: Phase 7 A3 (clear localStorage cache).
+9. **PR-Y**: Phase 7 A4 (hide profile editor).
+
+**Validation gate**: Open an event page. Live book updates flow within 5s
+of opening. Comments list populates. Hero carousel shows live price
+changes.
+
+### Stage 4 — Operational hardening (Phase 8 + Phase 9 + Phase 10 setup)
+
+1. **PR-Z**: Phase 8 A1 + A2 + A3 (cron rationalization, CYOM gate).
+2. **PR-AA**: Phase 9 A1 + A2 + A3 (geoblock middleware + region page).
+3. **PR-AB**: Phase 10 A3 + A4 (revenue dashboard + builder-trades cron).
+4. **PR-AC**: Phase 1 A4 + Phase 9 A4 (`restricted` flag persisted +
+   per-event gate).
+
+**Validation gate**: Hit the app from a US-shaped IP (Vercel preview
+override or a US VPN), confirm `/region-restricted`. Hit from a non-US IP,
+confirm normal flow. Place a trade as a non-US user; verify it lands in
+the new builder-trades table.
+
+### Stage 5 — Public launch
+
+1. Announce migration in changelog.
+2. Email existing users about the change (especially the kuest-proxy →
+   Safe wallet migration — they'll need to withdraw + re-onboard).
+3. Monitor for 24h. Key metrics: relay-tx count vs Polymarket cap, error
+   rate on `POST /order`, Sentry error rate.
+4. If relay-tx cap is hit before Verified tier is approved, throttle
+   onboarding (gate "Enable trading" behind a waitlist).
+
+## Validation gates summary
+
+| Gate | What it checks | Pass condition |
+|---|---|---|
+| Stage 1 | Read paths still work | All non-trading pages render; existing tests green; no 404s in network tab |
+| Stage 2 | Trading round-trip works | Phase 4 A8 live test passes |
+| Stage 3 | Real-time + content | Live book updates ≤5s; comments populate |
+| Stage 4 | Geoblock + dashboard | US IP blocked; non-US trades land in builder-trades |
+| Stage 5 | Public launch | 24h soak with no Sentry P0 |
+
+## Rollback procedure
+
+Each stage has a clean rollback boundary because of the merge ordering:
+
+- **Stage 1 rollback**: revert PRs in reverse order. Each is independent.
+- **Stage 2 rollback**: revert all of PR-J through PR-P together; flip
+  `CLOB_URL` env back to kuest. PR-O and PR-P (SDK adoption) bring us
+  forward but don't lock us in — the bespoke fetch path still exists in
+  the `_actions/` files until PR-O fully removes it. Don't delete the
+  bespoke path until Stage 2 has soaked for ≥48h.
+- **Stage 3-5 rollback**: revert independently.
+
+## Master plan summary
+
+A one-screen view of the whole migration:
+
+```
+PHASE                                           STATUS         OWNER
+─────────────────────────────────────────────────────────────────────
+0. Migration framework                          done           khaleel
+1. Markets / events / tags ingest               ready-for-action
+2. Pricing + charts CLOB read                   ready-for-action
+3. Read-only user data                          ready-for-action
+4. Trading core (signing + L2 + builder + relay) ready-for-action
+5. Wallet + auth strategy                       ready-for-action
+6. WebSockets                                   ready-for-action
+7. Comments + community                         ready-for-action
+8. Crons + admin sync routes                    ready-for-action
+9. Geoblock middleware                          ready-for-action
+10. Builder fees + tiers + referrals            ready-for-action
+11. Cutover plan (this doc)                     ready-for-action
+─────────────────────────────────────────────────────────────────────
+PARALLEL TRACK
+A. Apply for Polymarket Verified builder tier   day 0  (Phase 10 A1)
+B. Test wallet funded $50 USDC.e Polygon        day 0
+C. Live-probe contract addresses (Phase 4 A1)   day 0
+D. ADR write-up for Reown decision (Phase 5 A3) day 1
+─────────────────────────────────────────────────────────────────────
+```
+
+## Estimated calendar (relative to "this week")
+
+Assuming dedicated full-time work and no significant Polymarket review delay:
+
+- Day 1: Stage 1 PRs (foundation reads). Mostly mechanical.
+- Day 2: Stage 2 PRs J/K/L (contract addresses, header rename, L1 shape).
+  Manual tests against test wallet for each.
+- Day 3: Stage 2 PRs M/N (builder code + relayer flow). Phase 4 A8 live
+  test.
+- Day 4: Stage 2 PRs O/P (SDK adoption + onboarding hooks). Stage 3 PRs
+  Q-V (WS + comments).
+- Day 5: Stage 4 PRs Z-AC (geoblock, dashboard). End-to-end testing.
+- Day 6: Soak. Fix anything Stage 5 surfaces.
+- Day 7: Public launch.
+
+The two non-engineering blockers that can shift this:
+
+- Polymarket Verified tier approval (Phase 10 A1) — out of our control,
+  expected 1-7 days. Launch with Unverified tier is feasible for soft
+  launch but caps at 100 daily relay txns.
+- Live-probe of contract addresses (Phase 4 A1) — depends on availability
+  of a public source; expected hours.
+
+## Open questions resolved by Phases 1-10 reading vs flagged
+
+**Resolved with verbatim evidence:**
+
+- HMAC algorithm is identical to Polymarket (Phase 4 Finding 3).
+- EIP-712 Order struct is identical (Phase 4 Finding 3).
+- Auth headers are `POLY_*` (Phase 4 reference reading log, verbatim).
+- Builder code goes in the order POST body (Phase 4 reference reading log).
+- Comment reads land on gamma (Phase 7 reference reading log, live probe).
+- Leaderboard `timePeriod` enum is `day|week|month|all` (Phase 3 live probe).
+- WS market channel subscribe shape is `{assets_ids, type:"market"}` (Phase 6 verbatim).
+- `/data/volumes`, `/volume`, `/referrers`, `/user-pnl` all 404 on Polymarket (Phase 2/3 live probes).
+- Builder fees: 100 bps taker max, 50 bps maker max (Phase 10 verbatim).
+
+**Flagged for verification at implementation time:**
+
+- Exact Polymarket Polygon mainnet CTF Exchange + NegRisk addresses (Phase 4 A1).
+- Exact JSON-body placement of `builderCode` in `POST /order` (Phase 4 Finding 4).
+- Exact `ClobAuth` typed-data shape on Polymarket L1 derivation (Phase 4 A3).
+- Polymarket relayer endpoint paths for proxy-wallet deploy and token approvals (Phase 4 A5).
+- WS host `ws-subscriptions.polymarket.com` vs `ws-subscriptions-clob.polymarket.com` (Phase 6 A1).
+- Builder-trades endpoint exact path (Phase 10 A4).
+- Comment-write auth scheme on Polymarket gamma (Phase 7 A6, deferred).
+
+## Status when phase is closed
+
+Phase 11 is the launch itself. Closed when:
+
+- [ ] All gates above pass.
+- [ ] Public launch announced.
+- [ ] 7-day post-launch soak with no P0 incidents.
+- [ ] Phase 10 A1 (Verified tier) granted; relay-cap no longer a constraint.
+- [ ] Internal revenue dashboard (Phase 10 A3) shows builder fees flowing.
+
+After that, the queue is: Phase 7 A6 (comment writes), Phase 10 A5
+(referrals), Phase 5 A4 (Magic Link auth), Phase 5 A5 (Turnkey), Phase 6 A5
+(user WS — if not already shipped), and any P3 cleanup.

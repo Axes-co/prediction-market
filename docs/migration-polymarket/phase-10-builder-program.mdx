@@ -1,0 +1,248 @@
+---
+title: Phase 10. Builder fees, tiers, referrals, partnership
+status: ready-for-action
+owner: khaleel
+last-updated: 2026-04-29
+---
+
+# Phase 10. Builder fees, tiers, referrals, partnership
+
+## Scope
+
+The revenue side of the migration. Build the operational pieces around being
+a Polymarket builder:
+
+1. Builder code attribution path is wired (Phase 4 A4 already covers this).
+   Phase 10 verifies it produces fees.
+2. Builder tier upgrade path: Unverified → Verified → Partner.
+3. Builder fees configuration: taker (≤100 bps) + maker (≤50 bps).
+4. Internal revenue dashboard: revenue per period, per market, per source.
+5. Referrals — Polymarket has no native referrals, so this is custom Vercel-side.
+6. Partnership program — same.
+
+Out of scope: contract-level changes. All builder mechanics are off-chain
+metadata that Polymarket's relayer/CLOB tracks.
+
+## Code reading log
+
+| File | Status | Notes |
+|---|---|---|
+| `.env.local` | exists | Contains `POLYMARKET_BUILDER_CODE`, `POLYMARKET_BUILDER_ADDRESS`, `POLYMARKET_BUILDER_API_KEY`, `POLYMARKET_RELAYER_API_KEY`, `POLYMARKET_RELAYER_API_KEY_ADDRESS`. |
+| `src/app/[locale]/admin/affiliate/page.tsx` | exists | Hits `data-api/referrers` (404 on Polymarket). Phase 3 A3 defangs it. Phase 10 replaces it. |
+| `src/app/[locale]/(platform)/settings/affiliate/page.tsx` | exists | User-facing referral page. Same underlying call. |
+| `src/lib/data-api/fees.ts` | exists | `fetchFeeReceiverTotals({endpoint:'referrers',...})` — kuest-shaped. |
+
+## Polymarket reference reading log
+
+Live-fetched this session.
+
+### Builder tiers (verbatim from `docs.polymarket.com/builders/tiers`)
+
+| Tier | Relay txn limit |
+|---|---|
+| Unverified | 100 transactions/day |
+| Verified | 10,000 transactions/day |
+| Partner | Unlimited transactions/day |
+
+Verified tier unlocks "Monetize with Builder fees". Volume thresholds for
+moving Unverified → Verified are not in the public docs — gated by
+`builder@polymarket.com` review.
+
+### Builder fees (verbatim from `docs.polymarket.com/builders/fees`)
+
+> "Builder fees are flat percentages of trade notional, configured by each builder within enforced limits."
+>
+> Taker fee: up to 100 basis points (1%)
+> Maker fee: up to 50 basis points (0.5%)
+
+> "Collected builder fees are distributed to the wallet associated with your builder profile."
+
+The wallet for distribution is `POLYMARKET_BUILDER_ADDRESS` (already in
+`.env.local`).
+
+### Builder code (Phase 4 reference)
+
+> "Your **Builder Code** is a `bytes32` identifier that attributes orders routed through your application to your builder profile."
+
+Already covered in Phase 4 A4.
+
+## Findings
+
+### Finding 1. We're starting at Unverified tier with a 100-tx/day cap
+
+**Claim.** Without Polymarket-side review, our `POLYMARKET_BUILDER_CODE`
+gets us 100 relay transactions per day across the entire user base. That's
+roughly the activity of a single trader; it caps daily active users hard.
+
+**Evidence.** Tier table above.
+
+**Impact.** Soft launch is feasible (small private beta), but a public
+launch with even modest activity will hit the cap by mid-day and fail with
+relay-quota errors thereafter.
+
+**Action.** Apply for Verified tier before public launch. Email
+`builder@polymarket.com` with our app URL, expected daily relay tx volume,
+and a brief about Axes. This is a non-engineering blocker.
+
+**Confidence.** High.
+
+### Finding 2. Builder fees are configurable but not yet configured
+
+**Claim.** We can charge up to 100 bps taker / 50 bps maker per trade
+attributed via our `builderCode`. Default is presumably 0 bps (we collect
+nothing) until we explicitly configure it.
+
+**Evidence.** Polymarket docs above. The fee configuration step is part
+of the Verified-tier onboarding (gated by `builder@polymarket.com`).
+
+**Impact.** Until fees are set, we earn nothing per trade even if Phase 4
+A4 is wired. Setting fees pre-launch is a revenue lever, but high fees may
+push users to compete builders. Common starting point: 50 bps taker / 25
+bps maker, halving over time as scale lets us optimize for volume.
+
+**Confidence.** High on the mechanism; medium on the right starting fee
+(market-driven decision).
+
+### Finding 3. Polymarket has no native referral program; ours is custom
+
+**Claim.** Polymarket's builder API does not surface "X user was referred
+by Y" attribution. Builder code attribution is at the application level
+(all our users → our builder code), not the user-to-user level. If Axes
+wants referrals (User A invites User B; User A earns a share of User B's
+fees), we build that ourselves.
+
+**Evidence.** All four reference impls (`magic-safe-builder-example`,
+`wagmi-safe-builder-example`, etc.) lack any referral concept. The
+`/data-api/referrers` endpoint is kuest-only (Phase 3 finding 3).
+
+**Impact.** A referral program means new code: a `referrals` table, a
+referral code generation flow, attribution logic that runs at trade-time
+(probably triggered by a builder-trades sync cron), and a settlement flow
+to pay referrers from our builder fee pot.
+
+**Confidence.** High.
+
+### Finding 4. Partnership program ≈ a hand-curated subset of referrals
+
+**Claim.** "Partnership program" in our codebase is essentially a referral
+program with manually-set higher rev share rates for specific addresses
+(e.g. content creators, sponsors). It uses the same plumbing as referrals
+with different terms per partner.
+
+**Evidence.** The current `lib/data-api/fees.ts` `fetchFeeReceiverTotals`
+treats "referrers" as one of multiple endpoint types — implying kuest's
+data-api had a multi-tier classification. Polymarket has no equivalent;
+ours becomes 100% custom.
+
+**Impact.** Same as Finding 3. Partnership is a config layer on top of
+referrals, not a separate system.
+
+**Confidence.** High.
+
+## Action items
+
+### A1. Apply for Verified builder tier (P0, non-engineering)
+
+- **Change.** Email `builder@polymarket.com` with the application:
+  app URL, builder code, expected daily volume, contact info.
+- **Why.** Without it, we hit 100 tx/day and stop trading mid-day.
+- **Files.** None.
+- **Dependencies.** None. Do this immediately, in parallel with code work.
+
+### A2. Configure builder fees once Verified (P0)
+
+- **Change.** After `builder@polymarket.com` upgrades us, configure
+  builder fee percentages via the builder dashboard at
+  `polymarket.com/settings?tab=builder`. Recommended starting point:
+  50 bps taker / 25 bps maker. Adjust over time.
+- **Why.** Revenue.
+- **Files.** None.
+- **Dependencies.** A1.
+
+### A3. Replace the affiliate pages with a Polymarket-builder revenue dashboard (P1)
+
+- **Change.** Rewrite `src/app/[locale]/admin/affiliate/page.tsx` to:
+  - Fetch our cumulative builder revenue from the Polymarket builder
+    leaderboard / trades endpoint (auth via `POLYMARKET_BUILDER_API_KEY`).
+  - Display: daily / weekly / monthly revenue, top markets, top traders by
+    fees generated.
+  - Replace `lib/data-api/fees.ts:fetchFeeReceiverTotals('referrers')`
+    with a new `lib/polymarket/builder-revenue.ts` helper.
+- **Why.** Replaces a 404-throwing page with the actual revenue surface.
+- **Files.** `admin/affiliate/page.tsx`, `(platform)/settings/affiliate/page.tsx` (replace with a thin "your earnings" page), new `lib/polymarket/builder-revenue.ts`.
+- **Dependencies.** A1, A2 (fees actually flowing), Phase 4 A4 (builder code attached to orders).
+
+### A4. Build a per-trade builder revenue sync cron (P1)
+
+- **Change.** New cron `/api/sync/builder-trades` polls
+  `clob.polymarket.com/builder/trades?builderCode=$POLYMARKET_BUILDER_CODE`
+  on a 10-min cadence. Persists to a new `builder_trades` table:
+  `(condition_id, trader_address, taker_fee, maker_fee, traded_at,
+  tx_hash)`.
+- **Why.** Enables revenue analytics, dashboard, and downstream referral
+  attribution.
+- **Test.** After 24h of activity, the table has rows that match Polymarket
+  builder dashboard totals.
+- **Files.** New cron file, new schema migration, new `lib/db/queries/builder-trades.ts`.
+- **Dependencies.** Phase 4 A4 (builder code in orders).
+
+### A5. Build the referral / partnership layer on top (P2)
+
+- **Change.**
+  i. New schema: `referrals (referrer_user_id, referred_user_id,
+     code, created_at, status)`, `referral_payouts (referral_id,
+     amount, paid_at)`.
+  ii. UI: "Your referral code" on settings, "Invite friends" CTA on
+      onboarding completion, signup-via-referral-code flow (cookie-based
+      attribution).
+  iii. Job: at trade-time (via the Phase 10 A4 cron), match the trader
+       against `referrals.referred_user_id`, accumulate a share for the
+       referrer.
+  iv. Settlement: weekly cron that calls Polymarket's relayer to forward
+      the accumulated rev share from `POLYMARKET_BUILDER_ADDRESS` to the
+      referrer's wallet (or accumulates an in-app balance until claimed).
+- **Why.** Optional revenue / growth feature. Not a launch blocker, but
+  delivers on the "referrals + partnership program" requirement.
+- **Files.** Many. Estimate ~2 weeks of focused work.
+- **Dependencies.** A4.
+
+### A6. Consider a "partner" rate override list (P3, after A5)
+
+- **Change.** Add `referrals.partner_tier ENUM('standard','partner','elite')` and override the rev share rate per row.
+- **Why.** Partnership program from the user's brief — basically a higher-tier referral.
+- **Dependencies.** A5.
+
+## Risks
+
+1. **A1 timeline.** Builder verification is gated by Polymarket review. If
+   they take a week to respond, A2/A3 slip. Mitigation: apply day 0 of
+   Phase 4 work; don't wait for the rest of Phase 4 to land.
+
+2. **A4 cron auth.** The builder-trades endpoint requires
+   `POLYMARKET_BUILDER_API_KEY` (POLY_API_KEY header). The exact path and
+   auth is documented in Polymarket's builder API reference; needs verbatim
+   probe at implementation time.
+
+3. **A5 settlement complexity.** Forwarding rev share to referrers
+   on-chain at scale can be expensive (gas + dust). Mitigation: accumulate
+   in-app and let referrers withdraw on demand; only batch-settle once a
+   week or once per ~$100 accrued.
+
+4. **Regulatory exposure.** Referral programs that pay USDC to users may
+   trigger securities concerns in some jurisdictions. Phase 9 geoblock is
+   already in place but referral payouts add a separate compliance surface.
+   Consult legal pre-launch.
+
+## Status when phase is closed
+
+Phase 10 is closed when:
+
+- [ ] A1 application submitted; Verified tier granted by Polymarket.
+- [ ] A2 fees configured; first builder fee landed in the builder address.
+- [ ] A3 admin dashboard renders Polymarket revenue figures matching the
+      builder dashboard.
+- [ ] A4 cron running 24h+ with matching row counts.
+- [ ] A5 deferred (post-launch, optional for v1) or merged.
+- [ ] A6 deferred.
+
+A5/A6 are explicitly NOT launch blockers.

@@ -1,0 +1,243 @@
+---
+title: Phase 7. Comments + community feed
+status: ready-for-action
+owner: khaleel
+last-updated: 2026-04-29
+---
+
+# Phase 7. Comments + community feed
+
+## Scope
+
+Anything that today reads from or writes to `process.env.COMMUNITY_URL`:
+comment list / metrics / replies / reactions, comment posting / deletion,
+comment auth (nonce + verify), profile editing in settings, and the live
+comment WebSocket touched in Phase 6.
+
+Out of scope: profile reading from data-api (Phase 3); per-event live trade
+feeds (Phase 6 A3).
+
+## Code reading log
+
+| File | Lines | Use |
+|---|---|---|
+| `src/lib/community-auth.ts` | 90-180 | `ensureCommunityToken` flow: `POST /auth/nonce` → sign nonce.message → `POST /auth/verify` with `{address, signature, proxy_wallet_address}`. Returns a JWT-style token cached in localStorage. |
+| `src/app/[locale]/(platform)/(home)/_hooks/useHeroComments.ts` | 1-60 | `GET ${COMMUNITY_URL}/comments` for the homepage carousel comments preview. |
+| `src/app/[locale]/(platform)/event/[slug]/_hooks/useInfiniteComments.ts` | 51-431 | All event-page comment behaviour. Lists, posts, replies, deletes, reacts. Six distinct fetches against `${COMMUNITY_URL}/comments`. |
+| `src/app/[locale]/(platform)/event/[slug]/_hooks/useCommentMetrics.ts` | 13-end | `GET ${COMMUNITY_URL}/comments/metrics`. Likely returns `{count, last_activity_at}` etc. |
+| `src/app/[locale]/(platform)/event/[slug]/_hooks/useLiveCommentsChannel.ts` | 103-362 | WS for live comment updates. Connects to `${WS_LIVE_DATA_URL}` (Phase 6 A4 scope). |
+| `src/app/[locale]/(platform)/settings/_components/SettingsProfileContent.tsx` | 57, 122 | `POST ${COMMUNITY_URL}/profile` to update display name/bio/etc. |
+| `.env.local` | 36 | `COMMUNITY_URL=http://localhost:9095` (kuest local). |
+| `next.config.ts` | 108 | Default `https://community.axes.co`. |
+
+## Polymarket reference reading log
+
+Live probes against `gamma-api.polymarket.com`, this session.
+
+### Comments READ — works on gamma-api, public, no auth
+
+`GET https://gamma-api.polymarket.com/comments?parent_entity_type=Event&parent_entity_id=30615&limit=1&sort_by=likes`
+
+Returns an array of comment objects:
+
+```json
+[{
+  "id": "2856275",
+  "body": "France to win !",
+  "parentEntityType": "Event",
+  "parentEntityID": 30615,
+  "userAddress": "0x605e6fd2aab5827fa88f8e5f640f9f76b97e3c34",
+  "createdAt": "2026-04-28T23:47:39.842333Z",
+  "updatedAt": "2026-04-28T23:47:51.869699Z",
+  "profile": {
+    "name": "thiagofelipe",
+    "pseudonym": "Bronze-Corporation",
+    "displayUsernamePublic": true,
+    "bio": "",
+    "proxyWallet": "0xda25452547d537e7196e2655b31773c5fc3babaf",
+    "baseAddress": "0x605e6fd2aab5827fa88f8e5f640f9f76b97e3c34"
+  },
+  "reportCount": 0,
+  "reactionCount": 0
+}]
+```
+
+`GET https://gamma-api.polymarket.com/comments/<id>` (200) — returns the comment in an array, same shape.
+
+`GET .../comments?parent_entity_type=Event&parent_entity_id=30615&sort_by=likes` (200) — sort param is honored.
+
+### Comments WRITE — auth-gated
+
+`POST https://gamma-api.polymarket.com/comments` returns `HTTP 401 invalid token/cookies`. Auth is required and is **not** the kuest-style `/auth/nonce` + `/auth/verify` flow — that path 404s on gamma. Polymarket likely uses the same `POLY_ADDRESS / POLY_SIGNATURE / POLY_TIMESTAMP / POLY_API_KEY / POLY_PASSPHRASE` L2 headers as the CLOB (verify at implementation time; needs a fresh authenticated probe).
+
+### What's NOT exposed
+
+- `GET /comments/<id>/replies` → 404. Replies are returned inline in the parent comment list (probably as a nested array or via a `parent_id=` query filter).
+- `GET /comments/<id>/reactions` → 404. Reaction counts are aggregated in the list response (`reactionCount` field).
+- `GET /comments/metrics?...` → 422 with the obvious params. May exist with a different shape; needs more probing OR can be derived from a counting query.
+- `POST /auth/nonce`, `POST /auth/verify` → 404. Polymarket does not have a dedicated comment-auth flow; auth is shared with CLOB.
+- `POST /profile` → 404 on gamma (Phase 3 found the same).
+
+## Findings
+
+### Finding 1. Comment reads can land on gamma; no auth needed
+
+**Claim.** All five of our comment-read paths can be repointed to
+`gamma-api.polymarket.com/comments` with shape adaptation but no auth
+plumbing.
+
+**Evidence.** Live probe above. Six comment reads in our code:
+
+- List comments: `useInfiniteComments.ts:68` (`GET /comments?event=...&sort=...`).
+- List replies: `useInfiniteComments.ts:431` (`GET /comments/<id>/replies`).
+- Hero preview: `useHeroComments.ts:10` (`GET /comments?limit=N`).
+- Metrics: `useCommentMetrics.ts:14` (`GET /comments/metrics`).
+- Singleton fetch (rare): not in the grep but present in URL constructor at `useInfiniteComments.ts:336`.
+
+**Impact.** Comments display works on Polymarket cutover with read-only support. Posts, replies, deletes, reactions become disabled. Acceptable for launch.
+
+**Confidence.** High on read-only viability. Medium on whether replies are a nested field on the parent comment (haven't confirmed inline-reply shape).
+
+### Finding 2. Comment writes need a Polymarket-shaped auth path; defer to post-launch
+
+**Claim.** `POST /comments`, reactions, deletes all 401. Polymarket's auth
+for comments is most likely the same L2 scheme as CLOB (POLY_* headers),
+but our `community-auth.ts` flow (nonce → sign → verify → JWT in localStorage)
+is kuest-shaped and won't work against Polymarket.
+
+**Evidence.** Live probe `POST /comments` → 401 "invalid token/cookies".
+`POST /auth/nonce` → 404. Code: `community-auth.ts:116-150`.
+
+**Impact.** Read-only comments at launch is the realistic path. Write
+support is a Phase 7 follow-on after Phase 4 lands the L2 creds because
+they're the keys we'd reuse.
+
+**Confidence.** High on the constraint; medium on the exact write path
+shape until probed with valid creds.
+
+### Finding 3. Profile editing in settings is a separate concern from comments
+
+**Claim.** `SettingsProfileContent.tsx:122` posts to `${COMMUNITY_URL}/profile`
+which doesn't exist on Polymarket gamma. Profile editing on Polymarket goes
+through a different mechanism — likely the same authenticated comment-side
+endpoint or the official Polymarket app's profile edit. Either way, our
+settings page profile editor is non-functional post-cutover unless we keep
+COMMUNITY_URL pointing at our own community service (`community.axes.co`).
+
+**Evidence.** Live probe `gamma-api.polymarket.com/profile` → 404 (Phase 3).
+Live probe `data-api.polymarket.com/profile` → 404.
+
+**Impact.** Users cannot edit their display name / bio / avatar via our app.
+Workaround: rely on Polymarket's profile data via gamma comments (`profile.name`,
+`profile.pseudonym`) and remove our settings page profile editor for launch.
+
+**Confidence.** High.
+
+### Finding 4. Live comments WS is kuest-only
+
+**Claim.** `useLiveCommentsChannel.ts` connects to `${WS_LIVE_DATA_URL}` and
+expects comment-update events. Polymarket's WS host doesn't expose comments.
+
+**Evidence.** Phase 6 asyncapi.json operations list — no comment ops.
+
+**Impact.** Live comment refresh disabled. Falls back to polled refresh
+(currently 30s in `useInfiniteComments.ts`).
+
+**Confidence.** High.
+
+### Finding 5. The localStorage `STORAGE_KEY` cache is dead weight after cutover
+
+**Claim.** `community-auth.ts:99` stores a kuest JWT in localStorage. Past
+users of our app have these tokens cached. Post-cutover the tokens are
+useless; clearing them avoids a stale-token loop where the user retries
+auth with an invalid cached token before falling through to the new flow.
+
+**Evidence.** Code: `loadCommunityAuth`, `storeCommunityAuth`,
+`clearCommunityAuth` at `community-auth.ts:90-105`.
+
+**Impact.** Low. A `removeItem` migration on next user load fixes it.
+
+**Confidence.** High.
+
+## Action items
+
+### A1. Repoint comment READS to `gamma-api.polymarket.com/comments` (P0)
+
+- **Change.**
+  i. Add `GAMMA_URL` reads alongside `COMMUNITY_URL`. New helper
+     `src/lib/comments/client.ts` that switches based on whether
+     `COMMUNITY_URL.includes('axes.co') || COMMUNITY_URL.includes('localhost')`
+     — if true, use the kuest URL; otherwise repoint to
+     `${GAMMA_URL}/comments?parent_entity_type=Event&parent_entity_id=<id>&...`.
+  ii. Adapt the response mapper. Polymarket fields:
+      - `parentEntityID` → our `event_id` (number, gamma id, requires Phase 1 A3 to persist `gamma_event_id` on our `events` table).
+      - `userAddress` → our `user.address`.
+      - `profile.{pseudonym,name,bio,proxyWallet,baseAddress}` → our `user.{username,name,bio,proxy_wallet_address,address}`.
+      - `reactionCount`, `reportCount` → our `reactions_count`, `report_count`.
+      - `body` → our `body`.
+      - `createdAt`/`updatedAt` ISO → our `created_at`/`updated_at`.
+  iii. The `GET /comments/<id>/replies` endpoint doesn't exist on gamma — replace with `GET /comments?parent_entity_type=Comment&parent_entity_id=<comment_id>` (needs probe to confirm the parentEntityType for replies).
+  iv. The `GET /comments/metrics` endpoint shape is unclear; defer the metrics surface or compute a count client-side from the list.
+- **Why.** Comments are a high-visibility feature; shipping launch without them is a UX loss. Gamma's read endpoint is public, fast, and matches the data we need.
+- **Test.** Open an event page; comments list populates with Polymarket community data. Pagination, sorting (by likes), and "load more" all work.
+- **Files.** New `src/lib/comments/client.ts`. Modify `useHeroComments.ts`, `useInfiniteComments.ts`, `useCommentMetrics.ts`. Add a `gamma_event_id` lookup wherever the hook needs to translate a slug to a gamma id.
+- **Dependencies.** Phase 1 A3 (persist gamma id), Phase 1 A1 (full event ingest so the comment lookup hits a known event).
+
+### A2. Disable comment WRITES at launch; show "comments are read-only during migration" notice (P0)
+
+- **Change.** Hide the comment input box, reaction buttons, and delete-comment menu when `process.env.COMMUNITY_URL` resolves to a non-kuest host. Replace with a small inline notice.
+- **Why.** Polymarket's comment-write auth path isn't yet pinned down; shipping a write button that 401s is bad UX.
+- **Test.** Open an event page on a Polymarket-config build. No "Post a comment" input. Read flow still works.
+- **Files.** `useInfiniteComments.ts` (skip post/delete/react fetchers), the components that render the comment input.
+- **Dependencies.** A1.
+
+### A3. Defang `community-auth.ts` localStorage cache (P1)
+
+- **Change.** On first load post-cutover, call `clearCommunityAuth(address)`
+  unconditionally. Add a one-shot migration version key
+  (`localStorage.community_auth_schema_version: 'polymarket-launch'`) so the
+  clear runs once.
+- **Why.** Stale kuest JWTs cause confusing retry loops.
+- **Files.** `community-auth.ts`.
+- **Dependencies.** None.
+
+### A4. Hide the settings profile editor for launch (P1)
+
+- **Change.** In `SettingsProfileContent.tsx`, conditionally render
+  "Profile editing is managed via Polymarket — visit polymarket.com/settings
+  to update your display name and bio" when on a Polymarket-config build.
+- **Why.** Avoid POSTing to a 404 endpoint.
+- **Files.** `SettingsProfileContent.tsx`.
+- **Dependencies.** None.
+
+### A5. Phase 6 A4 — gate live-comments WS off (no-op duplicate)
+
+- **Already covered in Phase 6 A4.** Listed here for cross-reference.
+
+### A6. (Defer post-launch) Implement comment WRITES via Polymarket L2 auth (P3)
+
+- **Change.** Probe `POST gamma-api.polymarket.com/comments` with valid `POLY_*` L2 headers (Phase 4 A3 deliverables). If accepted, wire writes through. If rejected, evaluate options: (a) stand up our own community service at `community.axes.co`; (b) lobby for a Polymarket public write path.
+- **When.** After Phase 4 lands real L2 creds.
+- **Dependencies.** Phase 4 A3.
+
+## Risks
+
+1. **A1 mapping drift.** Polymarket comment field names differ from ours subtly; small typos in the mapper will silently drop fields and produce empty avatars / missing usernames. Mitigation: snapshot a real Polymarket comment in a test fixture and assert the mapping output against it.
+
+2. **A1 reply path uncertain.** If `parent_entity_type=Comment` doesn't return replies, we fall back to a flat list with no threading. Decide ahead of time: ship without threading, or block A1 on figuring this out. Recommendation: ship without threading; threading is a polish that doesn't gate launch.
+
+3. **A2 hides a feature users care about.** Some Axes users post comments. Communicate this in the migration changelog. Mitigation: launch with a banner across event pages explaining "comments are read-only during the Polymarket migration".
+
+4. **A6 is a long road.** Polymarket may never expose a public write endpoint. Plan a Phase-10-or-later effort to stand up our own community service if we want write parity in 2026Q3.
+
+## Status when phase is closed
+
+Phase 7 is closed when:
+
+- [ ] A1 merged. Comments display correctly across event pages and homepage.
+- [ ] A2 merged. Comment writes hidden. No 401s in network tab on event pages.
+- [ ] A3 merged. localStorage cleared on first load post-cutover.
+- [ ] A4 merged. Profile editor hidden.
+- [ ] A6 deferred to post-launch.
+
+Then comments are a working read-only feature.

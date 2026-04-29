@@ -112,7 +112,7 @@
     "vitest": "^4.1.2"
   },
   "lint-staged": {
-    "*": "eslint --fix"
+    "*.{js,jsx,ts,tsx,mjs,cjs}": "eslint --fix"
   },
   "overrides": {
     "@reown/appkit-adapter-wagmi": {

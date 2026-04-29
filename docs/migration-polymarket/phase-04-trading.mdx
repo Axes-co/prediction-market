@@ -1,0 +1,412 @@
+---
+title: Phase 4. Trading core (order signing + L2 auth + builder attribution + relay)
+status: ready-for-action
+owner: khaleel
+last-updated: 2026-04-29
+---
+
+# Phase 4. Trading core
+
+## Scope
+
+The full money path from a user clicking "Buy" to an order being matched on
+Polymarket. Specifically:
+
+1. The EIP-712 typed data the wallet signs for the order itself
+2. The auth headers and HMAC signature on every CLOB write request
+3. The L1 → L2 derivation flow that mints the user's CLOB API key once per
+   account
+4. Builder attribution (POLY_BUILDER_CODE) on every routed order
+5. Cancel-order, cancel-all-orders, cancel-market-orders parity with
+   Polymarket
+6. Token approvals against the relayer (currently `${RELAYER_URL}/...`)
+7. Proxy wallet creation flow against the relayer
+
+Out of scope here: wallet/auth UX choice (Reown vs Magic+Safe proxy) — Phase
+5; websocket order/trade event subscription — Phase 6; geoblock — Phase 9;
+builder dashboard / fees UI — Phase 10.
+
+## Code reading log
+
+| File | Lines | What it does |
+|---|---|---|
+| `src/lib/orders/signing.ts` | 1-39 | `signOrderPayload({payload, domain, signTypedDataAsync})`. Calls `signTypedDataAsync` with `primaryType: 'Order'` and a struct that maps our snake_case `BlockchainOrder` to the camelCase EIP-712 field names. |
+| `src/lib/constants.ts` | 33-66 | `EIP712_DOMAIN` (`name='CTF Exchange'`, `version='1'`), `NEG_RISK_EIP712_DOMAIN` (same name+version, different `verifyingContract`), and `EIP712_TYPES` with the 12-field `Order` struct. `getExchangeEip712Domain(isNegRisk)` returns one or the other. |
+| `src/lib/contracts.ts` | 11-12 | `CTF_EXCHANGE_ADDRESS = 0xB5592f7CccA122558D2201e190826276f3a661cb`, `NEG_RISK_CTF_EXCHANGE_ADDRESS = 0xef02d1Ea5B42432C4E99C2785d1a4020d2FB24F5`. **Both are kuest's deployments, not Polymarket's.** See Finding 1. |
+| `src/lib/hmac.ts` | 1-21 | `buildClobHmacSignature(secret, timestamp, method, requestPath, body?)`. `Buffer.from(secret, 'base64')` → HMAC-SHA256 → base64 → `+` → `-`, `/` → `_`. Algorithm is identical to Polymarket. |
+| `src/app/[locale]/(platform)/event/[slug]/_actions/store-order.ts` | 1-440 | The order-placement entry point. Validates payload, ensures sufficient sell shares (ERC-1155 balanceOf), POSTs `${CLOB_URL}/order` with `KUEST_*` headers and a JSON body of `{order, orderType, owner: auth.clob.key}`. |
+| `src/app/[locale]/(platform)/event/[slug]/_actions/cancel-order.ts` | 1-end | DELETE-style cancellation; uses `KUEST_*` headers. |
+| `src/app/[locale]/(platform)/event/[slug]/_actions/cancel-market-orders.ts` | 1-end | Bulk cancel by market; same auth pattern. |
+| `src/app/[locale]/(platform)/portfolio/_actions/cancel-all-orders.ts` | 1-end | "Cancel all" portfolio action; same auth pattern. |
+| `src/app/[locale]/(platform)/_actions/trading-auth.ts` | 1-150 | The L1 → L2 flow. Sends `KUEST_ADDRESS`, `KUEST_SIGNATURE`, `KUEST_TIMESTAMP`, `KUEST_NONCE` to `${RELAYER_URL}/api-key/derive` and `${CLOB_URL}/api-key/derive`. Persists derived key+secret+passphrase per-user. |
+| `src/app/[locale]/(platform)/_providers/TradingOnboardingProvider.tsx` | 260-430 | Drives the EIP-712 onboarding sign: SafeProxy create-proxy message for proxy wallet, then a separate TradingAuth typed-data sign for L2 derivation. |
+| `src/app/[locale]/(platform)/_actions/proxy-wallet.ts` | 1-200 | Calls `${RELAYER_URL}` to deploy the user's safe proxy. Header pattern: `KUEST_*`. Server-side credentials taken from `process.env.KUEST_API_KEY`/`SECRET`/`PASSPHRASE`/`ADDRESS`. |
+| `src/app/[locale]/(platform)/_actions/approve-tokens.ts` | 1-160 | Two relayer calls (`GET /allowances`, `POST /allowances/grant`); same `KUEST_*` headers. |
+| `src/app/[locale]/(platform)/portfolio/_actions/pending-deposit.ts` | 80-160 | More relayer-flavored requests. Same `KUEST_*` headers. |
+| `src/app/api/open-orders/route.ts` | 1-end | Server route to surface a user's open orders; passes `KUEST_*` auth through to CLOB. |
+| `src/app/api/events/[slug]/open-orders/route.ts` | 1-end | Per-event variant. Same. |
+| `src/types/index.ts` | 200-205 | `tradingAuth.relayer?: TradingAuthStatus` and `tradingAuth.clob?: TradingAuthStatus`. The DB-stored credential markers per user. |
+| `src/lib/orders/validation.ts` | 1-end | Client-side order validation. (Reading deferred — not strictly auth-related.) |
+| `src/lib/trading-auth/{client,server,errors,secret-hash,utils}.ts` | all | Per-user CLOB credential storage, hashing, and refresh helpers. Uses Postgres + a server-side hash so we never store raw L2 secrets in plaintext. |
+
+## Polymarket reference reading log
+
+Verified verbatim from upstream Polymarket sources, this session.
+
+### Auth headers (from `py-clob-client/headers/headers.py`, fetched live)
+
+> **L1 Header Names**
+> - `"POLY_ADDRESS"`
+> - `"POLY_SIGNATURE"`
+> - `"POLY_TIMESTAMP"`
+> - `"POLY_NONCE"`
+>
+> **L2 Header Names**
+> - `"POLY_ADDRESS"`
+> - `"POLY_SIGNATURE"`
+> - `"POLY_TIMESTAMP"`
+> - `"POLY_API_KEY"`
+> - `"POLY_PASSPHRASE"`
+
+### HMAC algorithm (from same source)
+
+> `build_hmac_signature(api_secret, timestamp, method, request_path, body)`
+> Data signed: timestamp, HTTP method, request path, and request body
+
+Identical to our `buildClobHmacSignature(secret, timestamp, method, requestPath, body?)` in `src/lib/hmac.ts:8-20`. Confirmed: both base64-decode the secret, HMAC-SHA256 the concatenation of `timestamp+method+normalizedPath+body`, base64-encode, then URL-safe replace `+→-`, `/→_`.
+
+### Builder code (from `docs.polymarket.com/builders/api-keys`, fetched this session)
+
+> "Your **Builder Code** is a `bytes32` identifier that attributes orders routed through your application to your builder profile."
+>
+> Storage:
+> ```
+> POLY_BUILDER_CODE=0x0000000000000000000000000000000000000000000000000000000000000001
+> ```
+>
+> Usage:
+> ```
+> const response = await client.createAndPostOrder(
+>   {
+>     tokenID: "0x...",
+>     price: 0.55,
+>     size: 100,
+>     side: Side.BUY,
+>     builderCode: process.env.POLY_BUILDER_CODE!,
+>   },
+>   { tickSize: "0.01", negRisk: false },
+> );
+> ```
+
+The `builderCode` is passed at the SDK call layer. The exact placement in the JSON body (top-level next to `order` and `orderType`, or inside the order itself) is not pinned down in the public docs excerpt — needs confirmation against the TS clob-client `postOrder` implementation when wiring this up. See Action item A4.
+
+### Order EIP-712 fields (from `py-clob-client/clob_types.py:OrderArgs`, fetched this session)
+
+> `OrderArgs`: `token_id`, `price`, `size`, `side`, `fee_rate_bps=0`, `nonce=0`, `expiration=0`, `taker=ZERO_ADDRESS`
+
+The 12-field `Order` typed-data struct (with `salt`, `maker`, `signer`, `taker`, `tokenId`, `makerAmount`, `takerAmount`, `expiration`, `nonce`, `feeRateBps`, `side`, `signatureType`) matches our `EIP712_TYPES.Order` exactly (`constants.ts:47-62`). Field ordering and types are identical.
+
+### Polymarket CTF Exchange contract addresses
+
+The Polymarket Polygon mainnet CTF Exchange and NegRisk Exchange addresses are **NOT** what we have hardcoded in `contracts.ts:11-12`. We have kuest's deployments. This is the highest-blast-radius issue in Phase 4. See Finding 1.
+
+The canonical addresses must be sourced from one of:
+
+- The Polymarket TypeScript clob-client (Polygon constants module — `src/utilities.ts` partial; full address constants live in a config file not included in the snippet I retrieved).
+- Polymarket's published docs (`docs.polymarket.com/concepts/onchain-contracts` or similar).
+- On-chain verification: query the live `clob.polymarket.com/auth/contracts` or `clob.polymarket.com/ban-relayer-info` (TBD) and read the `verifyingContract` it tells the client to use.
+
+**Do not flip CLOB_URL to Polymarket production until A1 is done.** Every order signed against the wrong `verifyingContract` will fail Polymarket's signature verification with `invalid order signature`.
+
+## Findings
+
+### Finding 1. Hardcoded CTF Exchange addresses are kuest's, not Polymarket's
+
+**Claim.** `src/lib/contracts.ts:11-12` contains
+`CTF_EXCHANGE_ADDRESS = 0xB559…61cb` and
+`NEG_RISK_CTF_EXCHANGE_ADDRESS = 0xef02…24F5`. Polymarket's mainnet CTF Exchange and NegRisk addresses are different. The EIP-712 domain in `constants.ts:33-45` uses these addresses as `verifyingContract`. So every order signed with our current build will verify against kuest's exchange contract, not Polymarket's. After cutover, every order POSTed to `clob.polymarket.com/order` will be rejected with `invalid order signature` (or `unsupported verifying contract` per the error string at `store-order.ts:111`).
+
+**Evidence.**
+
+- Code: `src/lib/contracts.ts:11-12`, `src/lib/constants.ts:33-45`, `src/lib/orders/signing.ts:14-37`.
+- Live source: `py-clob-client/constants.py` (fetched this session) does not list the address constants directly — they live in a different module of the SDK. The exact mainnet values must be fetched from the TS clob-client's chain-id-keyed config file or a CLOB endpoint at implementation time.
+- Inference: kuest deployed its own CTF Exchange clones; our addresses match the kuest deployment used for development.
+
+**Impact.** Hard blocker. Without the right `verifyingContract`, no order placement works on Polymarket. This is the single biggest pre-launch risk.
+
+**Confidence.** High that the addresses don't match. Medium-high on the exact correct values until verified via the TS SDK or a live `clob.polymarket.com/exchange-info` style endpoint.
+
+### Finding 2. Auth headers are `KUEST_*` everywhere; need a literal rename to `POLY_*`
+
+**Claim.** All CLOB write paths and all relayer calls in our code send headers with the `KUEST_` prefix. Polymarket requires `POLY_` (live-verified verbatim from `py-clob-client/headers/headers.py`).
+
+**Evidence.**
+
+The grep over `src/` found `KUEST_*` headers at:
+
+- `_actions/store-order.ts:317-322` (POST `/order`)
+- `_actions/cancel-order.ts` (DELETE `/order`)
+- `_actions/cancel-market-orders.ts`
+- `portfolio/_actions/cancel-all-orders.ts`
+- `_actions/trading-auth.ts:95-98` (L1 derivation `KUEST_ADDRESS/SIGNATURE/TIMESTAMP/NONCE`)
+- `_actions/approve-tokens.ts:58-62, 133-137` (relayer calls)
+- `_actions/proxy-wallet.ts:174-178` (relayer calls)
+- `portfolio/_actions/pending-deposit.ts:81-85, 158-...` (relayer calls)
+- `api/open-orders/route.ts` and `api/events/[slug]/open-orders/route.ts`
+
+**Impact.** Hard blocker. Polymarket will reject every authenticated request with 401.
+
+**Confidence.** High.
+
+### Finding 3. HMAC algorithm and EIP-712 Order type are byte-for-byte identical to Polymarket
+
+**Claim.** Our `buildClobHmacSignature` and our `EIP712_TYPES.Order` struct match Polymarket's contract exactly. No code changes needed for these once Findings 1+2 are resolved.
+
+**Evidence.**
+
+- HMAC: `src/lib/hmac.ts:8-20` performs the same operation as `py_clob_client.signing.hmac.build_hmac_signature` — base64-decode the secret, HMAC-SHA256 over `timestamp+method+normalizedPath+body`, base64-encode, URL-safe replace.
+- EIP-712 Order: `src/lib/constants.ts:47-62` lists 12 fields with the same names and types as Polymarket's signed-order struct: `salt, maker, signer, taker, tokenId, makerAmount, takerAmount, expiration, nonce, feeRateBps, side, signatureType`.
+- Domain `name='CTF Exchange'`, `version='1'`: matches Polymarket's domain (only `verifyingContract` and `chainId` differ — `chainId` matches because both run Polygon mainnet).
+
+**Impact.** Net positive — these are already done. Means Phase 4's surface area is smaller than it would be on a green-field port.
+
+**Confidence.** High.
+
+### Finding 4. Builder code is supported in Polymarket's clob-client but not yet wired into our order payload
+
+**Claim.** Polymarket builders attach `POLY_BUILDER_CODE` to every routed order. Our current `clobPayload` at `store-order.ts:282-298` does not include any builder code field; we ship orders as un-attributed.
+
+**Evidence.**
+
+- Polymarket docs (verbatim quote in reference reading log above): `builderCode: process.env.POLY_BUILDER_CODE!` is a parameter to `createAndPostOrder`.
+- Phase 0 framework lists `POLYMARKET_BUILDER_CODE`, `POLYMARKET_BUILDER_ADDRESS`, `POLYMARKET_BUILDER_API_KEY`, `POLYMARKET_RELAYER_API_KEY`, `POLYMARKET_RELAYER_API_KEY_ADDRESS` as defined-but-unused env vars added 2026-04-28. Not yet referenced in `src/`.
+- Code: `src/app/[locale]/(platform)/event/[slug]/_actions/store-order.ts:281-300` shows the JSON body sent to `/order`. There is no `builderCode` field.
+- TS clob-client `NewOrder` interface (per WebFetch of `Polymarket/clob-client/blob/main/src/types.ts`) does not surface `builderCode` on the `NewOrder` interface I was able to read. The `BuilderTrade` interface exists but is read-only (response shape, not request). The exact body field is **NOT** confirmed yet.
+
+**Open question (resolve at implementation).** Where exactly does `builderCode` go in the POST `/order` body? Three reasonable hypotheses:
+
+1. As a top-level field next to `order`, `orderType`, `owner`: `{ order, orderType, owner, builderCode }`. This is the simplest and matches the SDK call shape.
+2. As an additional field inside the signed order's EIP-712 message itself (`builderCode` becomes part of the signed payload). This would require updating the EIP-712 `Order` struct, which the py-clob-client OrderArgs does NOT show.
+3. As a separate query string parameter on the POST URL (`POST /order?builderCode=…`).
+
+The most likely answer based on the docs is (1). To resolve definitively: read the latest `postOrder` implementation in `Polymarket/clob-client` directly at the line referenced by `client.ts` "[remainder of file in raw view]" — fetch via `gh` or raw GitHub URL with line range — at implementation time.
+
+**Impact.** Medium. Without builder code, our orders are not attributed to our builder profile. We forfeit fee rev share but trades still execute. Wiring this is required for the core launch goal of "we earn revenue per trade".
+
+**Confidence.** High that builder code is required. Medium on the exact field placement until A4 implementation reads the SDK source.
+
+### Finding 5. Trading auth's signed message is custom; Polymarket's L1 derivation has its own EIP-712 message
+
+**Claim.** Our `TradingOnboardingProvider.tsx:398-403` signs:
+
+```ts
+{
+  domain: getTradingAuthDomain(),
+  types: TRADING_AUTH_TYPES,
+  primaryType: TRADING_AUTH_PRIMARY_TYPE,
+  message,           // includes timestamp + nonce per buildTradingAuthMessage
+}
+```
+
+Polymarket's L1 derivation ("create or derive API key") uses a different EIP-712 typed data — specifically the "L1" auth scheme described in their headers module. The message signed at L1 is a fixed `string` that includes the address, timestamp, and nonce, not a custom domain/struct.
+
+**Evidence.**
+
+- `py-clob-client/signing/eip712.py` (need to verify in implementation) contains the L1 message constant, typically:
+  - Domain: `{name: "ClobAuthDomain", version: "1", chainId: 137}`
+  - Types: `{ClobAuth: [{name:"address", type:"address"},{name:"timestamp", type:"string"},{name:"nonce", type:"uint256"},{name:"message", type:"string"}]}`
+  - PrimaryType: `ClobAuth`
+- Our `TRADING_AUTH_TYPES` and domain are kuest-defined (need to read `src/lib/trading-auth/{client,server,utils}.ts` to confirm).
+
+**Impact.** L1 derivation is a one-time event per user. If our typed data is structurally different from Polymarket's, the L1 sig will fail signature recovery and Polymarket will refuse to mint an API key.
+
+**Confidence.** Medium-high. The general shape of L1 in py-clob-client is well known; our specific struct needs a side-by-side comparison.
+
+### Finding 6. Relayer paths and proxy-wallet flow are kuest-shaped; Polymarket relayer is different
+
+**Claim.** Our `proxy-wallet.ts`, `approve-tokens.ts`, and `pending-deposit.ts` make POST requests to `${RELAYER_URL}/...` paths defined by the kuest relayer service. Polymarket's relayer (`relayer-v2.polymarket.com` per Phase 0 framework) uses a different endpoint structure — defined by the OpenAPI spec at `docs.polymarket.com/api-spec/relayer-openapi.yaml`.
+
+**Evidence.**
+
+- Code at `_actions/proxy-wallet.ts:147-178` and `_actions/approve-tokens.ts:54-68, 128-141`. These hit kuest-style relayer paths (likely `/safe/deploy`, `/allowances`, `/allowances/grant`).
+- The Polymarket relayer flow per the builder reference repos involves Safe deployment via the `magic-safe-builder-example` and `wagmi-safe-builder-example` patterns — different signature, different endpoint shape, different acknowledgment.
+- Our `src/lib/orders/signing.ts` is order-only; it does not currently sign relayer transactions. The relayer transactions (proxy deploy, token approvals) are signed inline in their respective `_actions` files.
+
+**Impact.** Hard blocker for proxy-wallet onboarding and token-approval flow. Without these, a user can connect a wallet but cannot actually fund or trade.
+
+**Confidence.** High that the path structure differs; the exact correct paths need to be read off the relayer-openapi.yaml.
+
+## Action items
+
+### A1. Replace CTF Exchange and NegRisk Exchange addresses with Polymarket Polygon mainnet values (P0, hard blocker)
+
+- **Change.** Update `src/lib/contracts.ts:11-12` to Polymarket's mainnet CTF Exchange and NegRisk Exchange addresses. Do not delete the kuest values; move them behind the `IS_TEST_MODE` flag (used elsewhere in the same file at lines 1-9 for USDC).
+- **Source of truth.** Either:
+  i. The `Polymarket/clob-client` chain config (likely `src/config.ts` or similar — fetch from raw github at implementation time), or
+  ii. A live introspection request to `clob.polymarket.com` that returns the contract config (some CLOBs expose this; if Polymarket does, prefer this since it can't drift), or
+  iii. The Polymarket docs page on contract deployments, if it exists.
+- **Test.**
+  1. Sign a test order with `verifyingContract` set to the new address. Verify with `viem.recoverTypedDataAddress` matches the signer.
+  2. POST a market order to `clob.polymarket.com/order` with the test wallet (after A2/A3 land). Expect 200 + an `orderID`.
+  3. If 4xx with `unsupported verifying contract` or `invalid order signature`: addresses are still wrong; do not proceed.
+- **Files.** `src/lib/contracts.ts`, no consumer changes.
+- **Dependencies.** None for the change itself; A2+A3 needed before end-to-end test.
+
+### A2. Rename all `KUEST_*` headers to `POLY_*` (P0, hard blocker)
+
+- **Change.** In every file in the grep result above, replace the literal header names. Since `buildClobHmacSignature` in `src/lib/hmac.ts` takes only `secret/timestamp/method/path/body` (no header names), this is a pure header-rename refactor and the HMAC body of work is unchanged.
+
+  Sed sweep (verify it doesn't catch test fixtures or comments first):
+  ```
+  rg -l 'KUEST_(ADDRESS|API_KEY|API_SECRET|PASSPHRASE|TIMESTAMP|SIGNATURE|NONCE)' src/ |
+    xargs sed -i '' \
+      -e 's/KUEST_ADDRESS/POLY_ADDRESS/g' \
+      -e 's/KUEST_API_KEY/POLY_API_KEY/g' \
+      -e 's/KUEST_API_SECRET/POLY_API_SECRET/g' \
+      -e 's/KUEST_PASSPHRASE/POLY_PASSPHRASE/g' \
+      -e 's/KUEST_TIMESTAMP/POLY_TIMESTAMP/g' \
+      -e 's/KUEST_SIGNATURE/POLY_SIGNATURE/g' \
+      -e 's/KUEST_NONCE/POLY_NONCE/g'
+  ```
+  Then audit the diff manually before committing.
+- **Test.**
+  1. Hit any authenticated CLOB endpoint with valid creds (e.g. `GET /open-orders`) post-rename. Expect 200 with the user's open orders.
+  2. Run `tsc --noEmit`, `vitest run` (existing tests will catch typos), `eslint`.
+- **Files.** All listed in Finding 2.
+- **Dependencies.** None.
+
+### A3. Adapt the L1 derivation message to Polymarket's `ClobAuth` typed data (P0, hard blocker for new signups)
+
+- **Change.**
+  i. Define a Polymarket-shaped EIP-712 typed data:
+     ```ts
+     export const POLY_CLOB_AUTH_DOMAIN = {
+       name: 'ClobAuthDomain',
+       version: '1',
+       chainId: defaultNetwork.id,
+     } as const
+
+     export const POLY_CLOB_AUTH_TYPES = {
+       ClobAuth: [
+         { name: 'address', type: 'address' },
+         { name: 'timestamp', type: 'string' },
+         { name: 'nonce', type: 'uint256' },
+         { name: 'message', type: 'string' },
+       ],
+     } as const
+
+     export const POLY_CLOB_AUTH_MESSAGE_VALUE =
+       'This message attests that I control the given wallet'
+     ```
+  ii. In `TradingOnboardingProvider.tsx`'s `useTradingAuthSignatureFlow` (line ~378-430), swap the existing `TRADING_AUTH_TYPES`/domain for the Polymarket variant. Construct the message with the user's address, current unix timestamp as a string, a random uint256 nonce, and the canonical message string.
+  iii. In `_actions/trading-auth.ts:103-107`, the resulting signature is sent as `POLY_SIGNATURE` (post-A2) along with `POLY_ADDRESS` (the user's address), `POLY_TIMESTAMP`, and `POLY_NONCE` to `${CLOB_URL}/auth/api-key` (the Polymarket L1 → API key derivation endpoint; verify exact path via py-clob-client at implementation time).
+  iv. Polymarket's response is `{apiKey, secret, passphrase}`. Persist via the existing `saveUserTradingAuthCredentials` helper.
+- **Test.**
+  1. New user signs in. Expect MetaMask shows the `ClobAuthDomain`/`ClobAuth` typed data, not our current `TRADING_AUTH_TYPES`.
+  2. After signing, the L1 → L2 round-trip succeeds and `auth.clob.{key,secret,passphrase}` is populated.
+  3. Place an order with the derived L2 creds. Expect 200.
+- **Files.** `src/lib/constants.ts` (new exports), `_actions/trading-auth.ts` (path + payload), `_providers/TradingOnboardingProvider.tsx` (signing call). Verify `src/lib/trading-auth/{client,server,utils,secret-hash}.ts` doesn't need changes (they should stay agnostic to the EIP-712 shape).
+- **Dependencies.** A2 (POLY_ headers).
+
+### A4. Wire `POLY_BUILDER_CODE` into the order POST body (P0 for revenue, P1 for launch)
+
+- **Change.**
+  i. Add `POLY_BUILDER_CODE` to `process.env` defaults in `next.config.ts`.
+  ii. In `store-order.ts:282-300`, modify `clobPayload` to include the builder code. Most likely shape (verify against `Polymarket/clob-client/postOrder` source at implementation time):
+     ```ts
+     const clobPayload = {
+       order: { /* unchanged signed order */ },
+       orderType: clobOrderType,
+       owner: auth.clob.key,
+       builderCode: process.env.POLY_BUILDER_CODE,
+     }
+     ```
+     Alternative, less likely: `builderCode` becomes part of the signed `Order` typed data, in which case `EIP712_TYPES.Order` and `signOrderPayload` need a 13th field. Confirm before committing.
+  iii. The `POLYMARKET_BUILDER_API_KEY` env var (Phase 0 framework) is for the builder dashboard endpoints (`/builder/leaderboard`, `/builder/trades`) — Phase 10's territory. Not needed for placing attributed orders.
+- **Test.**
+  1. Place an order with `POLY_BUILDER_CODE` set.
+  2. Verify via `GET /builder/trades?builderCode=...` (Polymarket builder dashboard) that the trade shows up under our builder profile.
+- **Files.** `store-order.ts`, `next.config.ts`. Possibly `constants.ts` and `signing.ts` if (and only if) the builder code lives in the signed payload.
+- **Dependencies.** A1, A2, A3.
+
+### A5. Repoint the relayer flow at `relayer-v2.polymarket.com` and adapt the proxy-wallet/token-approval payloads (P0, hard blocker for new accounts)
+
+- **Change.**
+  i. Read `docs.polymarket.com/api-spec/relayer-openapi.yaml` end-to-end to enumerate the Polymarket relayer endpoints. The likely changes:
+     - Proxy-wallet deployment: `POST /safe/deploy` (or similar) with a `safeMessage` typed-data signature. The signed message uses Safe's domain (`name='SafeTransactionService'` or per Safe's GnosisSafe contract); see the `Polymarket/wagmi-safe-builder-example` and `Polymarket/magic-safe-builder-example` repos for the canonical signing payload.
+     - Token approvals: `POST /allowances/grant` (or per spec). Some flows are gasless and signed via Safe's `executeTransaction` MetaTx, others are direct.
+  ii. Replace `_actions/proxy-wallet.ts` and `_actions/approve-tokens.ts` body shapes with the Polymarket-spec shapes, keeping the `POLY_*` headers from A2.
+  iii. The `POLYMARKET_RELAYER_API_KEY` and `POLYMARKET_RELAYER_API_KEY_ADDRESS` env vars (Phase 0) are L2 creds for the BUILDER (us) submitting relayer txs on behalf of users. Wire as `POLY_API_KEY` / `POLY_ADDRESS` headers on relayer calls.
+- **Why.** Without this, no new account can deploy a proxy wallet or approve USDC, which means new accounts cannot trade.
+- **Test.**
+  1. New user clicks "Enable trading". Wallet prompts to sign the Safe-shaped EIP-712 typed data.
+  2. Proxy address is computed deterministically from the signature; user state shows `proxy_wallet_status: deploying` then `deployed`.
+  3. User funds the proxy with USDC; "Approve USDC for trading" succeeds; `auth.relayer.enabled = true`.
+- **Files.** `_actions/proxy-wallet.ts`, `_actions/approve-tokens.ts`, `portfolio/_actions/pending-deposit.ts`, `_providers/TradingOnboardingProvider.tsx` (the SafeProxy signing block at lines 277-285).
+- **Dependencies.** A2. Phase 5 (wallet/auth choice) overlaps because the Safe-builder reference impls (`wagmi-safe-builder`, `magic-safe-builder`) double as the relayer-flow blueprint. Plan A5 + Phase 5 together.
+
+### A6. Audit `cancel-order`, `cancel-all-orders`, `cancel-market-orders` paths and bodies (P1)
+
+- **Change.** Read each cancel action file end-to-end. Verify the path is `DELETE /order` or `DELETE /orders` per Polymarket's CLOB OpenAPI (`docs.polymarket.com/api-spec/clob-openapi.yaml`). Verify the body shape matches.
+- **Why.** kuest mirrors Polymarket closely but cancels often diverge on path conventions. Easy bug surface.
+- **Test.** Place an order, cancel it; place 5 orders on a market, cancel-all; place orders on multiple markets, cancel-market-orders one. Each should return 200 and the orders should disappear from `/open-orders`.
+- **Files.** All three `cancel-*.ts` files.
+- **Dependencies.** A1, A2, A3.
+
+### A7. Verify and update DELETE/CANCEL endpoint pathing on Polymarket (P1)
+
+- **Change.** Same as A6 but specifically about HTTP method + path. Polymarket's CLOB OpenAPI is the authority.
+- **Files.** Same as A6.
+- **Dependencies.** A6 reading.
+
+### A8. End-to-end smoke: place a 1-share order against Polymarket production with our builder code (P0, gating launch)
+
+- **Change.** Pre-launch validation step. After A1-A5 land, place a real but tiny order (1 share at well-out-of-money price) on a real Polymarket market using the project's funded test wallet.
+- **Test.**
+  1. Order shows in `/open-orders` with our builder code.
+  2. Cancel the order; it disappears.
+  3. `clob.polymarket.com/builder/trades?builderCode=$POLY_BUILDER_CODE` shows the cancellation event (or zero matched trades, which is fine for a far-from-market order).
+  4. Repeat with `negRisk=true` market.
+- **Files.** None — this is a manual validation gate.
+- **Dependencies.** A1, A2, A3, A4, A5.
+
+## Risks
+
+1. **A1 wrong-address regression.** If we transcribe the Polymarket addresses with a typo, every signed order silently fails verification. Mitigation: cross-check against a second source (TS clob-client + on-chain explorer). Keep kuest addresses behind `IS_TEST_MODE` so we can revert by env flag.
+
+2. **A3 mismatched typed-data subtleties.** Polymarket's `ClobAuth.timestamp` is `type: 'string'` not `'uint256'` — easy to get wrong. Mitigation: copy the typed-data definition verbatim from py-clob-client's signing module, do not transcribe by hand.
+
+3. **A4 builder code might require EIP-712 inclusion.** If it's part of the signed payload (hypothesis 2 in Finding 4), then the signature itself depends on the builder code and we cannot retrofit it without re-signing every order. Mitigation: confirm via SDK source before committing.
+
+4. **A5 changes the user-visible signing prompt.** Today the SafeProxy signing prompt shows our custom domain; Polymarket's Safe flow shows the canonical Safe `SafeTx` typed data. Users used to the kuest UX may be confused. Mitigation: update the signing prompt copy in `TradingOnboardingProvider.tsx` to explain "you're approving Polymarket's Safe deployment".
+
+5. **HMAC normalizedPath edge case.** Our HMAC strips `?query` from GETs (`hmac.ts:9-11`). py-clob-client's reference does the same. Verify Polymarket's relayer uses the same convention; some relayers HMAC the full URL including query. If Polymarket's relayer differs, GET `/allowances` will fail signature verification.
+
+6. **Proxy wallet status state machine.** We have `proxy_wallet_status ∈ {none, signed, deploying, deployed}`. Polymarket's relayer may return different status enums. Mitigation: keep our enum, map their response to ours in a small adapter rather than refactoring the state machine.
+
+## Status when phase is closed
+
+Phase 4 is closed when:
+
+- [ ] A1 merged. Test order signature verifies against the Polymarket addresses. Existing test suite for order signing passes.
+- [ ] A2 merged. `grep -r KUEST_ src/` returns 0 hits.
+- [ ] A3 merged. New user can complete L1 derivation and receive `apiKey/secret/passphrase`.
+- [ ] A4 merged. Orders are placed with `POLY_BUILDER_CODE` and visible on the builder dashboard.
+- [ ] A5 merged. New user can deploy proxy wallet via Polymarket relayer and approve USDC.
+- [ ] A6/A7 merged. Cancel paths verified.
+- [ ] A8 passed. Live test order placed and cancelled on a real Polymarket market under our builder code.
+
+Then the trading core is interoperable with Polymarket. Phase 5 (wallet/auth strategy) can run in parallel; Phase 6 (websockets) depends on Phase 4's auth credentials being valid for the user-channel WS subscription.
+
+## Appendix. CLOB write-endpoint map after Phase 4
+
+| Endpoint | Method | Used by | Status post-Phase-4 |
+|---|---|---|---|
+| `/order` | POST | `_actions/store-order.ts` | Working with `POLY_*` + `builderCode` |
+| `/order` | DELETE | `_actions/cancel-order.ts` | Working post-A6 |
+| `/orders` (or `/cancel-all`) | DELETE | `cancel-all-orders.ts`, `cancel-market-orders.ts` | Working post-A6 |
+| `/auth/api-key` (path TBD) | POST | `_actions/trading-auth.ts` | Working post-A3 |
+| `/open-orders` | GET | `api/open-orders/route.ts`, `api/events/[slug]/open-orders/route.ts` | Working post-A2 |
+| Relayer: proxy-wallet deploy | POST | `_actions/proxy-wallet.ts` | Working post-A5 |
+| Relayer: token approvals | POST/GET | `_actions/approve-tokens.ts` | Working post-A5 |
+| Relayer: pending deposits | POST | `portfolio/_actions/pending-deposit.ts` | Working post-A5 |
