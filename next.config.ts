@@ -120,13 +120,9 @@ const withMDX = createMDX({
 const withNextIntl = createNextIntlPlugin({
   experimental: {
     srcPath: './src',
-    // `extract` removed — next-intl's experimental extractionLoader produces
-    // sourcemaps as escaped JSON strings, Next 16 Turbopack expects them as
-    // objects. The mismatch blocks compile of every file using `getExtracted`
-    // (e.g. `(platform)/layout.tsx`) with: "failed to read input source map
-    // from user-provided sourcemap … bad json: invalid type: string …
-    // expected struct RawSourceMap". The extract feature is build-time
-    // tooling for translation source extraction, not required at runtime.
+    extract: {
+      sourceLocale: 'en',
+    },
     messages: {
       path: './src/i18n/messages',
       format: 'json',
