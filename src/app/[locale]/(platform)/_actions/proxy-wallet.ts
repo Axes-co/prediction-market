@@ -3,17 +3,16 @@
 import type { ProxyWalletStatus } from '@/types'
 import { eq } from 'drizzle-orm'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
+import { SAFE_PROXY_FACTORY_ADDRESS } from '@/lib/contracts'
 import { UserRepository } from '@/lib/db/queries/user'
 import { users } from '@/lib/db/schema/auth/tables'
 import { db } from '@/lib/drizzle'
-import { buildClobHmacSignature } from '@/lib/hmac'
+import { buildRelayerHeaders } from '@/lib/polymarket/relayer-auth'
 import {
   getSafeProxyWalletAddress,
   isProxyWalletDeployed,
   SAFE_PROXY_CREATE_PROXY_MESSAGE,
 } from '@/lib/safe-proxy'
-import { TRADING_AUTH_REQUIRED_ERROR } from '@/lib/trading-auth/errors'
-import { getUserTradingAuthSecrets } from '@/lib/trading-auth/server'
 import {
   getTradingFlowErrorPreview,
   mapProxyWalletDeployError,
@@ -48,30 +47,11 @@ export async function saveProxyWalletSignature({ signature }: SaveProxyWalletSig
   }
 
   try {
-    const hasStoredRelayerAuth = Boolean(currentUser.settings?.tradingAuth?.relayer?.enabled)
-    const tradingAuth = await getUserTradingAuthSecrets(currentUser.id)
-    if (hasStoredRelayerAuth && !tradingAuth?.relayer) {
-      return { data: null, error: TRADING_AUTH_REQUIRED_ERROR }
-    }
-
-    const relayerAuth = tradingAuth?.relayer
-      ? {
-          key: tradingAuth.relayer.key,
-          secret: tradingAuth.relayer.secret,
-          passphrase: tradingAuth.relayer.passphrase,
-          address: currentUser.address,
-        }
-      : {
-          key: process.env.KUEST_API_KEY ?? '',
-          secret: process.env.KUEST_API_SECRET ?? '',
-          passphrase: process.env.KUEST_PASSPHRASE ?? '',
-          address: process.env.KUEST_ADDRESS ?? '',
-        }
-
-    if (!relayerAuth.key || !relayerAuth.secret || !relayerAuth.passphrase || !relayerAuth.address) {
-      return { data: null, error: 'Relayer credentials not configured.' }
-    }
-
+    // V2 relayer auth is builder-level (server env `POLYMARKET_BUILDER_*`),
+    // not per-user. The per-user `tradingAuth.relayer` left over from V1
+    // onboarding stays a no-op here. `triggerSafeProxyDeployment` and
+    // `submitSafeTransactionAction` derive their headers from
+    // `buildRelayerHeaders()` directly.
     const proxyAddress = currentUser.proxy_wallet_address
       ? currentUser.proxy_wallet_address as `0x${string}`
       : await getSafeProxyWalletAddress(currentUser.address as `0x${string}`)
@@ -81,7 +61,7 @@ export async function saveProxyWalletSignature({ signature }: SaveProxyWalletSig
       txHash = await triggerSafeProxyDeployment({
         owner: currentUser.address,
         signature: trimmedSignature,
-        auth: relayerAuth,
+        proxyWallet: proxyAddress,
       })
       proxyIsDeployed = await isProxyWalletDeployed(proxyAddress)
     }
@@ -135,47 +115,61 @@ export async function saveProxyWalletSignature({ signature }: SaveProxyWalletSig
   }
 }
 
+/**
+ * Polymarket V2 Safe deployment flow. Verbatim mirror of
+ * `@polymarket/builder-relayer-client@0.0.6/dist/builder/create.js` +
+ * `dist/client.js`. The relayer's `/wallet/safe` endpoint that kuest used is
+ * **not present on V2** (404). V2 deployment is a `SAFE_CREATE` transaction
+ * submitted through the unified `/submit` endpoint, authed with builder
+ * credentials (server-level, `POLY_BUILDER_*` headers — not per-user L2).
+ *
+ * The user's authorization is the EIP-712 signature over `CreateProxy(
+ *   paymentToken, payment, paymentReceiver
+ * )` against the domain `{ name: "Polymarket Contract Proxy Factory",
+ * chainId: 137, verifyingContract: <factory> }`. The signature lives in the
+ * request body, not the headers.
+ */
 async function triggerSafeProxyDeployment({
   owner,
   signature,
-  auth,
+  proxyWallet,
 }: {
   owner: string
   signature: string
-  auth: { key: string, secret: string, passphrase: string, address: string }
+  proxyWallet: string
 }) {
   const relayerUrl = process.env.RELAYER_URL!
   const method = 'POST'
-  const path = '/wallet/safe'
+  const path = '/submit'
 
   const payload = {
-    owner,
-    paymentToken: SAFE_PROXY_CREATE_PROXY_MESSAGE.paymentToken,
-    payment: SAFE_PROXY_CREATE_PROXY_MESSAGE.payment.toString(),
-    paymentReceiver: SAFE_PROXY_CREATE_PROXY_MESSAGE.paymentReceiver,
+    from: owner,
+    to: SAFE_PROXY_FACTORY_ADDRESS,
+    proxyWallet,
+    data: '0x',
     signature,
+    signatureParams: {
+      paymentToken: SAFE_PROXY_CREATE_PROXY_MESSAGE.paymentToken,
+      payment: SAFE_PROXY_CREATE_PROXY_MESSAGE.payment.toString(),
+      paymentReceiver: SAFE_PROXY_CREATE_PROXY_MESSAGE.paymentReceiver,
+    },
+    // Polymarket V2 relayer enum: the TypeScript key is `SAFE_CREATE` but the
+    // wire value is `"SAFE-CREATE"` (hyphen). Verbatim from
+    // `@polymarket/builder-relayer-client@0.0.6/dist/types.js`:
+    //   TransactionType["SAFE_CREATE"] = "SAFE-CREATE";
+    // Sending `"SAFE_CREATE"` (underscore) gets rejected upstream as 400 "bad request".
+    type: 'SAFE-CREATE',
   }
 
   const body = JSON.stringify(payload)
-  const timestamp = Math.floor(Date.now() / 1000)
-  const hmacSignature = buildClobHmacSignature(
-    auth.secret,
-    timestamp,
-    method,
-    path,
-    body,
-  )
+  const builderHeaders = buildRelayerHeaders(method, path, body)
 
   const response = await fetch(`${relayerUrl}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      'KUEST_ADDRESS': auth.address,
-      'KUEST_API_KEY': auth.key,
-      'KUEST_PASSPHRASE': auth.passphrase,
-      'KUEST_TIMESTAMP': timestamp.toString(),
-      'KUEST_SIGNATURE': hmacSignature,
+      ...builderHeaders,
     },
     body,
     signal: AbortSignal.timeout(15_000),

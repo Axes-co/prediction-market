@@ -3,9 +3,8 @@
 import type { SafeTransactionRequestPayload } from '@/lib/safe/transactions'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { UserRepository } from '@/lib/db/queries/user'
-import { buildClobHmacSignature } from '@/lib/hmac'
-import { TRADING_AUTH_REQUIRED_ERROR } from '@/lib/trading-auth/errors'
-import { getUserTradingAuthSecrets, markTokenApprovalsCompleted } from '@/lib/trading-auth/server'
+import { buildRelayerHeaders } from '@/lib/polymarket/relayer-auth'
+import { markTokenApprovalsCompleted } from '@/lib/trading-auth/server'
 import {
   getTradingFlowErrorPreview,
   mapApproveTokensError,
@@ -35,31 +34,24 @@ export async function getSafeNonceAction(): Promise<SafeNonceResult> {
     return { error: 'Deploy your proxy wallet before approving tokens.' }
   }
 
-  const auth = await getUserTradingAuthSecrets(user.id)
-  if (!auth?.relayer) {
-    return { error: TRADING_AUTH_REQUIRED_ERROR }
-  }
-
   const relayerUrl = process.env.RELAYER_URL
   if (!relayerUrl) {
     return { error: DEFAULT_ERROR_MESSAGE }
   }
 
+  // V2 relayer auth is server-level builder credentials, not per-user. The
+  // Safe nonce read is itself unauthenticated (returns nonce from chain), but
+  // the SDK signs it for parity with the rest of the relayer surface.
   const query = `address=${encodeURIComponent(user.address)}&type=SAFE`
   const path = `/nonce?${query}`
-  const timestamp = Math.floor(Date.now() / 1000)
-  const signature = buildClobHmacSignature(auth.relayer.secret, timestamp, 'GET', path)
 
   try {
+    const builderHeaders = buildRelayerHeaders('GET', path)
     const response = await fetch(`${relayerUrl}${path}`, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
-        KUEST_ADDRESS: user.address,
-        KUEST_API_KEY: auth.relayer.key,
-        KUEST_PASSPHRASE: auth.relayer.passphrase,
-        KUEST_TIMESTAMP: timestamp.toString(),
-        KUEST_SIGNATURE: signature,
+        ...builderHeaders,
       },
       signal: AbortSignal.timeout(10_000),
     })
@@ -93,11 +85,6 @@ export async function submitSafeTransactionAction(request: SafeTransactionReques
     return { error: 'Unauthenticated.' }
   }
 
-  const auth = await getUserTradingAuthSecrets(user.id)
-  if (!auth?.relayer) {
-    return { error: TRADING_AUTH_REQUIRED_ERROR }
-  }
-
   if (!user.proxy_wallet_address) {
     return { error: 'Deploy your proxy wallet first.' }
   }
@@ -121,8 +108,7 @@ export async function submitSafeTransactionAction(request: SafeTransactionReques
 
   const path = '/submit'
   const body = JSON.stringify(request)
-  const timestamp = Math.floor(Date.now() / 1000)
-  const signature = buildClobHmacSignature(auth.relayer.secret, timestamp, 'POST', path, body)
+  const builderHeaders = buildRelayerHeaders('POST', path, body)
 
   try {
     const response = await fetch(`${relayerUrl}${path}`, {
@@ -130,11 +116,7 @@ export async function submitSafeTransactionAction(request: SafeTransactionReques
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'KUEST_ADDRESS': user.address,
-        'KUEST_API_KEY': auth.relayer.key,
-        'KUEST_PASSPHRASE': auth.relayer.passphrase,
-        'KUEST_TIMESTAMP': timestamp.toString(),
-        'KUEST_SIGNATURE': signature,
+        ...builderHeaders,
       },
       body,
       signal: AbortSignal.timeout(15000),

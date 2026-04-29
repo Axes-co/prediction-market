@@ -3,7 +3,10 @@ import { createPublicClient, http } from 'viem'
 import { defaultNetwork } from '@/lib/appkit'
 import { SAFE_PROXY_FACTORY_ADDRESS, ZERO_ADDRESS } from '@/lib/contracts'
 
-export const SAFE_PROXY_DOMAIN_NAME = 'Contract Proxy Factory'
+// Verbatim from `@polymarket/builder-relayer-client@0.0.6/dist/constants/index.js`
+// (`SAFE_FACTORY_NAME`). Required for the EIP-712 domain on `CreateProxy`
+// signatures sent to `/submit` for Safe deployment.
+export const SAFE_PROXY_DOMAIN_NAME = 'Polymarket Contract Proxy Factory'
 export const SAFE_PROXY_PRIMARY_TYPE = 'CreateProxy'
 
 export const SAFE_PROXY_TYPES = {
@@ -14,6 +17,11 @@ export const SAFE_PROXY_TYPES = {
   ],
 } as const
 
+// EIP-712 message for `CreateProxy`. Must contain ONLY the three fields
+// declared in `SAFE_PROXY_TYPES.CreateProxy` — the factory address belongs
+// in the domain's `verifyingContract`, not the message. Including extra
+// fields makes wallets fall back to a plain-text signing display and
+// produces a digest the relayer's verifier rejects as a bad signature.
 export const SAFE_PROXY_CREATE_PROXY_MESSAGE = {
   paymentToken: ZERO_ADDRESS,
   payment: 0n,

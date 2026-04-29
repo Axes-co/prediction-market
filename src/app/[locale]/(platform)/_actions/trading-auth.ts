@@ -83,29 +83,34 @@ export async function generateTradingAuthAction(input: z.input<typeof GenerateTr
     return { error: parsed.error.issues[0]?.message ?? 'Invalid signature.', data: null }
   }
 
-  const relayerUrl = process.env.RELAYER_URL
   const clobUrl = process.env.CLOB_URL
-  if (!relayerUrl || !clobUrl) {
+  if (!clobUrl) {
     return { error: DEFAULT_ERROR_MESSAGE, data: null }
   }
 
   const headers = {
     'Accept': 'application/json',
     'Content-Type': 'application/json',
-    'KUEST_ADDRESS': user.address,
-    'KUEST_SIGNATURE': parsed.data.signature,
-    'KUEST_TIMESTAMP': parsed.data.timestamp,
-    'KUEST_NONCE': parsed.data.nonce,
+    'POLY_ADDRESS': user.address,
+    'POLY_SIGNATURE': parsed.data.signature,
+    'POLY_TIMESTAMP': parsed.data.timestamp,
+    'POLY_NONCE': parsed.data.nonce,
   }
 
   try {
-    const [relayerCreds, clobCreds] = await Promise.all([
-      requestApiKey(relayerUrl, headers),
-      requestApiKey(clobUrl, headers),
-    ])
+    // Polymarket V2 has CLOB-only L1. The relayer (`relayer-v2.polymarket.com`)
+    // does not expose `/auth/api-key` — POSTing there returns 404. After V2.6
+    // the relayer auth uses **server-level builder credentials**
+    // (`POLYMARKET_BUILDER_*` env via `buildRelayerHeaders`), not per-user L2.
+    // The `auth.relayer` field stays on the schema for back-compat but is no
+    // longer read by `proxy-wallet.ts` / `approve-tokens.ts` /
+    // `pending-deposit.ts`. We populate it with the CLOB triple as a no-op
+    // placeholder so existing onboarding-status checks (`tradingAuth.relayer.enabled`)
+    // keep working.
+    const clobCreds = await requestApiKey(clobUrl, headers)
 
     const l2AuthContextId = await saveUserTradingAuthCredentials(user.id, {
-      relayer: relayerCreds,
+      relayer: clobCreds,
       clob: clobCreds,
     })
     if (!l2AuthContextId) {
