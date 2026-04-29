@@ -1,3 +1,10 @@
+---
+title: V2 migration spec — native HTTP, no SDK
+status: in-progress
+owner: khaleel
+last-updated: 2026-04-29
+---
+
 # V2 migration spec — native HTTP, no SDK
 
 Status as of 2026-04-29. Source of truth for the V2.x sub-phases.

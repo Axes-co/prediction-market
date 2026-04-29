@@ -1,3 +1,10 @@
+---
+title: V2 migration — full audit
+status: complete
+owner: khaleel
+last-updated: 2026-04-29
+---
+
 # V2 migration — full audit
 
 Audit conducted 2026-04-29 against `clob.polymarket.com`, `relayer-v2.polymarket.com`, `data-api.polymarket.com`, `gamma-api.polymarket.com`, `user-pnl-api.polymarket.com`, `ws-subscriptions-clob.polymarket.com`. All findings backed by live `curl` + `cast` probes.
