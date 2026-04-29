@@ -9,10 +9,13 @@ import {
   zeroAddress,
 } from 'viem'
 import {
+  COLLATERAL_ONRAMP_ADDRESS,
   COLLATERAL_TOKEN_ADDRESS,
   CONDITIONAL_TOKENS_CONTRACT,
   CTF_EXCHANGE_ADDRESS,
+  NEG_RISK_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
+  PUSD_ADDRESS,
   SAFE_MULTISEND_ADDRESS,
   UMA_NEG_RISK_ADAPTER_ADDRESS,
   ZERO_COLLECTION_ID,
@@ -206,27 +209,66 @@ function parseAmountToBaseUnits(amount: string | number | bigint, decimals: numb
   )
 }
 
+/**
+ * V2 onboarding approvals batch. Three approval families bundled into a single
+ * Safe-tx so a new user signs once and is fully ready to trade:
+ *
+ *   1. USDC.e → Collateral Onramp — lets `Onramp.wrap()` pull USDC.e from the
+ *      Safe to mint pUSD on subsequent deposits.
+ *   2. pUSD → V2 trading spenders (4) — Conditional Tokens (V2),
+ *      NegRisk Adapter (V2), CTF Exchange (V2), NegRisk CTF Exchange (V2).
+ *      Required for the V2 Exchange to settle fills.
+ *   3. ERC1155.setApprovalForAll on Conditional Tokens for V2 operators (3) —
+ *      CTF Exchange (V2), NegRisk CTF Exchange (V2), NegRisk Adapter (V2).
+ *      Required to move outcome tokens.
+ *
+ * Spender list mirrors `Polymarket/wagmi-safe-builder-example/utils/approvals.ts`.
+ */
 export function buildApproveTokenTransactions(options?: ApproveOptions): SafeTransaction[] {
   const spenderList = options?.spenders?.length
     ? options.spenders
-    : [CONDITIONAL_TOKENS_CONTRACT, UMA_NEG_RISK_ADAPTER_ADDRESS]
+    : [
+        CONDITIONAL_TOKENS_CONTRACT,
+        NEG_RISK_ADAPTER_ADDRESS,
+        CTF_EXCHANGE_ADDRESS,
+        NEG_RISK_CTF_EXCHANGE_ADDRESS,
+      ]
 
   const uniqueSpenders = Array.from(new Set(spenderList)) as `0x${string}`[]
   const operators = options?.operators?.length
     ? options.operators
-    : [CTF_EXCHANGE_ADDRESS, NEG_RISK_CTF_EXCHANGE_ADDRESS, UMA_NEG_RISK_ADAPTER_ADDRESS]
+    : [CTF_EXCHANGE_ADDRESS, NEG_RISK_CTF_EXCHANGE_ADDRESS, NEG_RISK_ADAPTER_ADDRESS]
 
-  const transactions: SafeTransaction[] = uniqueSpenders.map(spender => ({
+  const transactions: SafeTransaction[] = []
+
+  // (1) USDC.e → Collateral Onramp. Single approval that powers all future
+  // `Onramp.wrap()` calls in the deposit flow.
+  transactions.push({
     to: COLLATERAL_TOKEN_ADDRESS as `0x${string}`,
     value: '0',
     data: encodeFunctionData({
       abi: erc20Abi,
       functionName: 'approve',
-      args: [spender, MAX_ALLOWANCE],
+      args: [COLLATERAL_ONRAMP_ADDRESS, MAX_ALLOWANCE],
     }),
     operation: SafeOperationType.Call,
-  }))
+  })
 
+  // (2) pUSD → V2 trading spenders.
+  for (const spender of uniqueSpenders) {
+    transactions.push({
+      to: PUSD_ADDRESS as `0x${string}`,
+      value: '0',
+      data: encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [spender, MAX_ALLOWANCE],
+      }),
+      operation: SafeOperationType.Call,
+    })
+  }
+
+  // (3) ERC1155.setApprovalForAll on Conditional Tokens for V2 operators.
   for (const operator of operators) {
     transactions.push({
       to: CONDITIONAL_TOKENS_CONTRACT as `0x${string}`,

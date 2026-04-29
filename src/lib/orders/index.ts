@@ -2,8 +2,21 @@ import type { CLOB_ORDER_TYPE } from '@/lib/constants'
 import type { BlockchainOrder, OrderSide, OrderType, Outcome } from '@/types'
 import { storeOrderAction } from '@/app/[locale]/(platform)/event/[slug]/_actions/store-order'
 import { MICRO_UNIT, ORDER_SIDE, ORDER_TYPE } from '@/lib/constants'
-import { ZERO_ADDRESS } from '@/lib/contracts'
+import { ZERO_ADDRESS, ZERO_BYTES32 } from '@/lib/contracts'
 import { toMicro } from '@/lib/formatters'
+
+/**
+ * Bytes32 builder code from `polymarket.com/settings?tab=builder`.
+ * Attribution lives in the signed `builder` field on every V2 order.
+ * Falls back to zero bytes32 (no attribution) when not configured.
+ */
+function resolveBuilderCode(): `0x${string}` {
+  const configured = process.env.POLYMARKET_BUILDER_CODE?.trim()
+  if (configured && /^0x[a-f0-9]{64}$/i.test(configured)) {
+    return configured as `0x${string}`
+  }
+  return ZERO_BYTES32
+}
 
 export interface CalculateOrderAmountsArgs {
   orderType: OrderType
@@ -35,8 +48,11 @@ export interface SubmitOrderArgs {
 const DEFAULT_ORDER_FIELDS = {
   salt: 0n,
   expiration: 0n,
+  // V1-only fields. V2 ignores `nonce` + `fee_rate_bps` entirely (not in the
+  // signed struct, not in the wire body). Kept on the type until V2.2 strips
+  // store-order.ts zod + serializeOrder.
   nonce: 0n,
-  fee_rate_bps: 200n,
+  fee_rate_bps: 0n,
   signature_type: 0,
 } as const
 
@@ -117,6 +133,8 @@ export function buildOrderPayload({
   const salt = generateOrderSalt()
   const maker = makerAddress ?? userAddress
   const signatureTypeValue = typeof signatureType === 'number' ? signatureType : DEFAULT_ORDER_FIELDS.signature_type
+  // V1 `feeRateBps` is parsed off the call site for back-compat but not
+  // propagated to the V2 signed struct or wire body. V2 fees are protocol-set.
   const feeRateBpsValue = typeof feeRateBps === 'number' && Number.isFinite(feeRateBps)
     ? BigInt(Math.max(0, Math.trunc(feeRateBps)))
     : DEFAULT_ORDER_FIELDS.fee_rate_bps
@@ -137,6 +155,10 @@ export function buildOrderPayload({
     side: rest.side,
     fee_rate_bps: feeRateBpsValue,
     signature_type: signatureTypeValue,
+    // V2 signed fields.
+    timestamp: BigInt(Date.now()),
+    metadata: ZERO_BYTES32,
+    builder: resolveBuilderCode(),
   }
 }
 
@@ -150,6 +172,9 @@ function serializeOrder(order: BlockchainOrder) {
     expiration: order.expiration.toString(),
     nonce: order.nonce.toString(),
     fee_rate_bps: order.fee_rate_bps.toString(),
+    timestamp: order.timestamp.toString(),
+    metadata: order.metadata,
+    builder: order.builder,
   }
 }
 
