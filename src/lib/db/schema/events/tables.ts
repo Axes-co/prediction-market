@@ -86,7 +86,16 @@ export const events = pgTable(
       .default(false),
     neg_risk: boolean()
       .default(false),
+    show_all_outcomes: boolean()
+      .notNull()
+      .default(false),
     neg_risk_market_id: char({ length: 66 }),
+    gamma_event_id: integer(),
+    comment_count: integer().notNull().default(0),
+    restricted: boolean().notNull().default(false),
+    liquidity_clob: numeric({ precision: 20, scale: 6 }),
+    featured: boolean().notNull().default(false),
+    featured_order: integer(),
     series_slug: text(),
     series_id: text(),
     series_recurrence: text(),
@@ -404,9 +413,83 @@ export const tags = pgTable(
     event_page_note: text(),
     display_order: smallint().default(0),
     active_markets_count: integer().default(0),
+    force_show: boolean().notNull().default(false),
+    force_hide: boolean().notNull().default(false),
+    is_carousel: boolean().notNull().default(false),
+    published_at: timestamp({ withTimezone: true }),
     created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updated_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
+)
+
+/**
+ * Read-mirror of every Polymarket address we observe (gamma comments,
+ * data-api activity / holders / leaderboard). Keyed by base EOA so a user
+ * with multiple Safes over time stays a single row. Populated opportunistically;
+ * never proactively crawled.
+ */
+export const polymarket_users = pgTable(
+  'polymarket_users',
+  {
+    base_address: text().primaryKey(),
+    proxy_wallet: text(),
+    pseudonym: text(),
+    name: text(),
+    display_username_public: boolean(),
+    bio: text(),
+    profile_image: text(),
+    profile_image_optimized: text(),
+    first_seen_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    last_seen_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    source: text().notNull(),
+  },
+)
+
+/**
+ * Axes-native comments. Pre-seeded by the gamma comment cron with
+ * `external_source = 'gamma_seed'` (so day-1 events look alive); subsequent
+ * user-authored comments use `external_source = 'native'`.
+ *
+ * `event_id` is our internal ULID; `author_base_address` is normalized lowercase
+ * EOA, FK'd into `polymarket_users` so every commenter has a user mirror row.
+ */
+export const comments = pgTable(
+  'comments',
+  {
+    id: char({ length: 26 }).primaryKey().default(sql`generate_ulid()`),
+    event_id: char({ length: 26 })
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    parent_comment_id: char({ length: 26 }),
+    author_base_address: text()
+      .notNull()
+      .references(() => polymarket_users.base_address, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    body: text().notNull(),
+    reactions_count: integer().notNull().default(0),
+    reports_count: integer().notNull().default(0),
+    external_source: text().notNull(),
+    external_id: text(),
+    is_hidden: boolean().notNull().default(false),
+    created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+)
+
+export const comment_reactions = pgTable(
+  'comment_reactions',
+  {
+    comment_id: char({ length: 26 })
+      .notNull()
+      .references(() => comments.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    reactor_base_address: text()
+      .notNull()
+      .references(() => polymarket_users.base_address, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    reaction_type: text().notNull().default('like'),
+    created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  table => ({
+    pk: primaryKey({ columns: [table.comment_id, table.reactor_base_address, table.reaction_type] }),
+  }),
 )
 
 export const tag_translations = pgTable(

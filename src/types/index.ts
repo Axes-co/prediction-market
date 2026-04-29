@@ -9,7 +9,18 @@ export interface Event {
   enable_neg_risk?: boolean
   neg_risk_augmented?: boolean
   neg_risk?: boolean
+  show_all_outcomes?: boolean
   neg_risk_market_id?: string
+  /** Polymarket gamma integer event id, used for `/comments` and `/other?id=` lookups. */
+  gamma_event_id?: number | null
+  /** Comment count surfaced on the event card and tab badge. */
+  comment_count?: number
+  /** Per-event geo-restriction flag. The IP middleware is the primary gate; this is a second layer. */
+  restricted?: boolean
+  /** CLOB liquidity surfaced by gamma; used for default sort and home shelves. */
+  liquidity_clob?: number | null
+  featured?: boolean
+  featured_order?: number | null
   status: 'draft' | 'active' | 'resolved' | 'archived'
   rules?: string
   series_slug?: string | null
@@ -425,15 +436,32 @@ export interface BlockchainOrder {
   salt: bigint
   maker: Address
   signer: Address
+  /**
+   * V1-only. Unused in the V2 signed struct and dropped from the V2 wire body.
+   * Kept on the type until `_actions/store-order.ts` zod and `serializeOrder`
+   * lose their references in V2.2; values written here are ignored by V2 signing.
+   */
   taker: Address
   token_id: bigint
   maker_amount: bigint
   taker_amount: bigint
+  /**
+   * V2 keeps `expiration` in the wire body for GTD order TTL but removes it
+   * from the signed struct. Seconds since epoch; `0n` means GTC (no expiry).
+   */
   expiration: bigint
+  /** V1-only. Removed from V2 sign + wire; see comment on `taker`. */
   nonce: bigint
+  /** V1-only. V2 fees are protocol-set at match time, see `getClobMarketInfo`. */
   fee_rate_bps: bigint
   side: number
   signature_type: number
+  /** V2: order creation time in milliseconds. Replaces `nonce` for per-address uniqueness. */
+  timestamp: bigint
+  /** V2: bytes32, zero unless special use. */
+  metadata: `0x${string}`
+  /** V2: bytes32 builder code from polymarket.com/settings?tab=builder, or zero. */
+  builder: `0x${string}`
 }
 
 export interface UserPosition {
