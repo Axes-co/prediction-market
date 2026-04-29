@@ -1,7 +1,8 @@
 export const PUBLIC_ALLOWED_MARKET_CREATORS_PATH = '/api/allowed-market-creators'
 export const DEMO_ALLOWED_MARKET_CREATOR_DISPLAY_NAME = 'demo.kuest.com'
+export const GAMMA_API_SOURCE_KEY_PREFIX = 'gamma:'
 
-export type AllowedMarketCreatorSourceType = 'site' | 'wallet'
+export type AllowedMarketCreatorSourceType = 'site' | 'wallet' | 'gamma_api'
 
 export interface AllowedMarketCreatorRecord {
   walletAddress: string
@@ -139,8 +140,47 @@ export function normalizeAllowedMarketCreatorSiteInput(value: string) {
   }
 }
 
+export function normalizeAllowedMarketCreatorGammaApiInput(value: string, displayNameInput?: string) {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return { error: 'Gamma API URL is required.' } as const
+  }
+
+  try {
+    const parsed = new URL(withDefaultProtocol(trimmed))
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { error: 'Gamma API URL must use http or https.' } as const
+    }
+
+    if (isDisallowedSiteHostname(parsed.hostname)) {
+      return { error: 'Gamma API URL must point to a public host.' } as const
+    }
+
+    const origin = parsed.origin
+    const fallbackName = parsed.host.trim().toLowerCase()
+    const displayName = displayNameInput?.trim() || fallbackName
+    if (!displayName) {
+      return { error: 'Gamma API URL is invalid.' } as const
+    }
+
+    return {
+      origin,
+      displayName,
+      sourceKey: `${GAMMA_API_SOURCE_KEY_PREFIX}${origin}`,
+    } as const
+  }
+  catch {
+    return { error: 'Gamma API URL is invalid.' } as const
+  }
+}
+
+export function isGammaApiSourceKey(walletAddress: string) {
+  return walletAddress.startsWith(GAMMA_API_SOURCE_KEY_PREFIX)
+}
+
 export function groupAllowedMarketCreatorItems(records: AllowedMarketCreatorRecord[]): AllowedMarketCreatorItem[] {
   const siteItems = new Map<string, AllowedMarketCreatorItem>()
+  const gammaApiItems = new Map<string, AllowedMarketCreatorItem>()
   const walletItems: AllowedMarketCreatorItem[] = []
 
   for (const record of records) {
@@ -161,6 +201,17 @@ export function groupAllowedMarketCreatorItems(records: AllowedMarketCreatorReco
       continue
     }
 
+    if (record.sourceType === 'gamma_api' && record.sourceUrl) {
+      gammaApiItems.set(record.sourceUrl, {
+        walletAddress: null,
+        walletCount: 0,
+        displayName: record.displayName,
+        sourceUrl: record.sourceUrl,
+        sourceType: 'gamma_api',
+      })
+      continue
+    }
+
     walletItems.push({
       walletAddress: record.walletAddress,
       walletCount: 1,
@@ -170,7 +221,7 @@ export function groupAllowedMarketCreatorItems(records: AllowedMarketCreatorReco
     })
   }
 
-  return [...siteItems.values(), ...walletItems]
+  return [...gammaApiItems.values(), ...siteItems.values(), ...walletItems]
 }
 
 export function isAllowedMarketCreatorItem(payload: unknown): payload is AllowedMarketCreatorItem {
@@ -183,7 +234,7 @@ export function isAllowedMarketCreatorItem(payload: unknown): payload is Allowed
     && typeof candidate.walletCount === 'number'
     && typeof candidate.displayName === 'string'
     && (typeof candidate.sourceUrl === 'string' || candidate.sourceUrl === null)
-    && (candidate.sourceType === 'site' || candidate.sourceType === 'wallet')
+    && (candidate.sourceType === 'site' || candidate.sourceType === 'wallet' || candidate.sourceType === 'gamma_api')
 }
 
 export function isAdminAllowedMarketCreatorsResponse(payload: unknown): payload is AdminAllowedMarketCreatorsResponse {

@@ -354,6 +354,19 @@ export default function HeroCarouselSlideChart({
   // is already rendered before the slide animates into view.
   const showChart = chartData.length > 0 && dimensions !== null
 
+  // [HERO_CHART_DEBUG] Temporary instrumentation — remove once charts confirmed.
+  if (typeof window !== 'undefined') {
+    console.debug('[HeroChart]', event.slug, {
+      variant,
+      targets: chartConfig.targets.length,
+      seriesKeys: chartConfig.series.map(s => s.key),
+      historyPoints: normalizedHistory.length,
+      filteredChartData: chartData.length,
+      dimensions,
+      showChart,
+    })
+  }
+
   return (
     <div ref={containerRef} className="size-full">
       {showChart

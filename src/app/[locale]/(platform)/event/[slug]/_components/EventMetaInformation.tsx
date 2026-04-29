@@ -1,10 +1,8 @@
 'use client'
 
 import type { Event } from '@/types'
-import { useQuery } from '@tanstack/react-query'
 import { CheckIcon, Clock3Icon, PlusIcon, SparkleIcon, TrophyIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
-import { useMemo } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatDate } from '@/lib/formatters'
 import { isMarketNew } from '@/lib/utils'
@@ -14,74 +12,15 @@ interface EventMetaInformationProps {
   event: Event
 }
 
-function useEventVolume(event: Event) {
-  const volumeRequestPayload = useMemo(() => {
-    const conditions = event.markets
-      .map((market) => {
-        const tokenIds = (market.outcomes ?? [])
-          .map(outcome => outcome.token_id)
-          .filter(Boolean)
-          .slice(0, 2)
-        if (!market.condition_id || tokenIds.length < 2) {
-          return null
-        }
-        return {
-          condition_id: market.condition_id,
-          token_ids: tokenIds as [string, string],
-        }
-      })
-      .filter((item): item is { condition_id: string, token_ids: [string, string] } => item !== null)
-
-    const signature = conditions
-      .map(condition => `${condition.condition_id}:${condition.token_ids.join(':')}`)
-      .join('|')
-
-    return { conditions, signature }
-  }, [event.markets])
-
-  const { data: volumeFromApi } = useQuery({
-    queryKey: ['trade-volumes', event.id, volumeRequestPayload.signature],
-    enabled: volumeRequestPayload.conditions.length > 0,
-    staleTime: 60_000,
-    refetchInterval: 60_000,
-    queryFn: async () => {
-      const response = await fetch(`${process.env.CLOB_URL}/data/volumes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          include_24h: false,
-          conditions: volumeRequestPayload.conditions,
-        }),
-      })
-
-      const payload = await response.json() as Array<{
-        condition_id: string
-        status: number
-        volume?: string
-      }>
-
-      return payload
-        .filter(entry => entry?.status === 200)
-        .reduce((total, entry) => {
-          const numeric = Number(entry.volume ?? 0)
-          return Number.isFinite(numeric) ? total + numeric : total
-        }, 0)
-    },
-  })
-
-  return useMemo(() => {
-    if (typeof volumeFromApi === 'number' && Number.isFinite(volumeFromApi)) {
-      return volumeFromApi
-    }
-    return event.volume
-  }, [event.volume, volumeFromApi])
+function resolveEventVolume(event: Event) {
+  // `clob.polymarket.com/data/volumes` was removed in V2 (returns 404).
+  // `event.volume` is populated by the gamma sync.
+  return event.volume
 }
 
 export default function EventMetaInformation({ event, currentTimestamp }: EventMetaInformationProps) {
   const t = useExtracted()
-  const resolvedVolume = useEventVolume(event)
+  const resolvedVolume = resolveEventVolume(event)
 
   const isNegRiskEnabled = Boolean(event.enable_neg_risk || event.neg_risk)
   const isNegRiskAugmented = Boolean(event.neg_risk_augmented)

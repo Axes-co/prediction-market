@@ -22,7 +22,7 @@ import {
   isAdminAllowedMarketCreatorsResponse,
 } from '@/lib/allowed-market-creators'
 
-type CreatorInputMode = 'site' | 'wallet'
+type CreatorInputMode = 'site' | 'wallet' | 'gamma_api'
 
 interface AllowedMarketCreatorsManagerProps {
   disabled?: boolean
@@ -37,21 +37,20 @@ function readApiError(payload: unknown) {
   return typeof maybeError === 'string' && maybeError.trim() ? maybeError.trim() : null
 }
 
+function getItemSortKey(item: AllowedMarketCreatorItem): string {
+  if (item.sourceType === 'site' || item.sourceType === 'gamma_api') {
+    return item.sourceUrl ?? ''
+  }
+  return item.walletAddress ?? ''
+}
+
 function sortItems(items: AllowedMarketCreatorItem[]) {
   return [...items].sort((left, right) => {
     const displayNameSort = left.displayName.localeCompare(right.displayName)
     if (displayNameSort !== 0) {
       return displayNameSort
     }
-
-    const leftKey = left.sourceType === 'site'
-      ? (left.sourceUrl ?? '')
-      : (left.walletAddress ?? '')
-    const rightKey = right.sourceType === 'site'
-      ? (right.sourceUrl ?? '')
-      : (right.walletAddress ?? '')
-
-    return leftKey.localeCompare(rightKey)
+    return getItemSortKey(left).localeCompare(getItemSortKey(right))
   })
 }
 
@@ -78,6 +77,8 @@ function useAllowedMarketCreatorsState(disabled: boolean) {
   const [siteUrl, setSiteUrl] = useState('')
   const [walletAddress, setWalletAddress] = useState('')
   const [walletName, setWalletName] = useState('')
+  const [gammaUrl, setGammaUrl] = useState('')
+  const [gammaName, setGammaName] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [itemPendingRemoval, setItemPendingRemoval] = useState<AllowedMarketCreatorItem | null>(null)
   const [isRemoving, setIsRemoving] = useState(false)
@@ -122,8 +123,12 @@ function useAllowedMarketCreatorsState(disabled: boolean) {
       return siteUrl.trim().length === 0
     }
 
+    if (dialogMode === 'gamma_api') {
+      return gammaUrl.trim().length === 0
+    }
+
     return walletName.trim().length === 0 || walletAddress.trim().length === 0
-  }, [dialogMode, disabled, isSubmitting, siteUrl, walletAddress, walletName])
+  }, [dialogMode, disabled, isSubmitting, siteUrl, walletAddress, walletName, gammaUrl])
 
   return {
     items,
@@ -139,6 +144,10 @@ function useAllowedMarketCreatorsState(disabled: boolean) {
     setWalletAddress,
     walletName,
     setWalletName,
+    gammaUrl,
+    setGammaUrl,
+    gammaName,
+    setGammaName,
     isSubmitting,
     setIsSubmitting,
     itemPendingRemoval,
@@ -167,6 +176,10 @@ export default function AllowedMarketCreatorsManager({
     setWalletAddress,
     walletName,
     setWalletName,
+    gammaUrl,
+    setGammaUrl,
+    gammaName,
+    setGammaName,
     isSubmitting,
     setIsSubmitting,
     itemPendingRemoval,
@@ -176,25 +189,45 @@ export default function AllowedMarketCreatorsManager({
     submitDisabled,
   } = useAllowedMarketCreatorsState(disabled)
 
+  function buildAddSourceBody() {
+    if (dialogMode === 'site') {
+      return { sourceType: 'site' as const, url: siteUrl.trim() }
+    }
+    if (dialogMode === 'gamma_api') {
+      return {
+        sourceType: 'gamma_api' as const,
+        url: gammaUrl.trim(),
+        name: gammaName.trim() || undefined,
+      }
+    }
+    return {
+      sourceType: 'wallet' as const,
+      walletAddress: walletAddress.trim(),
+      name: walletName.trim(),
+    }
+  }
+
+  function getAddSourceSuccessMessage() {
+    if (dialogMode === 'site') {
+      return t('Site source added.')
+    }
+    if (dialogMode === 'gamma_api') {
+      return t('Gamma API source added.')
+    }
+    return t('Wallet source added.')
+  }
+
   async function handleAddSource() {
     setIsSubmitting(true)
 
     try {
-      const body = dialogMode === 'site'
-        ? { sourceType: 'site', url: siteUrl.trim() }
-        : {
-            sourceType: 'wallet',
-            walletAddress: walletAddress.trim(),
-            name: walletName.trim(),
-          }
-
       const response = await fetchAllowedCreatorsApi('', {
         method: 'POST',
         cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(buildAddSourceBody()),
       })
 
       const payload = await response.json().catch(() => null) as unknown
@@ -209,7 +242,9 @@ export default function AllowedMarketCreatorsManager({
       setSiteUrl('')
       setWalletAddress('')
       setWalletName('')
-      toast.success(dialogMode === 'site' ? t('Site source added.') : t('Wallet source added.'))
+      setGammaUrl('')
+      setGammaName('')
+      toast.success(getAddSourceSuccessMessage())
     }
     catch (error) {
       console.error('Failed to add allowed market creator source:', error)
@@ -225,7 +260,11 @@ export default function AllowedMarketCreatorsManager({
 
     try {
       const searchParams = new URLSearchParams()
-      if (item.sourceType === 'site' && item.sourceUrl) {
+      if (item.sourceType === 'gamma_api' && item.sourceUrl) {
+        searchParams.set('sourceType', 'gamma_api')
+        searchParams.set('sourceUrl', item.sourceUrl)
+      }
+      else if (item.sourceType === 'site' && item.sourceUrl) {
         searchParams.set('sourceUrl', item.sourceUrl)
       }
       else if (item.walletAddress) {
@@ -312,14 +351,19 @@ export default function AllowedMarketCreatorsManager({
                 <div className="flex flex-wrap gap-2">
                   {items.map((item, index) => (
                     <Badge
-                      key={item.sourceType === 'site'
+                      key={(item.sourceType === 'site' || item.sourceType === 'gamma_api')
                         ? (item.sourceUrl ?? `${item.displayName}-${index}`)
                         : (item.walletAddress ?? `${item.displayName}-${index}`)}
                       variant="outline"
                       className="gap-1.5 pr-1"
-                      title={item.walletAddress ? `${item.displayName} • ${item.walletAddress}` : item.displayName}
+                      title={item.walletAddress
+                        ? `${item.displayName} • ${item.walletAddress}`
+                        : (item.sourceUrl ?? item.displayName)}
                     >
                       <span>{item.displayName}</span>
+                      {item.sourceType === 'gamma_api'
+                        ? <span className="text-muted-foreground">{t('(gamma API)')}</span>
+                        : null}
                       {item.sourceType === 'site' && item.walletCount > 1
                         ? (
                             <span className="text-muted-foreground">{`(${item.walletCount})`}</span>
@@ -379,47 +423,86 @@ export default function AllowedMarketCreatorsManager({
               >
                 {t('Wallet + name')}
               </Button>
+              <Button
+                type="button"
+                variant={dialogMode === 'gamma_api' ? 'default' : 'outline'}
+                className="flex-1"
+                onClick={() => setDialogMode('gamma_api')}
+                disabled={isSubmitting}
+              >
+                {t('Gamma API')}
+              </Button>
             </div>
 
-            {dialogMode === 'site'
-              ? (
-                  <div className="grid gap-2">
-                    <Label htmlFor="allowed-market-source-url">{t('Kuest site URL or domain')}</Label>
-                    <Input
-                      id="allowed-market-source-url"
-                      value={siteUrl}
-                      onChange={event => setSiteUrl(event.target.value)}
-                      placeholder="site2.com"
-                      disabled={isSubmitting}
-                    />
-                  </div>
-                )
-              : (
-                  <div className="grid gap-4">
-                    <div className="grid gap-2">
-                      <Label htmlFor="allowed-market-source-name">{t('Wallet name')}</Label>
-                      <Input
-                        id="allowed-market-source-name"
-                        value={walletName}
-                        onChange={event => setWalletName(event.target.value)}
-                        placeholder="Site 2 creator"
-                        maxLength={80}
-                        disabled={isSubmitting}
-                      />
-                    </div>
+            {dialogMode === 'site' && (
+              <div className="grid gap-2">
+                <Label htmlFor="allowed-market-source-url">{t('Kuest site URL or domain')}</Label>
+                <Input
+                  id="allowed-market-source-url"
+                  value={siteUrl}
+                  onChange={event => setSiteUrl(event.target.value)}
+                  placeholder="site2.com"
+                  disabled={isSubmitting}
+                />
+              </div>
+            )}
 
-                    <div className="grid gap-2">
-                      <Label htmlFor="allowed-market-source-wallet">{t('Wallet address')}</Label>
-                      <Input
-                        id="allowed-market-source-wallet"
-                        value={walletAddress}
-                        onChange={event => setWalletAddress(event.target.value)}
-                        placeholder="0xabc..."
-                        disabled={isSubmitting}
-                      />
-                    </div>
-                  </div>
-                )}
+            {dialogMode === 'wallet' && (
+              <div className="grid gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="allowed-market-source-name">{t('Wallet name')}</Label>
+                  <Input
+                    id="allowed-market-source-name"
+                    value={walletName}
+                    onChange={event => setWalletName(event.target.value)}
+                    placeholder="Site 2 creator"
+                    maxLength={80}
+                    disabled={isSubmitting}
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="allowed-market-source-wallet">{t('Wallet address')}</Label>
+                  <Input
+                    id="allowed-market-source-wallet"
+                    value={walletAddress}
+                    onChange={event => setWalletAddress(event.target.value)}
+                    placeholder="0xabc..."
+                    disabled={isSubmitting}
+                  />
+                </div>
+              </div>
+            )}
+
+            {dialogMode === 'gamma_api' && (
+              <div className="grid gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="allowed-market-gamma-url">{t('Gamma API URL')}</Label>
+                  <Input
+                    id="allowed-market-gamma-url"
+                    value={gammaUrl}
+                    onChange={event => setGammaUrl(event.target.value)}
+                    placeholder="https://gamma-api.polymarket.com"
+                    disabled={isSubmitting}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {t('Polymarket-compatible Gamma API endpoint. Markets will be pulled directly from this source.')}
+                  </p>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="allowed-market-gamma-name">{t('Display name (optional)')}</Label>
+                  <Input
+                    id="allowed-market-gamma-name"
+                    value={gammaName}
+                    onChange={event => setGammaName(event.target.value)}
+                    placeholder="polymarket"
+                    maxLength={80}
+                    disabled={isSubmitting}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <DialogFooter>

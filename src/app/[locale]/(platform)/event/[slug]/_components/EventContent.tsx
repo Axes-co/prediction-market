@@ -508,7 +508,9 @@ export default function EventContent({
   const viewportWidth = windowViewport.viewportWidth
   const currentUser = clientUser ?? user
   const isNegRiskEnabled = Boolean(event.enable_neg_risk || event.neg_risk)
-  const shouldHideChart = event.total_markets_count > 1 && !isNegRiskEnabled
+  const shouldHideChart = event.total_markets_count > 1
+    && !isNegRiskEnabled
+    && !event.show_all_outcomes
   const orderBootstrapTargetMarket = useMemo(
     () => resolveBootstrapTargetMarket(event, marketSlug),
     [event, marketSlug],

@@ -4,7 +4,6 @@ import type { ChartSettings } from '@/app/[locale]/(platform)/event/[slug]/_comp
 import type { TimeRange } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useEventPriceHistory'
 import type { Market, Outcome } from '@/types'
 import type { PredictionChartCursorSnapshot, PredictionChartProps } from '@/types/PredictionChartTypes'
-import { useQuery } from '@tanstack/react-query'
 import { Clock3Icon, SparkleIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import dynamic from 'next/dynamic'
@@ -492,61 +491,9 @@ function buildChartData(
 
 function MarketOutcomeMetaInformation({ market, currentTimestamp }: { market: Market, currentTimestamp: number | null }) {
   const t = useExtracted()
-  const volumeRequestPayload = useMemo(() => {
-    const tokenIds = (market.outcomes ?? [])
-      .map(outcome => outcome.token_id)
-      .filter(Boolean)
-      .slice(0, 2)
-
-    if (!market.condition_id || tokenIds.length < 2) {
-      return { conditions: [], signature: '' }
-    }
-
-    const signature = `${market.condition_id}:${tokenIds.join(':')}`
-    return {
-      conditions: [{ condition_id: market.condition_id, token_ids: tokenIds as [string, string] }],
-      signature,
-    }
-  }, [market.condition_id, market.outcomes])
-
-  const { data: volumeFromApi } = useQuery({
-    queryKey: ['market-volumes', market.condition_id, volumeRequestPayload.signature],
-    enabled: volumeRequestPayload.conditions.length > 0,
-    staleTime: 60_000,
-    refetchInterval: 60_000,
-    queryFn: async () => {
-      const response = await fetch(`${process.env.CLOB_URL}/data/volumes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          include_24h: false,
-          conditions: volumeRequestPayload.conditions,
-        }),
-      })
-
-      const payload = await response.json() as Array<{
-        condition_id: string
-        status: number
-        volume?: string
-      }>
-
-      return payload
-        .filter(entry => entry?.status === 200)
-        .reduce((total, entry) => {
-          const numeric = Number(entry.volume ?? 0)
-          return Number.isFinite(numeric) ? total + numeric : total
-        }, 0)
-    },
-  })
-
-  const resolvedVolume = useMemo(() => {
-    if (typeof volumeFromApi === 'number' && Number.isFinite(volumeFromApi)) {
-      return volumeFromApi
-    }
-    return market.volume
-  }, [market.volume, volumeFromApi])
+  // `clob.polymarket.com/data/volumes` was removed in V2 (returns 404).
+  // `market.volume` is populated by the gamma sync.
+  const resolvedVolume = market.volume
 
   const shouldShowNew = isMarketNew(market.created_at, undefined, currentTimestamp)
   const formattedVolume = Number.isFinite(resolvedVolume)

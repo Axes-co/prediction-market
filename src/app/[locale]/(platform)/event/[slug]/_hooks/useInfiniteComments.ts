@@ -1,15 +1,7 @@
 import type { Comment, User } from '@/types'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo, useState } from 'react'
-import { useSignMessage } from 'wagmi'
 import { commentMetricsQueryKey } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useCommentMetrics'
-import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
-import {
-  clearCommunityAuth,
-  ensureCommunityToken,
-  loadCommunityAuth,
-  parseCommunityError,
-} from '@/lib/community-auth'
 
 const COMMENTS_PAGE_SIZE = 20
 
@@ -17,6 +9,25 @@ type CommentSort = 'newest' | 'most_liked'
 
 function resolveSort(sortBy: CommentSort) {
   return sortBy === 'most_liked' ? 'top' : 'recent'
+}
+
+/**
+ * Auth here piggybacks on the existing better-auth SIWE session. `fetch` uses
+ * `credentials: 'include'` so the session cookie travels with each request —
+ * no parallel Bearer token is issued for comments. The server (`/api/comments`)
+ * resolves the connected wallet from `auth.api.getSession(request.headers)`.
+ */
+async function parseApiError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = await response.json() as { error?: unknown }
+    if (typeof body?.error === 'string' && body.error.trim().length > 0) {
+      return body.error
+    }
+  }
+  catch {
+    return fallback
+  }
+  return fallback
 }
 
 function hasPositivePositions(positions?: Comment['positions']) {
@@ -40,32 +51,16 @@ export function useInfiniteComments(
   holdersOnly = false,
 ) {
   const queryClient = useQueryClient()
-  const { signMessageAsync } = useSignMessage()
-  const { runWithSignaturePrompt } = useSignaturePromptRunner()
   const [infiniteScrollError, setInfiniteScrollError] = useState<Error | null>(null)
   const [loadingRepliesForComment, setLoadingRepliesForComment] = useState<string | null>(null)
   const [pendingLikeIds, setPendingLikeIds] = useState<Set<string>>(() => new Set())
   const userAddress = user?.address ?? null
-  const userProxyWalletAddress = user?.proxy_wallet_address ?? null
   const commentsQueryKey = ['event-comments', eventSlug, sortBy, holdersOnly, userAddress]
-  const communityApiUrl = process.env.COMMUNITY_URL!
-
-  const getCommunityToken = useCallback(async () => {
-    if (!userAddress) {
-      throw new Error('Connect your wallet to comment')
-    }
-
-    return await ensureCommunityToken({
-      address: userAddress,
-      signMessageAsync: args => runWithSignaturePrompt(() => signMessageAsync(args)),
-      communityApiUrl,
-      proxyWalletAddress: userProxyWalletAddress,
-    })
-  }, [communityApiUrl, runWithSignaturePrompt, signMessageAsync, userAddress, userProxyWalletAddress])
 
   const fetchCommentsPage = useCallback(async ({ pageParam = 0 }: { pageParam: number }) => {
     const offset = pageParam * COMMENTS_PAGE_SIZE
-    const url = new URL(`${communityApiUrl}/comments`)
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
+    const url = new URL('/api/comments', origin)
     url.searchParams.set('event_slug', eventSlug)
     url.searchParams.set('limit', COMMENTS_PAGE_SIZE.toString())
     url.searchParams.set('offset', offset.toString())
@@ -74,27 +69,15 @@ export function useInfiniteComments(
       url.searchParams.set('holders_only', 'true')
     }
 
-    const headers: HeadersInit = {}
-    if (userAddress) {
-      const auth = loadCommunityAuth(userAddress)
-      if (auth?.token) {
-        headers.Authorization = `Bearer ${auth.token}`
-      }
-    }
-
-    const response = await fetch(url.toString(), { headers })
-
-    if (response.status === 401) {
-      clearCommunityAuth()
-    }
+    const response = await fetch(url.toString(), { credentials: 'include' })
 
     if (!response.ok) {
-      throw new Error(await parseCommunityError(response, 'Failed to fetch comments'))
+      throw new Error(await parseApiError(response, 'Failed to fetch comments'))
     }
 
     const payload = await response.json()
     return Array.isArray(payload) ? payload : []
-  }, [communityApiUrl, eventSlug, holdersOnly, sortBy, userAddress])
+  }, [eventSlug, holdersOnly, sortBy])
 
   const {
     data,
@@ -159,14 +142,14 @@ export function useInfiniteComments(
         throw new Error('Comment is too long (max 2000 characters).')
       }
 
-      const token = await getCommunityToken()
+      if (!userAddress) {
+        throw new Error('Connect your wallet to comment')
+      }
 
-      const response = await fetch(`${communityApiUrl}/comments`, {
+      const response = await fetch('/api/comments', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           event_slug: eventSlug,
           content: trimmedContent,
@@ -174,12 +157,8 @@ export function useInfiniteComments(
         }),
       })
 
-      if (response.status === 401) {
-        clearCommunityAuth()
-      }
-
       if (!response.ok) {
-        throw new Error(await parseCommunityError(response, 'Failed to create comment.'))
+        throw new Error(await parseApiError(response, 'Failed to create comment.'))
       }
 
       return await response.json() as Comment
@@ -287,23 +266,19 @@ export function useInfiniteComments(
 
   const likeCommentMutation = useMutation({
     mutationFn: async ({ commentId }: { commentId: string }) => {
-      const token = await getCommunityToken()
+      if (!userAddress) {
+        throw new Error('Connect your wallet to react')
+      }
 
-      const response = await fetch(`${communityApiUrl}/comments/${commentId}/reactions`, {
+      const response = await fetch(`/api/comments/${commentId}/reactions`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'toggle' }),
       })
 
-      if (response.status === 401) {
-        clearCommunityAuth()
-      }
-
       if (!response.ok) {
-        throw new Error(await parseCommunityError(response, 'Failed to update reaction'))
+        throw new Error(await parseApiError(response, 'Failed to update reaction'))
       }
 
       return await response.json() as { likes_count: number, user_has_liked: boolean }
@@ -331,21 +306,17 @@ export function useInfiniteComments(
 
   const deleteCommentMutation = useMutation({
     mutationFn: async ({ commentId }: { commentId: string }) => {
-      const token = await getCommunityToken()
-
-      const response = await fetch(`${communityApiUrl}/comments/${commentId}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
-
-      if (response.status === 401) {
-        clearCommunityAuth()
+      if (!userAddress) {
+        throw new Error('Connect your wallet to delete')
       }
 
+      const response = await fetch(`/api/comments/${commentId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+
       if (!response.ok) {
-        throw new Error(await parseCommunityError(response, 'Failed to delete comment'))
+        throw new Error(await parseApiError(response, 'Failed to delete comment'))
       }
 
       return commentId
@@ -420,20 +391,11 @@ export function useInfiniteComments(
 
   const loadMoreRepliesMutation = useMutation({
     mutationFn: async ({ commentId }: { commentId: string }) => {
-      const headers: HeadersInit = {}
-      if (user?.address) {
-        const auth = loadCommunityAuth(user.address)
-        if (auth?.token) {
-          headers.Authorization = `Bearer ${auth.token}`
-        }
-      }
-
-      const response = await fetch(`${communityApiUrl}/comments/${commentId}/replies`, { headers })
-      if (response.status === 401) {
-        clearCommunityAuth()
-      }
+      const response = await fetch(`/api/comments/${commentId}/replies`, {
+        credentials: 'include',
+      })
       if (!response.ok) {
-        throw new Error(await parseCommunityError(response, 'Failed to load replies'))
+        throw new Error(await parseApiError(response, 'Failed to load replies'))
       }
       return await response.json()
     },

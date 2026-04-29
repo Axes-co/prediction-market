@@ -8,7 +8,7 @@ import type {
   OrderBookSummaryResponse,
 } from '@/app/[locale]/(platform)/event/[slug]/_types/EventOrderBookTypes'
 import type { Market, Outcome } from '@/types'
-import { fetchClobJson, getRoundedCents } from '@/lib/clob'
+import { buildClobPriceQueryEntries, fetchClobJson, getRoundedCents } from '@/lib/clob'
 import { MICRO_UNIT, OUTCOME_INDEX } from '@/lib/constants'
 import { formatCentsLabel, formatSharesLabel, toCents } from '@/lib/formatters'
 
@@ -21,11 +21,11 @@ export async function fetchOrderBookSummaries(tokenIds: string[]): Promise<Order
     return {}
   }
 
-  const payload = tokenIds.map(tokenId => ({ token_id: tokenId }))
+  const booksPayload = tokenIds.map(tokenId => ({ token_id: tokenId }))
 
   const [orderBooks, lastTrades] = await Promise.all([
-    fetchClobJson<ClobOrderbookSummary[]>('/books', payload),
-    fetchClobJson<LastTradePriceEntry[]>('/last-trades-prices', payload).catch((error) => {
+    fetchClobJson<ClobOrderbookSummary[]>('/books', booksPayload),
+    fetchClobJson<LastTradePriceEntry[]>('/last-trades-prices', buildClobPriceQueryEntries(tokenIds)).catch((error) => {
       console.error('Failed to fetch last trades prices', error)
       return null
     }),

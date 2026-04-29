@@ -4,6 +4,7 @@ import { z } from 'zod'
 import {
   groupAllowedMarketCreatorItems,
   isPublicAllowedMarketCreatorsResponse,
+  normalizeAllowedMarketCreatorGammaApiInput,
   normalizeAllowedMarketCreatorSiteInput,
 } from '@/lib/allowed-market-creators'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
@@ -21,9 +22,16 @@ const addWalletCreatorSchema = z.object({
   name: z.string().trim().min(1, 'Wallet name is required.').max(80, 'Wallet name is too long.'),
 })
 
+const addGammaApiCreatorSchema = z.object({
+  sourceType: z.literal('gamma_api'),
+  url: z.string().trim().min(1, 'Gamma API URL is required.'),
+  name: z.string().trim().max(80, 'Display name is too long.').optional(),
+})
+
 const addCreatorSchema = z.discriminatedUnion('sourceType', [
   addSiteCreatorSchema,
   addWalletCreatorSchema,
+  addGammaApiCreatorSchema,
 ])
 
 function toNormalizedWalletList(wallets: string[]) {
@@ -118,6 +126,25 @@ export async function POST(request: Request) {
       return response
     }
 
+    if (parsed.data.sourceType === 'gamma_api') {
+      const normalizedGamma = normalizeAllowedMarketCreatorGammaApiInput(parsed.data.url, parsed.data.name)
+      if ('error' in normalizedGamma) {
+        return NextResponse.json({ error: normalizedGamma.error }, { status: 400 })
+      }
+
+      const { error } = await AllowedMarketCreatorRepository.upsertGammaApiSource({
+        sourceUrl: normalizedGamma.origin,
+        displayName: normalizedGamma.displayName,
+      })
+
+      if (error) {
+        return NextResponse.json({ error }, { status: 500 })
+      }
+
+      const { response } = await buildAdminResponse()
+      return response
+    }
+
     const normalizedSite = normalizeAllowedMarketCreatorSiteInput(parsed.data.url)
     if ('error' in normalizedSite) {
       return NextResponse.json({ error: normalizedSite.error }, { status: 400 })
@@ -186,8 +213,24 @@ export async function DELETE(request: Request) {
     }
 
     const searchParams = new URL(request.url).searchParams
+    const sourceType = searchParams.get('sourceType')?.trim()
     const sourceUrl = searchParams.get('sourceUrl')?.trim() ?? ''
     if (sourceUrl) {
+      if (sourceType === 'gamma_api') {
+        const normalizedGamma = normalizeAllowedMarketCreatorGammaApiInput(sourceUrl)
+        if ('error' in normalizedGamma) {
+          return NextResponse.json({ error: normalizedGamma.error }, { status: 400 })
+        }
+
+        const { error } = await AllowedMarketCreatorRepository.deleteGammaApiSource(normalizedGamma.origin)
+        if (error) {
+          return NextResponse.json({ error }, { status: 500 })
+        }
+
+        const { response } = await buildAdminResponse()
+        return response
+      }
+
       const normalizedSource = normalizeAllowedMarketCreatorSiteInput(sourceUrl)
       if ('error' in normalizedSource) {
         return NextResponse.json({ error: normalizedSource.error }, { status: 400 })

@@ -101,8 +101,13 @@ function buildTimeRangeFilters(range: TimeRange, createdAt: string, resolvedAt?:
   const { createdSeconds, nowSeconds, ageSeconds } = resolveCreatedRange(createdAt, resolvedAt)
 
   if (range === 'ALL') {
+    // Polymarket requires `interval` for the lifetime range and rejects bare
+    // (startTs, endTs) with: "invalid filters: the time component is mandatory,
+    // please use 'startTs' and 'endTs' or 'interval'". Sending both is accepted
+    // by Polymarket and preserves the bounds for kuest's CLOB.
     return {
       fidelity: resolveFidelityForSpan(ageSeconds).toString(),
+      interval: 'all',
       startTs: createdSeconds.toString(),
       endTs: nowSeconds.toString(),
     }
@@ -112,12 +117,15 @@ function buildTimeRangeFilters(range: TimeRange, createdAt: string, resolvedAt?:
   const windowSeconds = RANGE_WINDOW_SECONDS[range]
   const isLongRange = range === '1D' || range === '1W' || range === '1M'
 
-  // Preserve the previous query shape for active markets because CLOB expects
-  // interval-only filters for short ranges.
+  // Polymarket V2 `/batch-prices-history` requires `interval` even when bounds
+  // are provided. Bounded-only bodies return 400 "invalid filters: the time
+  // component is mandatory" (verified live 2026-04-29). We always include
+  // `interval` from the range config; bounds further constrain the window.
   if (!hasResolvedAnchor) {
     if (isLongRange && ageSeconds < windowSeconds) {
       return {
         fidelity: resolveFidelityForSpan(ageSeconds).toString(),
+        interval: config.interval,
         startTs: createdSeconds.toString(),
         endTs: nowSeconds.toString(),
       }
@@ -129,8 +137,7 @@ function buildTimeRangeFilters(range: TimeRange, createdAt: string, resolvedAt?:
     }
   }
 
-  // For resolved markets, anchor non-ALL ranges to the resolution timestamp
-  // and avoid mixing interval with explicit time bounds.
+  // For resolved markets, anchor non-ALL ranges to the resolution timestamp.
   const startSeconds = Math.max(createdSeconds, nowSeconds - windowSeconds)
   const fidelity = isLongRange && ageSeconds < windowSeconds
     ? resolveFidelityForSpan(ageSeconds)
@@ -138,6 +145,7 @@ function buildTimeRangeFilters(range: TimeRange, createdAt: string, resolvedAt?:
 
   return {
     fidelity: fidelity.toString(),
+    interval: config.interval,
     startTs: startSeconds.toString(),
     endTs: nowSeconds.toString(),
   }

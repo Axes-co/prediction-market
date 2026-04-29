@@ -2,6 +2,7 @@ import type { AllowedMarketCreatorRecord, AllowedMarketCreatorSourceType } from 
 import type { QueryResult } from '@/types'
 import { and, asc, eq, notInArray, sql } from 'drizzle-orm'
 import { getAddress } from 'viem'
+import { GAMMA_API_SOURCE_KEY_PREFIX } from '@/lib/allowed-market-creators'
 import { allowed_market_creators } from '@/lib/db/schema'
 import { runQuery } from '@/lib/db/utils/run-query'
 import { db } from '@/lib/drizzle'
@@ -11,6 +12,11 @@ interface UpsertAllowedMarketCreatorInput {
   displayName: string
   sourceUrl?: string | null
   sourceType: AllowedMarketCreatorSourceType
+}
+
+export interface GammaApiSourceRecord {
+  sourceUrl: string
+  displayName: string
 }
 
 function normalizeWalletAddress(walletAddress: string) {
@@ -172,6 +178,71 @@ export const AllowedMarketCreatorRepository = {
         data: deletedRows.length > 0,
         error: null,
       }
+    })
+  },
+
+  async upsertGammaApiSource(input: { sourceUrl: string, displayName: string }): Promise<QueryResult<GammaApiSourceRecord>> {
+    return runQuery(async () => {
+      const sourceUrl = input.sourceUrl.trim()
+      const displayName = input.displayName.trim()
+      const walletAddress = `${GAMMA_API_SOURCE_KEY_PREFIX}${sourceUrl}`
+
+      await db
+        .insert(allowed_market_creators)
+        .values({
+          wallet_address: walletAddress,
+          display_name: displayName,
+          source_url: sourceUrl,
+          source_type: 'gamma_api',
+        })
+        .onConflictDoUpdate({
+          target: allowed_market_creators.wallet_address,
+          set: {
+            display_name: sql`EXCLUDED.display_name`,
+            source_url: sql`EXCLUDED.source_url`,
+            source_type: sql`EXCLUDED.source_type`,
+          },
+        })
+
+      return {
+        data: { sourceUrl, displayName },
+        error: null,
+      }
+    })
+  },
+
+  async listGammaApiSources(): Promise<QueryResult<GammaApiSourceRecord[]>> {
+    return runQuery(async () => {
+      const rows = await db
+        .select({
+          source_url: allowed_market_creators.source_url,
+          display_name: allowed_market_creators.display_name,
+        })
+        .from(allowed_market_creators)
+        .where(eq(allowed_market_creators.source_type, 'gamma_api'))
+        .orderBy(asc(allowed_market_creators.display_name))
+
+      const records: GammaApiSourceRecord[] = []
+      for (const row of rows) {
+        if (row.source_url) {
+          records.push({ sourceUrl: row.source_url, displayName: row.display_name })
+        }
+      }
+      return { data: records, error: null }
+    })
+  },
+
+  async deleteGammaApiSource(sourceUrl: string): Promise<QueryResult<boolean>> {
+    return runQuery(async () => {
+      const deleted = await db
+        .delete(allowed_market_creators)
+        .where(and(
+          eq(allowed_market_creators.source_type, 'gamma_api'),
+          eq(allowed_market_creators.source_url, sourceUrl.trim()),
+        ))
+        .returning({ walletAddress: allowed_market_creators.wallet_address })
+
+      return { data: deleted.length > 0, error: null }
     })
   },
 }

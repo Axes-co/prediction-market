@@ -1,6 +1,7 @@
 import type { MarketTokenTarget } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useEventPriceHistory'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
+import { buildClobPriceQueryEntries } from '@/lib/clob'
 import { normalizeClobMarketPrice } from '@/lib/clob-price'
 
 interface PriceApiResponse {
@@ -79,7 +80,7 @@ async function fetchQuotesByMarket(targets: MarketTokenTarget[]): Promise<Market
       'Accept': 'application/json',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(uniqueTokenIds.map(tokenId => ({ token_id: tokenId }))),
+    body: JSON.stringify(buildClobPriceQueryEntries(uniqueTokenIds)),
   })
 
   if (!response.ok) {

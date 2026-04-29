@@ -86,16 +86,25 @@ export async function fetchBatchPriceHistoryByTokenIds(tokenIds: string[], filte
   const historyByChunk = await Promise.all(
     tokenIdChunks.map(async (tokenIdChunk) => {
       try {
+        const requestBody = buildBatchPriceHistoryRequestBody(tokenIdChunk, filters)
+        // [HERO_CHART_DEBUG] Temporary instrumentation — remove once confirmed.
+        if (typeof window !== 'undefined') {
+          console.debug('[priceHistory] POST', `${process.env.CLOB_URL!}/batch-prices-history`, requestBody)
+        }
         const response = await fetch(`${process.env.CLOB_URL!}/batch-prices-history`, {
           method: 'POST',
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(buildBatchPriceHistoryRequestBody(tokenIdChunk, filters)),
+          body: JSON.stringify(requestBody),
         })
 
         if (!response.ok) {
+          // [HERO_CHART_DEBUG]
+          if (typeof window !== 'undefined') {
+            console.error('[priceHistory] FAIL', response.status, response.statusText, await response.clone().text().catch(() => ''))
+          }
           throw new Error('Failed to fetch price history')
         }
 

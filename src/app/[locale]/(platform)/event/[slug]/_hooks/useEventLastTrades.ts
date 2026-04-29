@@ -2,6 +2,7 @@ import type { MarketTokenTarget } from '@/app/[locale]/(platform)/event/[slug]/_
 import type { LastTradePriceEntry } from '@/app/[locale]/(platform)/event/[slug]/_types/EventOrderBookTypes'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
+import { buildClobPriceQueryEntries } from '@/lib/clob'
 import { normalizeClobMarketPrice } from '@/lib/clob-price'
 
 const CLOB_BASE_URL = process.env.CLOB_URL
@@ -28,7 +29,7 @@ async function fetchLastTradesByMarket(targets: MarketTokenTarget[]) {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(uniqueTokenIds.map(tokenId => ({ token_id: tokenId }))),
+    body: JSON.stringify(buildClobPriceQueryEntries(uniqueTokenIds)),
   })
 
   if (!response.ok) {

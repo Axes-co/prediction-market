@@ -6,8 +6,8 @@ import { useQuery } from '@tanstack/react-query'
 const HERO_COMMENTS_LIMIT = 8
 
 async function fetchRecentComments(eventSlug: string): Promise<Comment[]> {
-  const communityApiUrl = process.env.COMMUNITY_URL!
-  const url = new URL(`${communityApiUrl}/comments`)
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
+  const url = new URL('/api/comments', origin)
   url.searchParams.set('event_slug', eventSlug)
   url.searchParams.set('limit', HERO_COMMENTS_LIMIT.toString())
   url.searchParams.set('offset', '0')

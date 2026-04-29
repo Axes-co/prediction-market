@@ -1,10 +1,9 @@
 'use client'
 
 import type { EventMarketRow } from '@/app/[locale]/(platform)/event/[slug]/_hooks/useEventMarketRows'
-import { useQuery } from '@tanstack/react-query'
 import { XIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
-import { memo, useMemo } from 'react'
+import { memo } from 'react'
 import EventMarketChance from '@/app/[locale]/(platform)/event/[slug]/_components/EventMarketChance'
 import EventIconImage from '@/components/EventIconImage'
 import { Button } from '@/components/ui/button'
@@ -35,60 +34,10 @@ interface EventMarketCardProps {
   onCashOut?: (market: EventMarketRow['market'], tag: MarketPositionTag) => void
 }
 
-function useMarketCardVolume(market: EventMarketRow['market'], yesOutcome: EventMarketRow['yesOutcome'], noOutcome: EventMarketRow['noOutcome']) {
-  const volumeRequestPayload = useMemo(() => {
-    const tokenIds = [yesOutcome?.token_id, noOutcome?.token_id].filter(Boolean) as string[]
-    if (!market.condition_id || tokenIds.length < 2) {
-      return { conditions: [], signature: '' }
-    }
-
-    const signature = `${market.condition_id}:${tokenIds.join(':')}`
-    return {
-      conditions: [{ condition_id: market.condition_id, token_ids: tokenIds.slice(0, 2) as [string, string] }],
-      signature,
-    }
-  }, [market.condition_id, noOutcome?.token_id, yesOutcome?.token_id])
-
-  const { data: volumeFromApi } = useQuery({
-    queryKey: ['trade-volumes', market.condition_id, volumeRequestPayload.signature],
-    enabled: volumeRequestPayload.conditions.length > 0,
-    staleTime: 60_000,
-    refetchInterval: 60_000,
-    queryFn: async () => {
-      const response = await fetch(`${process.env.CLOB_URL}/data/volumes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          include_24h: false,
-          conditions: volumeRequestPayload.conditions,
-        }),
-      })
-
-      const payload = await response.json() as Array<{
-        condition_id: string
-        status: number
-        volume?: string
-      }>
-
-      return payload
-        .filter(entry => entry?.status === 200)
-        .reduce((total, entry) => {
-          const numeric = Number(entry.volume ?? 0)
-          return Number.isFinite(numeric) ? total + numeric : total
-        }, 0)
-    },
-  })
-
-  const resolvedVolume = useMemo(() => {
-    if (typeof volumeFromApi === 'number' && Number.isFinite(volumeFromApi)) {
-      return volumeFromApi
-    }
-    return market.volume
-  }, [market.volume, volumeFromApi])
-
-  return resolvedVolume
+function resolveMarketVolume(market: EventMarketRow['market']) {
+  // `clob.polymarket.com/data/volumes` was removed in V2 (returns 404).
+  // `market.volume` is populated by the gamma sync.
+  return market.volume
 }
 
 function EventMarketCardComponent({
@@ -114,7 +63,7 @@ function EventMarketCardComponent({
   const hasOpenOrders = openOrdersCount > 0
   const shouldShowTags = resolvedPositionTags.length > 0 || hasOpenOrders
   const shouldShowIcon = showMarketIcon && Boolean(market.icon_url)
-  const resolvedVolume = useMarketCardVolume(market, yesOutcome, noOutcome)
+  const resolvedVolume = resolveMarketVolume(market)
 
   return (
     <div
