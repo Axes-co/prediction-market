@@ -69,7 +69,7 @@ describe('buildOrderPayload', () => {
     expect(payload.fee_rate_bps).toBe(150n)
   })
 
-  it('falls back to default fee rate when not provided', () => {
+  it('falls back to zero fee rate when not provided (V2 fees are protocol-set at match time)', () => {
     const payload = buildOrderPayload({
       userAddress: '0xUser',
       outcome: { token_id: '1' } as any,
@@ -81,7 +81,7 @@ describe('buildOrderPayload', () => {
       marketPriceCents: 50,
     })
 
-    expect(payload.fee_rate_bps).toBe(200n)
+    expect(payload.fee_rate_bps).toBe(0n)
   })
 })
 
@@ -90,6 +90,8 @@ describe('submitOrder', () => {
     storeOrderActionMock.mockResolvedValueOnce({ ok: true })
 
     const address = '0x0000000000000000000000000000000000000001' as `0x${string}`
+    const builderCode = '0x23a45b95958270c7094680b5ee0c572662b167b5ea3abb04dd08862e9fb7e309' as const
+    const zeroBytes32 = '0x0000000000000000000000000000000000000000000000000000000000000000' as const
     const payload = {
       salt: 1n,
       maker: address,
@@ -103,6 +105,9 @@ describe('submitOrder', () => {
       fee_rate_bps: 6n,
       side: ORDER_SIDE.BUY,
       signature_type: 0,
+      timestamp: 1777_469_175_000n,
+      metadata: zeroBytes32,
+      builder: builderCode,
     }
 
     await submitOrder({
@@ -118,6 +123,9 @@ describe('submitOrder', () => {
       token_id: '1',
       maker_amount: '2',
       taker_amount: '3',
+      timestamp: '1777469175000',
+      metadata: zeroBytes32,
+      builder: builderCode,
       signature: '0xsigned',
       type: ORDER_TYPE.MARKET,
       condition_id: 'cond-1',

@@ -57,11 +57,11 @@ export async function cancelAllOrdersAction(): Promise<CancelAllOrdersResult> {
       method,
       headers: {
         Accept: 'application/json',
-        KUEST_ADDRESS: user.address,
-        KUEST_API_KEY: auth.clob.key,
-        KUEST_PASSPHRASE: auth.clob.passphrase,
-        KUEST_TIMESTAMP: timestamp.toString(),
-        KUEST_SIGNATURE: signature,
+        POLY_ADDRESS: user.address,
+        POLY_API_KEY: auth.clob.key,
+        POLY_PASSPHRASE: auth.clob.passphrase,
+        POLY_TIMESTAMP: timestamp.toString(),
+        POLY_SIGNATURE: signature,
       },
       signal: AbortSignal.timeout(5_000),
     })

@@ -164,7 +164,7 @@ function usePendingDepositSwap({
         nonce,
         signature: packSafeSignature(signature as `0x${string}`),
         signatureParams: signatureParams ?? typedSignatureParams,
-        metadata: 'swap_usdc_e',
+        metadata: 'wrap_usdc_e',
       }
 
       const submitResult = await submitPendingUsdcSwapAction(submitPayload)

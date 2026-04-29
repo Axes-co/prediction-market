@@ -15,20 +15,27 @@ import { getUserTradingAuthSecrets } from '@/lib/trading-auth/server'
 import { normalizeAddress } from '@/lib/wallet'
 
 const StoreOrderSchema = z.object({
-  // begin blockchain data
+  // begin V2 blockchain data — `serializeOrder` emits both V1 and V2 fields
+  // during the V2.1 → V2.2 transition. V1 fields (taker, nonce, fee_rate_bps)
+  // are accepted by zod for back-compat with the cached client bundle but
+  // never propagated into the V2 wire body.
   salt: z.string(),
   maker: z.string(),
   signer: z.string(),
-  taker: z.string(),
+  taker: z.string().optional(),
   token_id: z.string(),
   maker_amount: z.string(),
   taker_amount: z.string(),
   expiration: z.string(),
-  nonce: z.string(),
-  fee_rate_bps: z.string(),
+  nonce: z.string().optional(),
+  fee_rate_bps: z.string().optional(),
   side: z.union([z.literal(0), z.literal(1)]),
   signature_type: z.number(),
   signature: z.string(),
+  // V2 signed-struct fields
+  timestamp: z.string(),
+  metadata: z.string(),
+  builder: z.string(),
   // end blockchain data
 
   type: z.union([z.literal(ORDER_TYPE.MARKET), z.literal(ORDER_TYPE.LIMIT)]),
@@ -278,21 +285,24 @@ export async function storeOrderAction(payload: StoreOrderInput) {
       return { error: 'Invalid maker address for this order.' }
     }
 
+    // V2 wire body per `docs.polymarket.com/v2-migration.md`. `taker`,
+    // `nonce`, `feeRateBps`, and `conditionId` are removed from V2 — only the
+    // 11 signed fields plus `expiration` (wire-only, GTD TTL) plus `signature`
+    // remain inside `order`.
     const clobPayload = {
       order: {
         salt: validated.data.salt,
         maker: validated.data.maker,
         signer: validated.data.signer,
-        taker: validated.data.taker,
-        conditionId: validated.data.condition_id,
         tokenId: validated.data.token_id,
         makerAmount: validated.data.maker_amount,
         takerAmount: validated.data.taker_amount,
         expiration: validated.data.expiration,
-        nonce: validated.data.nonce,
-        feeRateBps: validated.data.fee_rate_bps,
         side: validated.data.side === 0 ? 'BUY' : 'SELL',
         signatureType: validated.data.signature_type,
+        timestamp: validated.data.timestamp,
+        metadata: validated.data.metadata,
+        builder: validated.data.builder,
         signature: validated.data.signature,
       },
       orderType: clobOrderType,
@@ -316,11 +326,11 @@ export async function storeOrderAction(payload: StoreOrderInput) {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'KUEST_ADDRESS': user.address,
-        'KUEST_API_KEY': auth.clob.key,
-        'KUEST_PASSPHRASE': auth.clob.passphrase,
-        'KUEST_TIMESTAMP': timestamp.toString(),
-        'KUEST_SIGNATURE': signature,
+        'POLY_ADDRESS': user.address,
+        'POLY_API_KEY': auth.clob.key,
+        'POLY_PASSPHRASE': auth.clob.passphrase,
+        'POLY_TIMESTAMP': timestamp.toString(),
+        'POLY_SIGNATURE': signature,
       },
       body,
       signal: AbortSignal.timeout(CLOB_REQUEST_TIMEOUT_MS),
@@ -362,8 +372,13 @@ export async function storeOrderAction(payload: StoreOrderInput) {
       salt: BigInt(validated.data.salt),
       maker_amount: BigInt(validated.data.maker_amount),
       taker_amount: BigInt(validated.data.taker_amount),
-      nonce: BigInt(validated.data.nonce),
-      fee_rate_bps: Number(validated.data.fee_rate_bps),
+      // V1-only fields. Polymarket V2 ignores nonce/feeRateBps; we persist
+      // zeros so the existing `orders` schema columns stay populated until
+      // V2.4 drops them. `validated.data.taker` may be absent post-V2.2
+      // client bundle — default to zero-address to satisfy the column NOT NULL.
+      nonce: validated.data.nonce ? BigInt(validated.data.nonce) : 0n,
+      fee_rate_bps: validated.data.fee_rate_bps ? Number(validated.data.fee_rate_bps) : 0,
+      taker: validated.data.taker ?? '0x0000000000000000000000000000000000000000',
       expiration: BigInt(validated.data.expiration),
       user_id: user.id,
       affiliate_user_id: user.referred_by_user_id,

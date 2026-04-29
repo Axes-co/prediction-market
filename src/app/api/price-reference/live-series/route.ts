@@ -158,7 +158,24 @@ async function getSeriesMapBySlug() {
   return seriesMapBySlugCache
 }
 
+/**
+ * Polymarket V2 has no HTTP equivalent for kuest's `/series-map`,
+ * `/marks/latest`, `/marks/history` price-reference endpoints — sports/live
+ * series data lives on the RTDS WebSocket (`wss://ws-live-data.polymarket.com`)
+ * exclusively. This route stays on the API surface (consumers exist) but
+ * returns `unavailable: true` so the UI can degrade to static charts without
+ * generating 5xx noise. A follow-up sub-phase will reimplement this against
+ * an in-process RTDS subscriber that keeps a local cache of the latest values.
+ */
+const LIVE_SERIES_AVAILABLE = process.env.PRICE_REFERENCE_URL !== undefined
+  && process.env.PRICE_REFERENCE_URL !== process.env.CLOB_URL
+  && !process.env.PRICE_REFERENCE_URL.includes('clob.polymarket.com')
+
 export async function GET(request: Request) {
+  if (!LIVE_SERIES_AVAILABLE) {
+    return NextResponse.json({ unavailable: true })
+  }
+
   const { searchParams } = new URL(request.url)
   const seriesSlugParam = searchParams.get('seriesSlug')?.trim() ?? ''
   const eventStartMsParam = searchParams.get('eventStartMs')?.trim() ?? ''

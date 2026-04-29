@@ -33,7 +33,10 @@ export async function cancelOrderAction(rawOrderId: string) {
 
   const method = 'DELETE'
   const path = '/order'
-  const body = JSON.stringify({ orderId: parsed.data.orderId })
+  // V2 wire body uses `orderID` (uppercase D), matching the response field
+  // from POST /order. Per docs.polymarket.com/v2-migration.md and the
+  // canonical clob-client-v2 SDK source.
+  const body = JSON.stringify({ orderID: parsed.data.orderId })
   const timestamp = Math.floor(Date.now() / 1000)
   const signature = buildClobHmacSignature(
     auth.clob.secret,
@@ -49,11 +52,11 @@ export async function cancelOrderAction(rawOrderId: string) {
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'KUEST_ADDRESS': user.address,
-        'KUEST_API_KEY': auth.clob.key,
-        'KUEST_PASSPHRASE': auth.clob.passphrase,
-        'KUEST_TIMESTAMP': timestamp.toString(),
-        'KUEST_SIGNATURE': signature,
+        'POLY_ADDRESS': user.address,
+        'POLY_API_KEY': auth.clob.key,
+        'POLY_PASSPHRASE': auth.clob.passphrase,
+        'POLY_TIMESTAMP': timestamp.toString(),
+        'POLY_SIGNATURE': signature,
       },
       body,
       signal: AbortSignal.timeout(5_000),

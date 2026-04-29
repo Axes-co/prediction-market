@@ -64,7 +64,9 @@ export async function cancelMarketOrdersAction(payload: { market?: string, asset
   const path = '/cancel-market-orders'
   const body = JSON.stringify({
     ...(parsed.data.market ? { market: parsed.data.market } : {}),
-    ...(parsed.data.assetId ? { assetId: parsed.data.assetId } : {}),
+    // V2 wire body uses snake_case `asset_id`; the `assetId` server-action
+    // arg name stays for the existing client call sites.
+    ...(parsed.data.assetId ? { asset_id: parsed.data.assetId } : {}),
   })
   const timestamp = Math.floor(Date.now() / 1000)
   const signature = buildClobHmacSignature(
@@ -81,11 +83,11 @@ export async function cancelMarketOrdersAction(payload: { market?: string, asset
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'KUEST_ADDRESS': user.address,
-        'KUEST_API_KEY': auth.clob.key,
-        'KUEST_PASSPHRASE': auth.clob.passphrase,
-        'KUEST_TIMESTAMP': timestamp.toString(),
-        'KUEST_SIGNATURE': signature,
+        'POLY_ADDRESS': user.address,
+        'POLY_API_KEY': auth.clob.key,
+        'POLY_PASSPHRASE': auth.clob.passphrase,
+        'POLY_TIMESTAMP': timestamp.toString(),
+        'POLY_SIGNATURE': signature,
       },
       body,
       signal: AbortSignal.timeout(5_000),

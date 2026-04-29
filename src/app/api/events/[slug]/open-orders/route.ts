@@ -178,11 +178,11 @@ async function fetchClobOpenOrders({
     method: 'GET',
     headers: {
       Accept: 'application/json',
-      KUEST_ADDRESS: userAddress,
-      KUEST_API_KEY: auth.key,
-      KUEST_PASSPHRASE: auth.passphrase,
-      KUEST_TIMESTAMP: timestamp.toString(),
-      KUEST_SIGNATURE: signature,
+      POLY_ADDRESS: userAddress,
+      POLY_API_KEY: auth.key,
+      POLY_PASSPHRASE: auth.passphrase,
+      POLY_TIMESTAMP: timestamp.toString(),
+      POLY_SIGNATURE: signature,
     },
     signal: AbortSignal.timeout(5_000),
   })

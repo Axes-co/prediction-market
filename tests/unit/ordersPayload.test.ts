@@ -39,7 +39,10 @@ describe('buildOrderPayload money-safety defaults', () => {
       limitShares: '0',
       feeRateBps: Number.NaN,
     })
-    expect(payloadDefault.fee_rate_bps).toBe(200n)
+    // V2 fees are protocol-set at match time; the call-site `feeRateBps` is
+    // accepted for back-compat but a NaN/missing value normalizes to zero
+    // (was 200n in V1 when fees were embedded in the signed order).
+    expect(payloadDefault.fee_rate_bps).toBe(0n)
 
     const payloadTrunc = buildOrderPayload({
       userAddress,
