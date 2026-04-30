@@ -13,6 +13,7 @@ import {
   COLLATERAL_TOKEN_ADDRESS,
   CONDITIONAL_TOKENS_CONTRACT,
   CTF_EXCHANGE_ADDRESS,
+  NATIVE_USDC_TOKEN_ADDRESS,
   NEG_RISK_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   PUSD_ADDRESS,
@@ -198,8 +199,8 @@ function parseAmountToBaseUnits(amount: string | number | bigint, decimals: numb
  * V2 onboarding approvals batch. Three approval families bundled into a single
  * Safe-tx so a new user signs once and is fully ready to trade:
  *
- *   1. USDC.e → Collateral Onramp — lets `Onramp.wrap()` pull USDC.e from the
- *      Safe to mint pUSD on subsequent deposits.
+ *   1. USDC / USDC.e → Collateral Onramp — lets `Onramp.wrap()` pull either
+ *      supported Polygon USDC variant from the Safe to mint pUSD on deposits.
  *   2. pUSD → V2 trading spenders (4) — Conditional Tokens (V2),
  *      NegRisk Adapter (V2), CTF Exchange (V2), NegRisk CTF Exchange (V2).
  *      Required for the V2 Exchange to settle fills.
@@ -226,18 +227,25 @@ export function buildApproveTokenTransactions(options?: ApproveOptions): SafeTra
 
   const transactions: SafeTransaction[] = []
 
-  // (1) USDC.e → Collateral Onramp. Single approval that powers all future
-  // `Onramp.wrap()` calls in the deposit flow.
-  transactions.push({
-    to: COLLATERAL_TOKEN_ADDRESS as `0x${string}`,
-    value: '0',
-    data: encodeFunctionData({
-      abi: erc20Abi,
-      functionName: 'approve',
-      args: [COLLATERAL_ONRAMP_ADDRESS, MAX_ALLOWANCE],
-    }),
-    operation: SafeOperationType.Call,
-  })
+  // (1) USDC / USDC.e → Collateral Onramp. The deposit flow can select either
+  // asset depending on what the Safe received, so both allowances must exist.
+  const onrampAssets = Array.from(new Set([
+    COLLATERAL_TOKEN_ADDRESS,
+    NATIVE_USDC_TOKEN_ADDRESS,
+  ])) as `0x${string}`[]
+
+  for (const asset of onrampAssets) {
+    transactions.push({
+      to: asset,
+      value: '0',
+      data: encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [COLLATERAL_ONRAMP_ADDRESS, MAX_ALLOWANCE],
+      }),
+      operation: SafeOperationType.Call,
+    })
+  }
 
   // (2) pUSD → V2 trading spenders.
   for (const spender of uniqueSpenders) {
