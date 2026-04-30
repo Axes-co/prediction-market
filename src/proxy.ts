@@ -20,6 +20,7 @@ import { routing } from './i18n/routing'
 
 const intlMiddleware = createMiddleware(routing)
 const protectedPrefixes = ['/settings', '/portfolio', '/admin']
+const DEFAULT_PREDICTIONS_ROUTE_SLUG = 'trending'
 
 const BLOCKED_COUNTRIES_CACHE_TTL_MS = 60_000
 let blockedCountriesCache: { value: string[], expiresAt: number } | null = null
@@ -111,7 +112,11 @@ function resolvePredictionResultsRewrite({
     return null
   }
 
-  if (!/^\/predictions\/[^/]+$/.test(pathname)) {
+  const normalizedPathname = pathname === '/predictions'
+    ? `/predictions/${DEFAULT_PREDICTIONS_ROUTE_SLUG}`
+    : pathname
+
+  if (!/^\/predictions\/[^/]+$/.test(normalizedPathname)) {
     return null
   }
 
@@ -122,7 +127,7 @@ function resolvePredictionResultsRewrite({
   rewrittenSearchParams.delete(PREDICTION_RESULTS_STATUS_PARAM)
 
   return {
-    pathname: buildPredictionResultsInternalRoutePath(pathname, filters),
+    pathname: buildPredictionResultsInternalRoutePath(normalizedPathname, filters),
     search: rewrittenSearchParams.toString(),
   }
 }
