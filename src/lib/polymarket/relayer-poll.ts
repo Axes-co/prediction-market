@@ -1,5 +1,3 @@
-import { buildRelayerHeaders } from '@/lib/polymarket/relayer-auth'
-
 export interface RelayerTransactionRecord {
   transactionID: string
   transactionHash?: string
@@ -30,13 +28,11 @@ export async function fetchRelayerTransaction(
   }
 
   const path = `/transaction?id=${encodeURIComponent(transactionID)}`
-  const headers = buildRelayerHeaders('GET', `/transaction`)
 
   const response = await fetch(`${relayerUrl}${path}`, {
     method: 'GET',
     headers: {
       Accept: 'application/json',
-      ...headers,
     },
     signal,
   })
