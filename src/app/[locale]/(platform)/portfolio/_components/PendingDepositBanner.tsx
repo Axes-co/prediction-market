@@ -1,6 +1,7 @@
 'use client'
 
 import type { SafeOperationType } from '@/lib/safe/transactions'
+import { useQueryClient } from '@tanstack/react-query'
 import { ArrowDownToLineIcon, CheckIcon, Loader2Icon } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
@@ -10,6 +11,7 @@ import { useTradingOnboarding } from '@/app/[locale]/(platform)/_providers/Tradi
 import { buildPendingUsdcSwapAction, submitPendingUsdcSwapAction } from '@/app/[locale]/(platform)/portfolio/_actions/pending-deposit'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { SAFE_BALANCE_QUERY_KEY } from '@/hooks/useBalance'
 import { usePendingUsdcDeposit } from '@/hooks/usePendingUsdcDeposit'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
 import { useRouter } from '@/i18n/navigation'
@@ -75,8 +77,9 @@ function usePendingDepositSwap({
   closeDialog,
   userAddress,
   userProxyWalletAddress,
-  pendingBalanceRawBase,
+  pendingBalance,
   refetchPendingDeposit,
+  invalidateTradeBalance,
   openTradeRequirements,
   runWithSignaturePrompt,
   signMessageAsync,
@@ -87,8 +90,9 @@ function usePendingDepositSwap({
   closeDialog: () => void
   userAddress: string | null
   userProxyWalletAddress: string | null
-  pendingBalanceRawBase: string | null
+  pendingBalance: ReturnType<typeof usePendingUsdcDeposit>['pendingBalance']
   refetchPendingDeposit: () => void
+  invalidateTradeBalance: () => void
   openTradeRequirements: ReturnType<typeof useTradingOnboarding>['openTradeRequirements']
   runWithSignaturePrompt: ReturnType<typeof useSignaturePromptRunner>['runWithSignaturePrompt']
   signMessageAsync: ReturnType<typeof useSignMessage>['signMessageAsync']
@@ -108,7 +112,17 @@ function usePendingDepositSwap({
       return
     }
 
-    if (!pendingBalanceRawBase || pendingBalanceRawBase === '0') {
+    // Pick whichever variant has the larger balance — the Onramp accepts both
+    // native USDC and USDC.e per the deployed contract. If both have funds,
+    // wrap the bigger one first; the smaller stays as a follow-up pending
+    // deposit on the next render.
+    const assetToWrap = pendingBalance.bridged && pendingBalance.native
+      ? (BigInt(pendingBalance.bridged.rawBase) >= BigInt(pendingBalance.native.rawBase)
+          ? pendingBalance.bridged
+          : pendingBalance.native)
+      : pendingBalance.bridged ?? pendingBalance.native ?? null
+
+    if (!assetToWrap || assetToWrap.rawBase === '0') {
       toast.error('No pending deposit found.')
       return
     }
@@ -118,7 +132,8 @@ function usePendingDepositSwap({
 
     try {
       const buildResult = await buildPendingUsdcSwapAction({
-        amount: pendingBalanceRawBase,
+        amount: assetToWrap.rawBase,
+        asset: assetToWrap.asset,
       })
 
       if (buildResult.error || !buildResult.payload) {
@@ -183,7 +198,12 @@ function usePendingDepositSwap({
       await new Promise(resolve => setTimeout(resolve, CONFIRMATION_DELAY_MS))
       setStep('success')
       triggerConfettiColorful()
+      // The wrap consumes the source USDC and mints pUSD to the proxy. Both
+      // the pre-wrap (USDC variants) and post-wrap (pUSD) balances changed,
+      // so refresh both readers — otherwise trade panels still show $0
+      // until their interval poll catches up.
       void refetchPendingDeposit()
+      invalidateTradeBalance()
     }
     catch (error) {
       if (!isUserRejectedRequestError(error)) {
@@ -194,8 +214,9 @@ function usePendingDepositSwap({
     }
   }, [
     closeDialog,
+    invalidateTradeBalance,
     openTradeRequirements,
-    pendingBalanceRawBase,
+    pendingBalance,
     refetchPendingDeposit,
     runWithSignaturePrompt,
     setStatusMessage,
@@ -211,6 +232,7 @@ function usePendingDepositSwap({
 
 export default function PendingDepositBanner() {
   const { pendingBalance, hasPendingDeposit, refetchPendingDeposit } = usePendingUsdcDeposit()
+  const queryClient = useQueryClient()
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
   const router = useRouter()
@@ -228,6 +250,9 @@ export default function PendingDepositBanner() {
     closeDialog,
     handleOpenChange,
   } = usePendingDepositDialogState()
+  const invalidateTradeBalance = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: [SAFE_BALANCE_QUERY_KEY] })
+  }, [queryClient])
   const { handleConfirm } = usePendingDepositSwap({
     step,
     setStep,
@@ -235,8 +260,9 @@ export default function PendingDepositBanner() {
     closeDialog,
     userAddress,
     userProxyWalletAddress,
-    pendingBalanceRawBase: pendingBalance.rawBase,
+    pendingBalance,
     refetchPendingDeposit,
+    invalidateTradeBalance,
     openTradeRequirements,
     runWithSignaturePrompt,
     signMessageAsync,

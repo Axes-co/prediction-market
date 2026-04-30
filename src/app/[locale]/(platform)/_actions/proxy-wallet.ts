@@ -8,6 +8,7 @@ import { UserRepository } from '@/lib/db/queries/user'
 import { users } from '@/lib/db/schema/auth/tables'
 import { db } from '@/lib/drizzle'
 import { buildRelayerHeaders } from '@/lib/polymarket/relayer-auth'
+import { parseRelayerSubmitResponse } from '@/lib/polymarket/relayer-poll'
 import {
   getSafeProxyWalletAddress,
   isProxyWalletDeployed,
@@ -208,5 +209,10 @@ async function triggerSafeProxyDeployment({
     }))
   }
 
-  return typeof responsePayload?.txHash === 'string' ? responsePayload.txHash : null
+  // V2 /submit returns `{ transactionID, state: "STATE_NEW" }` — the onchain
+  // tx hash is only available later via GET /transaction. Track the
+  // transactionID for status polling; on-chain `getCode(proxyAddress)` remains
+  // the source of truth for the "deployed" status flip.
+  const parsed = parseRelayerSubmitResponse(responsePayload)
+  return parsed.transactionID ?? parsed.legacyTxHash
 }

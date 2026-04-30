@@ -4,6 +4,11 @@ import type { SafeTransactionRequestPayload } from '@/lib/safe/transactions'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { UserRepository } from '@/lib/db/queries/user'
 import { buildRelayerHeaders } from '@/lib/polymarket/relayer-auth'
+import {
+  isRelayerSuccess,
+  parseRelayerSubmitResponse,
+  pollRelayerTransaction,
+} from '@/lib/polymarket/relayer-poll'
 import { markTokenApprovalsCompleted } from '@/lib/trading-auth/server'
 import {
   getTradingFlowErrorPreview,
@@ -22,8 +27,12 @@ interface SubmitSafeTransactionResult {
     enabled: boolean
     updatedAt: string
   }
+  transactionID?: string
+  state?: string
   txHash?: string
 }
+
+const APPROVAL_POLL_TIMEOUT_MS = 60_000
 
 export async function getSafeNonceAction(): Promise<SafeNonceResult> {
   const user = await UserRepository.getCurrentUser({ disableCookieCache: true })
@@ -137,22 +146,60 @@ export async function submitSafeTransactionAction(request: SafeTransactionReques
       return { error: message }
     }
 
+    const parsed = parseRelayerSubmitResponse(payload)
+    if (!parsed.transactionID) {
+      // Legacy relayer (kuest) returned txHash inline. Trust it as terminal.
+      const legacyHash = parsed.legacyTxHash
+      let approvals
+      if (request.metadata === 'approve_tokens') {
+        approvals = await markTokenApprovalsCompleted(user.id)
+      }
+      return { error: null, approvals, txHash: legacyHash ?? undefined }
+    }
+
+    // V2 relayer: /submit returns STATE_NEW + transactionID. Poll for terminal
+    // state before flipping local approval flags so DB never advances ahead of
+    // the on-chain reality.
+    const final = await pollRelayerTransaction(parsed.transactionID, {
+      timeoutMs: APPROVAL_POLL_TIMEOUT_MS,
+    }).catch((error) => {
+      console.error('Relayer transaction poll failed.', error)
+      return null
+    })
+
+    // Poll didn't resolve to a terminal state in time. We can't claim the
+    // approvals are completed because we don't know whether the on-chain
+    // call succeeded — returning a soft error keeps the UI at the prompt
+    // step rather than declaring success on a still-pending transaction.
+    if (!final) {
+      return {
+        error: 'Approval submitted to the relayer but did not confirm in time. Refresh in a minute and try again.',
+        transactionID: parsed.transactionID,
+        state: parsed.state ?? 'STATE_NEW',
+      }
+    }
+
+    if (!isRelayerSuccess(final.state)) {
+      return {
+        error: 'Approval transaction failed on-chain. Please try again.',
+        transactionID: parsed.transactionID,
+        state: final.state,
+        txHash: final.transactionHash,
+      }
+    }
+
     let approvals
     if (request.metadata === 'approve_tokens') {
       approvals = await markTokenApprovalsCompleted(user.id)
     }
 
-    const txHash = typeof payload?.txHash === 'string'
-      ? payload.txHash
-      : typeof payload?.tx_hash === 'string'
-        ? payload.tx_hash
-        : typeof payload?.transactionHash === 'string'
-          ? payload.transactionHash
-          : typeof payload?.hash === 'string'
-            ? payload.hash
-            : undefined
-
-    return { error: null, approvals, txHash }
+    return {
+      error: null,
+      approvals,
+      transactionID: parsed.transactionID,
+      state: final.state,
+      txHash: final.transactionHash,
+    }
   }
   catch (error) {
     console.error('Failed to submit safe transaction', error)

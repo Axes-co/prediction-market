@@ -4,14 +4,14 @@ import type { SafeTransactionRequestPayload } from '@/lib/safe/transactions'
 import type { ProxyWalletStatus } from '@/types'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { hashTypedData, isAddress } from 'viem'
+import { hashTypedData, isAddress, parseUnits } from 'viem'
 import { useSignMessage } from 'wagmi'
 import { getSafeNonceAction, submitSafeTransactionAction } from '@/app/[locale]/(platform)/_actions/approve-tokens'
 import { WalletDepositModal, WalletWithdrawModal } from '@/app/[locale]/(platform)/_components/WalletModal'
 import { useTradingOnboarding } from '@/app/[locale]/(platform)/_providers/TradingOnboardingProvider'
 import { useBalance } from '@/hooks/useBalance'
 import { useIsMobile } from '@/hooks/useIsMobile'
-import { useLiFiWalletUsdBalance } from '@/hooks/useLiFiWalletUsdBalance'
+import { useProxyDepositBalance } from '@/hooks/useProxyDepositBalance'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
 import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 import { MAX_AMOUNT_INPUT } from '@/lib/amount-input'
@@ -19,7 +19,8 @@ import { defaultNetwork } from '@/lib/appkit'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { COLLATERAL_TOKEN_ADDRESS } from '@/lib/contracts'
 import { formatAmountInputValue } from '@/lib/formatters'
-import { buildSendErc20Transaction, getSafeTxTypedData, packSafeSignature } from '@/lib/safe/transactions'
+import { buildOfframpUnwrapTransaction } from '@/lib/polymarket/onramp'
+import { aggregateSafeTransactions, buildSendErc20Transaction, getSafeTxTypedData, packSafeSignature } from '@/lib/safe/transactions'
 import { isTradingAuthRequiredError } from '@/lib/trading-auth/errors'
 
 type DepositView = 'fund' | 'receive' | 'wallets' | 'amount' | 'confirm' | 'success'
@@ -173,12 +174,24 @@ function useWalletSendHandler({
         return
       }
 
-      const transaction = buildSendErc20Transaction({
+      // V2 trading collateral lives as pUSD at the proxy. To send it out as
+      // USDC.e (the on-chain ERC-20 the user expects on their destination
+      // wallet), atomically unwrap pUSD → USDC.e via the Offramp and then
+      // transfer USDC.e to `walletSendTo`. Bundled into a single Safe
+      // MultiSend so the user signs once and either both legs land or
+      // neither does.
+      const amountBaseUnits = BigInt(parseUnits(walletSendAmount, 6))
+      const unwrapTransaction = buildOfframpUnwrapTransaction({
+        recipient: user.proxy_wallet_address as `0x${string}`,
+        amountBaseUnits,
+      })
+      const transferTransaction = buildSendErc20Transaction({
         token: COLLATERAL_TOKEN_ADDRESS,
         to: walletSendTo as `0x${string}`,
         amount: walletSendAmount,
         decimals: 6,
       })
+      const transaction = aggregateSafeTransactions([unwrapTransaction, transferTransaction])
 
       const typedData = getSafeTxTypedData({
         chainId: defaultNetwork.id,
@@ -343,10 +356,14 @@ export function WalletFlow({
   } = useWithdrawFormState(onWithdrawOpenChange)
   const { pendingWithdrawals: visiblePendingWithdrawals, setPendingWithdrawals } = usePendingWithdrawals()
   const { balance, isLoadingBalance } = useBalance()
+  // Deposit modal "Axes Balance" should reflect funds already inside the
+  // platform (Safe proxy USDC.e + pUSD), not the EOA's Li.Fi-discoverable
+  // USD. Li.Fi at the EOA stays in scope for the source-token list further
+  // down (`useLiFiWalletTokens` in the modal itself).
   const {
-    formattedUsdBalance,
-    isLoadingUsdBalance,
-  } = useLiFiWalletUsdBalance(user?.address, { enabled: depositOpen })
+    balance: depositBalance,
+    isLoadingBalance: isLoadingDepositBalance,
+  } = useProxyDepositBalance({ enabled: depositOpen })
   const site = useSiteIdentity()
   const connectedWalletAddress = user?.address ?? null
   const { openTradeRequirements } = useTradingOnboarding()
@@ -385,8 +402,8 @@ export function WalletFlow({
         view={depositView}
         onViewChange={setDepositView}
         onBuy={handleBuy}
-        walletBalance={formattedUsdBalance}
-        isBalanceLoading={isLoadingUsdBalance}
+        walletBalance={depositBalance.totalFormatted}
+        isBalanceLoading={isLoadingDepositBalance}
       />
       <WalletWithdrawModal
         open={withdrawOpen}

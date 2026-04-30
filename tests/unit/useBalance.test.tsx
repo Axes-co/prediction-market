@@ -29,6 +29,7 @@ vi.mock('@/lib/appkit', () => ({
 
 vi.mock('@/lib/contracts', () => ({
   COLLATERAL_TOKEN_ADDRESS: '0x0000000000000000000000000000000000000001',
+  PUSD_ADDRESS: '0x0000000000000000000000000000000000000002',
 }))
 
 function createWrapper() {

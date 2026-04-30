@@ -31,27 +31,45 @@ const GenerateTradingAuthSchema = z.object({
 })
 
 async function requestApiKey(baseUrl: string, headers: Record<string, string>) {
-  const response = await fetch(`${baseUrl}/auth/api-key`, {
-    method: 'POST',
-    headers,
-    body: '',
-    signal: AbortSignal.timeout(10_000),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${baseUrl}/auth/api-key`, {
+      method: 'POST',
+      headers,
+      body: '',
+      signal: AbortSignal.timeout(10_000),
+    })
+  }
+  catch (error) {
+    const detail = error instanceof Error ? error.message : 'unknown network error'
+    console.error('Trading auth API key request failed (transport).', { baseUrl, detail })
+    throw new Error(`Could not reach ${baseUrl}: ${detail}`)
+  }
 
   const { payload, rawError, contentType } = await readTradingFlowErrorResponse(response)
   if (!response.ok || !payload) {
     console.error('Trading auth API key request failed.', {
       baseUrl,
       status: response.status,
+      statusText: response.statusText,
       contentType,
       rawError: getTradingFlowErrorPreview(rawError),
     })
+    // Surface the upstream status/error verbatim instead of always returning
+    // the generic "try again" fallback. The CLOB returns clearly actionable
+    // errors like `Invalid L1 headers` (401) or `Could not create api key`
+    // (400), and operators need to see them to diagnose configuration issues
+    // (geoblock, signature shape, etc.) instead of a useless generic message.
+    const upstream = getTradingFlowErrorPreview(rawError)
+    if (upstream) {
+      throw new Error(`CLOB ${response.status}: ${upstream}`)
+    }
     const message = mapTradingAuthError(rawError, {
       status: response.status,
       contentType,
       forceFallback: response.ok,
     })
-    throw new Error(message)
+    throw new Error(`${message} (CLOB ${response.status} ${response.statusText})`)
   }
 
   if (

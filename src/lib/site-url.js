@@ -28,19 +28,17 @@ function normalizeSiteUrl(value) {
 }
 
 function resolveSiteUrl(env = process.env) {
-  const explicitSiteUrl = typeof env.SITE_URL === 'string' && env.SITE_URL.trim()
-    ? env.SITE_URL
-    : null
-  const vercelProductionUrl = typeof env.VERCEL_PROJECT_PRODUCTION_URL === 'string' && env.VERCEL_PROJECT_PRODUCTION_URL.trim()
-    ? env.VERCEL_PROJECT_PRODUCTION_URL
-    : null
+  const candidates = [
+    env.SITE_URL,
+    env.VERCEL_PROJECT_PRODUCTION_URL,
+    env.VERCEL_BRANCH_URL,
+    env.VERCEL_URL,
+  ]
 
-  if (explicitSiteUrl) {
-    return normalizeSiteUrl(explicitSiteUrl)
-  }
-
-  if (vercelProductionUrl) {
-    return normalizeSiteUrl(vercelProductionUrl)
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return normalizeSiteUrl(candidate)
+    }
   }
 
   return 'http://localhost:3000'

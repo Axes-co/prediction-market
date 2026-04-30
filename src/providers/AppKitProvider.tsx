@@ -71,6 +71,12 @@ function initializeAppKitSingleton(
       adapters: [wagmiAdapter],
       themeMode,
       defaultAccountTypes: { eip155: 'eoa' },
+      // Reown metadata.url is a build-time constant used by their Verify API
+      // to whitelist the application origin (https://docs.reown.com/appkit
+      // — "url ... origin must match your domain"). Anchored on
+      // `process.env.SITE_URL`, which `src/lib/site-url.js` resolves from
+      // SITE_URL → VERCEL_PROJECT_PRODUCTION_URL → VERCEL_BRANCH_URL →
+      // VERCEL_URL at build time.
       metadata: {
         name: site.name,
         description: site.description,
@@ -89,9 +95,14 @@ function initializeAppKitSingleton(
       },
       siweConfig: createSIWEConfig({
         signOutOnAccountChange: true,
+        // EIP-4361 §3 explicitly requires the SIWE `domain` and `uri` to
+        // match the actual origin where the signing request was made, not a
+        // build-time constant — the requirement exists to prevent phishing
+        // signature replay across domains. So these MUST come from the live
+        // `window.location`, not from `process.env.SITE_URL`.
         getMessageParams: async () => ({
-          domain: new URL(process.env.SITE_URL!).host,
-          uri: typeof window !== 'undefined' ? window.location.origin : '',
+          domain: window.location.host,
+          uri: window.location.origin,
           chains: [defaultNetwork.id],
           statement: 'Please sign with your account',
         }),
