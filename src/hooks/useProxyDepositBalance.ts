@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { createPublicClient, formatUnits, http } from 'viem'
 import { defaultNetwork } from '@/lib/appkit'
-import { COLLATERAL_TOKEN_ADDRESS, PUSD_ADDRESS } from '@/lib/contracts'
+import { COLLATERAL_TOKEN_ADDRESS, NATIVE_USDC_TOKEN_ADDRESS, PUSD_ADDRESS } from '@/lib/contracts'
 import { normalizeAddress } from '@/lib/wallet'
 import { useUser } from '@/stores/useUser'
 
@@ -26,17 +26,20 @@ const USD_FORMATTER = new Intl.NumberFormat('en-US', {
 export const PROXY_DEPOSIT_BALANCE_QUERY_KEY = 'proxy-deposit-balance'
 
 interface ProxyDepositBalance {
+  /** Native Circle USDC held at the Safe proxy (waiting to be wrapped). */
+  nativeUsdc: number
   /** USDC.e held at the Safe proxy (waiting to be wrapped). 6-decimal float. */
   usdce: number
   /** pUSD held at the Safe proxy (already wrapped, tradable). 6-decimal float. */
   pusd: number
-  /** Sum of `usdce + pusd`. The user's total platform balance, USD-equivalent. */
+  /** Sum of `nativeUsdc + usdce + pusd`. The user's total platform balance, USD-equivalent. */
   total: number
   /** Pre-formatted total for display (e.g., "12.34"). */
   totalFormatted: string
 }
 
 const INITIAL_STATE: ProxyDepositBalance = {
+  nativeUsdc: 0,
   usdce: 0,
   pusd: 0,
   total: 0,
@@ -50,14 +53,13 @@ interface UseProxyDepositBalanceOptions {
 const RPC_URL = defaultNetwork.rpcUrls.default.http[0]
 
 /**
- * Reads the Safe proxy's USDC.e + pUSD balances and exposes the combined
- * total. Used in the deposit modal's "Axes Balance" header so the displayed
- * number is the user's actual at-the-platform funds, regardless of whether
- * they have wrapped via the Onramp yet.
+ * Reads the Safe proxy's native USDC, USDC.e, and pUSD balances and exposes
+ * the combined total. Used in the deposit modal's "Axes Balance" header so
+ * the displayed number is the user's actual at-the-platform funds, regardless
+ * of whether they have wrapped via the Onramp yet.
  *
- * Trading-side hooks (`useBalance`) continue to read USDC.e only because their
- * consumers expect that exact semantic (max-amount input, withdrawal cap,
- * etc.). Combining there would change the meaning silently.
+ * Trading-side hooks (`useBalance`) continue to read pUSD only because that is
+ * the actual CLOB/CTF collateral after activation.
  */
 export function useProxyDepositBalance(options: UseProxyDepositBalanceOptions = {}) {
   const user = useUser()
@@ -92,7 +94,13 @@ export function useProxyDepositBalance(options: UseProxyDepositBalanceOptions = 
       }
 
       try {
-        const [usdceRaw, pusdRaw] = await Promise.all([
+        const [nativeUsdcRaw, usdceRaw, pusdRaw] = await Promise.all([
+          client.readContract({
+            address: NATIVE_USDC_TOKEN_ADDRESS,
+            abi: ERC20_BALANCE_ABI,
+            functionName: 'balanceOf',
+            args: [proxyWalletAddress],
+          }) as Promise<bigint>,
           client.readContract({
             address: COLLATERAL_TOKEN_ADDRESS,
             abi: ERC20_BALANCE_ABI,
@@ -107,11 +115,13 @@ export function useProxyDepositBalance(options: UseProxyDepositBalanceOptions = 
           }) as Promise<bigint>,
         ])
 
+        const nativeUsdc = Number(formatUnits(nativeUsdcRaw, USDC_DECIMALS))
         const usdce = Number(formatUnits(usdceRaw, USDC_DECIMALS))
         const pusd = Number(formatUnits(pusdRaw, USDC_DECIMALS))
-        const total = usdce + pusd
+        const total = nativeUsdc + usdce + pusd
 
         return {
+          nativeUsdc,
           usdce,
           pusd,
           total,

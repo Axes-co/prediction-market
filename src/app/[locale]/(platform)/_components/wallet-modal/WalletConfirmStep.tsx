@@ -1,6 +1,7 @@
 'use client'
 
 import type { LiFiWalletTokenItem } from '@/hooks/useLiFiWalletTokens'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   ChevronRightIcon,
   FuelIcon,
@@ -17,6 +18,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useLiFiExecution } from '@/hooks/useLiFiExecution'
 import { useLiFiQuote } from '@/hooks/useLiFiQuote'
+import { PENDING_USDC_QUERY_KEY } from '@/hooks/usePendingUsdcDeposit'
+import { PROXY_DEPOSIT_BALANCE_QUERY_KEY } from '@/hooks/useProxyDepositBalance'
 import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 import { formatDisplayAmount } from '@/lib/amount-input'
 import { cn } from '@/lib/utils'
@@ -41,6 +44,7 @@ function WalletConfirmStep({
   refreshIndex: number
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const queryClient = useQueryClient()
   const eoaSuffix = walletEoaAddress?.slice(-4)
   const [isBreakdownOpen, setIsBreakdownOpen] = useState(false)
   const site = useSiteIdentity()
@@ -244,7 +248,7 @@ function WalletConfirmStep({
       </div>
 
       <Badge variant="outline" className="w-full p-3 text-muted-foreground">
-        By clicking on Confirm Order, you agree to our
+        By clicking on Confirm Deposit, you agree to our
         {' '}
         <a
           href="/tos"
@@ -267,6 +271,10 @@ function WalletConfirmStep({
           try {
             setIsSubmitting(true)
             await execute()
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: [PENDING_USDC_QUERY_KEY] }),
+              queryClient.invalidateQueries({ queryKey: [PROXY_DEPOSIT_BALANCE_QUERY_KEY] }),
+            ])
             onComplete()
           }
           finally {
@@ -278,7 +286,7 @@ function WalletConfirmStep({
         {isSubmitting && 'Confirm transaction in your wallet'}
         {!isSubmitting && status === 'quote' && 'Preparing your quote...'}
         {!isSubmitting && status === 'gas' && 'Estimating gas...'}
-        {!isSubmitting && status === 'ready' && 'Confirm order'}
+        {!isSubmitting && status === 'ready' && 'Confirm deposit'}
       </Button>
     </div>
   )

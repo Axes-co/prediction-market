@@ -1,6 +1,7 @@
 import type { LiFiWalletTokenItem } from '@/hooks/useLiFiWalletTokens'
 import { useQuery } from '@tanstack/react-query'
 import { parseUnits } from 'viem'
+import { POLYGON_DIRECT_DEPOSIT_METHOD } from '@/hooks/useLiFiWalletTokens'
 import { sanitizeLiFiAmount } from '@/lib/lifi-amount'
 
 export const LIFI_QUOTE_QUERY_KEY = 'lifi-quote'
@@ -35,10 +36,20 @@ export function useLiFiQuote({
     }
   })()
   const canQuote = hasAddresses && hasValidAmount
+  const isDirectPolygonUsdc = fromToken?.depositMethod === POLYGON_DIRECT_DEPOSIT_METHOD
+  const directQuote = isDirectPolygonUsdc && canQuote
+    ? {
+        toAmountDisplay: Number.parseFloat(sanitizedAmount).toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 6,
+        }),
+        gasUsdDisplay: null,
+      }
+    : null
 
   const query = useQuery({
     queryKey: [LIFI_QUOTE_QUERY_KEY, fromToken?.id, amountValue, fromAddress, toAddress, refreshIndex],
-    enabled: canQuote,
+    enabled: canQuote && !isDirectPolygonUsdc,
     staleTime: 15_000,
     queryFn: async () => {
       if (!fromAddress || !toAddress || !fromToken) {
@@ -95,8 +106,8 @@ export function useLiFiQuote({
   })
 
   return {
-    quote: query.data,
-    isLoadingQuote: query.isLoading || (query.isFetching && query.data === undefined),
+    quote: directQuote ?? query.data,
+    isLoadingQuote: isDirectPolygonUsdc ? false : (query.isLoading || (query.isFetching && query.data === undefined)),
     refetchQuote: query.refetch,
   }
 }

@@ -1,8 +1,11 @@
 import type { ChainId, ExtendedChain, TokensExtendedResponse, WalletTokenExtended } from '@lifi/types'
 import { useQuery } from '@tanstack/react-query'
-import { formatUnits } from 'viem'
+import { createPublicClient, formatUnits, http } from 'viem'
+import { defaultNetwork } from '@/lib/appkit'
+import { COLLATERAL_TOKEN_ADDRESS, NATIVE_USDC_TOKEN_ADDRESS } from '@/lib/contracts'
 
 export const LIFI_WALLET_TOKENS_QUERY_KEY = 'lifi-wallet-tokens'
+export const POLYGON_DIRECT_DEPOSIT_METHOD = 'polygon-usdc-direct'
 
 const USD_FORMATTER = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
@@ -84,10 +87,83 @@ export interface LiFiWalletTokenItem {
   usd: string
   usdValue: number
   disabled: boolean
+  depositMethod: 'lifi' | typeof POLYGON_DIRECT_DEPOSIT_METHOD
 }
 
 interface UseLiFiWalletTokensOptions {
   enabled?: boolean
+}
+
+const USDC_DECIMALS = 6
+const POLYGON_USDC_ICON = '/images/deposit/transfer/usdc_dark.png'
+const POLYGON_CHAIN_ICON = '/images/deposit/transfer/polygon_dark.png'
+const ERC20_BALANCE_ABI = [
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ type: 'uint256' }],
+  },
+] as const
+
+const polygonClient = createPublicClient({
+  chain: defaultNetwork,
+  transport: http(defaultNetwork.rpcUrls.default.http[0]),
+})
+
+function buildWalletTokenId(chainId: number, address: string) {
+  return `${chainId}:${address.toLowerCase()}`
+}
+
+async function readDirectPolygonUsdcItems(walletAddress: string): Promise<LiFiWalletTokenItem[]> {
+  const assets = Array.from(new Map([
+    [NATIVE_USDC_TOKEN_ADDRESS.toLowerCase(), { address: NATIVE_USDC_TOKEN_ADDRESS, symbol: 'USDC' }],
+    [COLLATERAL_TOKEN_ADDRESS.toLowerCase(), { address: COLLATERAL_TOKEN_ADDRESS, symbol: 'USDC.e' }],
+  ]).values())
+
+  const balances = await Promise.all(
+    assets.map(async (asset) => {
+      const rawBase = await polygonClient.readContract({
+        address: asset.address,
+        abi: ERC20_BALANCE_ABI,
+        functionName: 'balanceOf',
+        args: [walletAddress as `0x${string}`],
+      }) as bigint
+      return { ...asset, rawBase }
+    }),
+  )
+
+  return balances.flatMap((asset) => {
+    if (asset.rawBase <= 0n) {
+      return []
+    }
+
+    const balanceRaw = Number(formatUnits(asset.rawBase, USDC_DECIMALS))
+    if (!Number.isFinite(balanceRaw) || balanceRaw <= 0) {
+      return []
+    }
+
+    return [{
+      id: buildWalletTokenId(defaultNetwork.id, asset.address),
+      chainId: defaultNetwork.id,
+      address: asset.address,
+      decimals: USDC_DECIMALS,
+      symbol: asset.symbol,
+      network: 'Polygon',
+      icon: POLYGON_USDC_ICON,
+      chainIcon: POLYGON_CHAIN_ICON,
+      balance: balanceRaw.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 6,
+      }),
+      balanceRaw,
+      usd: USD_FORMATTER.format(balanceRaw),
+      usdValue: balanceRaw,
+      disabled: balanceRaw < MIN_USD_BALANCE,
+      depositMethod: POLYGON_DIRECT_DEPOSIT_METHOD,
+    }]
+  })
 }
 
 export function useLiFiWalletTokens(walletAddress?: string | null, options: UseLiFiWalletTokensOptions = {}) {
@@ -105,6 +181,8 @@ export function useLiFiWalletTokens(walletAddress?: string | null, options: UseL
         return []
       }
 
+      const directPolygonUsdcItemsPromise = readDirectPolygonUsdcItems(walletAddress).catch(() => [])
+
       try {
         const [tokensResult, balancesResult, chainsResult] = await Promise.all([
           fetch('/api/lifi/tokens', {
@@ -121,7 +199,7 @@ export function useLiFiWalletTokens(walletAddress?: string | null, options: UseL
         ])
 
         if (!tokensResult.ok || !balancesResult.ok || !chainsResult.ok) {
-          return []
+          return directPolygonUsdcItemsPromise
         }
 
         const tokensJson = await tokensResult.json()
@@ -133,7 +211,7 @@ export function useLiFiWalletTokens(walletAddress?: string | null, options: UseL
 
         const acceptedByChain = buildAcceptedTokenMap(tokensResponse)
         const chainMap = buildChainMap(chains)
-        const items: LiFiWalletTokenItem[] = []
+        const itemsById = new Map<string, LiFiWalletTokenItem>()
 
         for (const [chainIdKey, walletTokens] of Object.entries(balancesByChain)) {
           const chainId = Number(chainIdKey) as ChainId
@@ -157,8 +235,9 @@ export function useLiFiWalletTokens(walletAddress?: string | null, options: UseL
               continue
             }
 
-            items.push({
-              id: `${chainId}:${token.address}`,
+            const id = buildWalletTokenId(chainId, token.address)
+            itemsById.set(id, {
+              id,
               chainId,
               address: token.address,
               decimals: Number(token.decimals),
@@ -171,16 +250,26 @@ export function useLiFiWalletTokens(walletAddress?: string | null, options: UseL
               usd: USD_FORMATTER.format(usdValue),
               usdValue,
               disabled: usdValue < MIN_USD_BALANCE,
+              depositMethod: 'lifi',
             })
           }
         }
 
+        const directPolygonUsdcItems = await directPolygonUsdcItemsPromise
+        for (const item of directPolygonUsdcItems) {
+          // Prefer the direct same-chain USDC transfer path for Polygon USDC.
+          // It avoids LI.FI metadata/quote gaps and matches the Polymarket
+          // Safe builder example's native Polygon funding model.
+          itemsById.set(item.id, item)
+        }
+
+        const items = Array.from(itemsById.values())
         items.sort((a, b) => b.usdValue - a.usdValue)
 
         return items
       }
       catch {
-        return []
+        return directPolygonUsdcItemsPromise
       }
     },
   })

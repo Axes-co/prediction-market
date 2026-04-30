@@ -5,7 +5,7 @@ import type { ProxyWalletStatus } from '@/types'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { hashTypedData, isAddress, parseUnits } from 'viem'
-import { useSignMessage } from 'wagmi'
+import { useAccount, useSignMessage } from 'wagmi'
 import { getSafeNonceAction, submitSafeTransactionAction } from '@/app/[locale]/(platform)/_actions/approve-tokens'
 import { WalletDepositModal, WalletWithdrawModal } from '@/app/[locale]/(platform)/_components/WalletModal'
 import { useTradingOnboarding } from '@/app/[locale]/(platform)/_providers/TradingOnboardingProvider'
@@ -347,6 +347,7 @@ export function WalletFlow({
   meldUrl,
 }: WalletFlowProps) {
   const isMobile = useIsMobile()
+  const account = useAccount()
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
   const requireSignatureWallet = useWalletSignatureGate(user?.address)
@@ -371,7 +372,7 @@ export function WalletFlow({
     isLoadingBalance: isLoadingDepositBalance,
   } = useProxyDepositBalance({ enabled: depositOpen })
   const site = useSiteIdentity()
-  const connectedWalletAddress = user?.address ?? null
+  const connectedWalletAddress = account.address ?? user?.address ?? null
   const { openTradeRequirements } = useTradingOnboarding()
 
   const hasDeployedProxyWallet = useHasDeployedProxyWallet(user)
@@ -402,7 +403,7 @@ export function WalletFlow({
         onOpenChange={handleDepositModalChange}
         isMobile={isMobile}
         walletAddress={user?.proxy_wallet_address ?? null}
-        walletEoaAddress={user?.address ?? null}
+        walletEoaAddress={connectedWalletAddress}
         siteName={site.name}
         meldUrl={meldUrl}
         hasDeployedProxyWallet={hasDeployedProxyWallet}

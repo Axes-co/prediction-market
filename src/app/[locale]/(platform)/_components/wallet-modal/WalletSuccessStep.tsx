@@ -10,6 +10,7 @@ import {
 import Image from 'next/image'
 import SiteLogoIcon from '@/components/SiteLogoIcon'
 import { Button } from '@/components/ui/button'
+import { POLYGON_DIRECT_DEPOSIT_METHOD } from '@/hooks/useLiFiWalletTokens'
 import { useSiteIdentity } from '@/hooks/useSiteIdentity'
 import { formatDisplayAmount } from '@/lib/amount-input'
 import { POLYGON_SCAN_BASE } from '@/lib/network'
@@ -44,6 +45,7 @@ function WalletSuccessStep({
   const sendIcon = selectedToken?.icon ?? '/images/deposit/transfer/polygon_dark.png'
   const chainIcon = selectedToken?.chainIcon ?? '/images/deposit/transfer/polygon_dark.png'
   const receiveAmountDisplay = quote?.toAmountDisplay ?? '—'
+  const isDirectPolygonUsdcDeposit = selectedToken?.depositMethod === POLYGON_DIRECT_DEPOSIT_METHOD
 
   return (
     <div className="space-y-5">
@@ -56,7 +58,11 @@ function WalletSuccessStep({
         </div>
         <div className="space-y-1">
           <p className="text-base font-semibold text-foreground">Deposit successful</p>
-          <p className="text-sm text-muted-foreground">Your funds were successfully deposited.</p>
+          <p className="text-sm text-muted-foreground">
+            {isDirectPolygonUsdcDeposit
+              ? 'Your USDC reached your wallet. Activate it from Portfolio to make it tradable.'
+              : 'Your funds were successfully deposited.'}
+          </p>
         </div>
       </div>
 

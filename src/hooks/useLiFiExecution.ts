@@ -1,7 +1,9 @@
 import type { LiFiWalletTokenItem } from '@/hooks/useLiFiWalletTokens'
 import { useMutation } from '@tanstack/react-query'
 import { encodeFunctionData, erc20Abi, maxUint256, parseUnits } from 'viem'
-import { usePublicClient, useWalletClient } from 'wagmi'
+import { useChainId, usePublicClient, useSwitchChain, useWalletClient } from 'wagmi'
+import { POLYGON_DIRECT_DEPOSIT_METHOD } from '@/hooks/useLiFiWalletTokens'
+import { defaultNetwork } from '@/lib/appkit'
 import { ZERO_ADDRESS } from '@/lib/contracts'
 import { sanitizeLiFiAmount } from '@/lib/lifi-amount'
 
@@ -20,17 +22,20 @@ export function useLiFiExecution({
 }: UseLiFiExecutionParams) {
   const { data: walletClient } = useWalletClient()
   const publicClient = usePublicClient()
+  const polygonPublicClient = usePublicClient({ chainId: defaultNetwork.id })
+  const chainId = useChainId()
+  const { switchChainAsync } = useSwitchChain()
 
   const mutation = useMutation({
     mutationFn: async () => {
       if (!walletClient) {
         throw new Error('Wallet not connected.')
       }
-      if (!publicClient) {
-        throw new Error('Public client not available.')
-      }
       if (!fromToken || !fromAddress || !toAddress) {
         throw new Error('Missing token or wallet addresses.')
+      }
+      if (fromToken.depositMethod === POLYGON_DIRECT_DEPOSIT_METHOD && !polygonPublicClient) {
+        throw new Error('Polygon public client not available.')
       }
 
       const sanitizedAmount = sanitizeLiFiAmount(amountValue, fromToken.decimals)
@@ -43,6 +48,31 @@ export function useLiFiExecution({
       }
       if (fromAmountBigInt <= 0n) {
         throw new Error('Enter a valid amount.')
+      }
+
+      if (fromToken.depositMethod === POLYGON_DIRECT_DEPOSIT_METHOD) {
+        if (chainId !== fromToken.chainId) {
+          await switchChainAsync({ chainId: fromToken.chainId })
+        }
+
+        const hash = await walletClient.sendTransaction({
+          account: fromAddress as `0x${string}`,
+          to: fromToken.address as `0x${string}`,
+          data: encodeFunctionData({
+            abi: erc20Abi,
+            functionName: 'transfer',
+            args: [toAddress as `0x${string}`, fromAmountBigInt],
+          }),
+          value: 0n,
+        })
+
+        await polygonPublicClient!.waitForTransactionReceipt({ hash })
+
+        return hash
+      }
+
+      if (!publicClient) {
+        throw new Error('Public client not available.')
       }
 
       const fromAmount = fromAmountBigInt.toString()
