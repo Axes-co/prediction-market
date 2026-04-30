@@ -1,0 +1,536 @@
+---
+title: Phase 22 - Full API Reference App Cross-Audit
+status: claude-execution-audit
+last_updated: 2026-04-30
+---
+
+# Phase 22 - Full API Reference App Cross-Audit
+
+This audit refreshes the source of truth from the current Polymarket API reference and cross-references it against the Axes Next.js app phase by phase. It is written as the implementation brief for Claude or any coding agent that works next.
+
+Do not treat this as legal advice. It is a technical/compliance implementation audit based on Polymarket's docs. Legal sufficiency still needs counsel, especially for jurisdiction blocking, disclosures, builder fees, referral language, and custody/funding UX.
+
+## Source Corpus
+
+Official docs fetched during this pass:
+
+- `https://docs.polymarket.com/llms.txt`
+- `https://docs.polymarket.com/llms-full.txt`
+- `https://docs.polymarket.com/api-reference/introduction.md`
+- `https://docs.polymarket.com/api-reference/authentication.md`
+- `https://docs.polymarket.com/api-reference/geoblock.md`
+- `https://docs.polymarket.com/api-reference/rate-limits.md`
+- `https://docs.polymarket.com/api-reference/data-api-openapi.yaml`
+- `https://docs.polymarket.com/api-spec/gamma-openapi.yaml`
+- `https://docs.polymarket.com/api-spec/clob-openapi.yaml`
+- `https://docs.polymarket.com/api-spec/relayer-openapi.yaml`
+- `https://docs.polymarket.com/api-reference/bridge-api-openapi.yaml`
+- Builder docs in `llms-full`: `/builders/overview`, `/builders/tiers`, `/builders/fees`
+- Websocket docs in `llms-full`: `/market-data/websocket/overview`, `/market-data/websocket/market-channel`, `/market-data/websocket/user-channel`, `/market-data/websocket/rtds`
+- pUSD docs in `llms-full`: `/concepts/pusd`
+
+API reference inventory from `llms.txt`:
+
+- Gamma/API browsing: events, markets, tags, comments, profiles, search, series, sports.
+- Data API: positions, trades, activity, holders, value, live volume, closed positions, other positions, builder leaderboard/volume, leaderboard.
+- CLOB API: market data, price history, auth, order submit/cancel, open orders, builder trades, rewards, rebates, heartbeat.
+- Relayer API: submit, transaction lookup, transactions list, nonce, deployed check, relayer API keys.
+- Bridge API: supported assets, quote, deposit addresses, withdrawal addresses, status.
+- WebSockets: market, user, sports, RTDS.
+
+## Senior Assessment
+
+The app is architecturally close to Polymarket because Kuest/Axes copied the same product model: Gamma-like market discovery, CLOB-like trading, proxy wallets, local orderbook UI, portfolio views, comments, admin settings, and sports pages. That is why the migration is feasible.
+
+The current code is not clean enough to launch full Polymarket production trading this week without fixing blockers. The trading order body is mostly right, but several surrounding flows can break real users or create compliance risk:
+
+- Geoblock is not enforced even though Polymarket docs explicitly warn builders to implement checks before trading.
+- The relayer response handling expects `txHash`, while current relayer docs say `/submit` returns `transactionID` and `STATE_NEW`; tx hash comes from `GET /transaction`.
+- pUSD and current adapter usage is inconsistent in CTF split/merge/redeem/convert flows.
+- Market-level neg-risk domain selection is wrong in the event order form.
+- Websocket heartbeats and server-safe user-channel handling are missing.
+- Old Axes-only endpoints still power profile, admin, affiliate, create-market, and geoblock flows.
+- Prior docs contain stale conclusions and sensitive material. Do not publish them.
+
+## Phase 0 - Legal, Security, Environment, Cutover Baseline
+
+Official evidence:
+
+- API introduction says Gamma/Data are public, CLOB trading endpoints require auth, and Bridge API is separate: `https://docs.polymarket.com/api-reference/introduction.md`.
+- Authentication docs say CLOB trading endpoints require all five `POLY_*` L2 headers: `https://docs.polymarket.com/api-reference/authentication.md`.
+- Geoblock docs warn that orders from blocked regions will be rejected and builders should implement geoblock checks before users attempt to trade: `https://docs.polymarket.com/api-reference/geoblock.md`.
+- Current geoblock docs list `US` as blocked. That means a US user must not be allowed to place Polymarket orders through Axes.
+
+App evidence:
+
+- `next.config.ts:101-112` defaults all production integration URLs to Axes hosts.
+- `src/proxy.ts:95-108` exempts `/geoblock`, rate-limits `/api/*`, then returns for APIs without geoblock enforcement.
+- `src/proxy.ts:141-163` only handles auth/admin protection, not country blocking.
+- `src/app/[locale]/admin/(general)/_actions/update-general-settings.ts:146-165` still syncs to `GEOBLOCK_URL`.
+- Phase 16 and Phase 19 notes contain stale conclusions and sensitive env/credential material.
+
+Verdict:
+
+- Blocked. This is the highest compliance and production-safety phase.
+
+Claude tasks:
+
+- Replace Axes URL defaults with no fallback or explicit Polymarket production defaults in server-only runtime config. Avoid exposing secrets through `next.config.ts env`.
+- Add Vercel country/region geoblock enforcement in `src/proxy.ts` before page access and before trading/API mutations.
+- Ensure `/api/comments` read-only/listing can remain available if product wants comments in blocked regions, but trading, order, relay, funding, and CTF mutation routes must be blocked.
+- Remove or disable external `GEOBLOCK_URL` sync.
+- Redact stale migration docs and rotate any leaked builder/relayer credentials.
+
+Acceptance:
+
+- Requests from blocked `x-vercel-ip-country` values redirect pages to `/geoblock`.
+- Trading APIs return a blocked response before touching CLOB/relayer.
+- No browser JS contains builder credentials, CLOB secrets, relayer secrets, or server-only auth material.
+
+## Phase 1 - Markets, Events, Tags, Sports, Search
+
+Official evidence:
+
+- Gamma API base is `https://gamma-api.polymarket.com` and covers markets, events, tags, series, comments, sports, search, and public profiles.
+- Gamma OpenAPI lists `/events/keyset` and says use `next_cursor` as `after_cursor`; `offset` is rejected on keyset endpoints.
+- Gamma OpenAPI lists `/tags`, `/events/{id}/tags`, `/markets`, `/markets/keyset`, `/series`, `/sports`, `/sports/market-types`, and `/public-search`.
+- Gamma schema includes `conditionId`, `questionID`, `clobTokenIds`, `negRisk`, `enableNegRisk`, and `next_cursor`.
+
+App evidence:
+
+- `src/lib/gamma/client.ts:13-17` has Polymarket default base URL, 100 default page size, max 500.
+- `src/lib/gamma/client.ts:35-49` calls `/events/keyset` with `limit`, `closed=false`, `active=true`, `archived=false`, `include_tags=true`, `order`, `ascending=false`, and `after_cursor`.
+- `src/lib/gamma/sync.ts:100-119` resolves allowed Gamma sources, then falls back only to `process.env.GAMMA_URL`.
+- `src/lib/gamma/mapper.ts:91-118` maps event slug/title, Gamma event id, neg-risk flags, comment count, restricted, liquidity, featured, start/end dates.
+- `src/lib/gamma/mapper.ts:184-260` requires `conditionId`, `questionID`, valid oracle, outcomes, and `clobTokenIds`, and maps market-level `negRisk`.
+- `src/lib/gamma/repository.ts:289-300` inserts outcomes with conflict-do-nothing on `token_id`.
+- `vercel.json:4-17` schedules old `/api/sync/events`, `/api/sync/resolution`, and `/api/sync/translations`, not new Gamma/tags/comment sync routes.
+
+Verdict:
+
+- Market ingestion is mostly correct. Launch is blocked by missing cron schedules and operational source fallback ambiguity.
+
+Claude tasks:
+
+- Add Vercel cron entries for `/api/sync/gamma`, `/api/sync/tags`, and `/api/sync/gamma-comments`.
+- Decide whether `/api/sync/events` is legacy and should be disabled after Gamma is authoritative.
+- Make Gamma source fallback explicit: if no allowed creator source exists, use `https://gamma-api.polymarket.com`, not empty config.
+- Update outcome rows on conflict if Gamma outcome labels or indexes change.
+- Add admin sync visibility for last cursor, last success, errors, inserted/updated counts.
+
+Acceptance:
+
+- Fresh DB can populate active Polymarket events and markets from Gamma without manual SQL.
+- Every tradable market has condition id, question id, CLOB token ids, outcomes, event slug, active/resolved flags, neg-risk flags, and tags.
+- Sports pages render from Gamma fields or are clearly disabled where data is unavailable.
+
+## Phase 2 - Pricing, Charts, Order Books
+
+Official evidence:
+
+- CLOB OpenAPI `/price` says it returns best bid for `BUY` and best ask for `SELL`.
+- CLOB OpenAPI lists `/prices`, `/midpoint`, `/midpoints`, `/book`, `/books`, `/last-trades-prices`, `/prices-history`, and `/batch-prices-history`.
+- CLOB OpenAPI `/prices-history` accepts `market`, optional `startTs`, `endTs`, `interval` in `max|all|1m|1w|1d|6h|1h`, and optional `fidelity`.
+
+App evidence:
+
+- `src/lib/clob.ts:8-24` expands token ids into `BUY` and `SELL` price query entries.
+- `src/app/[locale]/(platform)/event/[slug]/_hooks/useEventMidPrices.ts:30-42` treats `BUY` as ask and `SELL` as bid.
+- `src/app/[locale]/(platform)/event/[slug]/_hooks/useEventMidPrices.ts:77-84` POSTs `/prices` with the expanded body.
+- `src/app/[locale]/(platform)/event/[slug]/_utils/EventOrderBookUtils.ts:24-31` POSTs `/books` and `/last-trades-prices`.
+- `src/app/[locale]/(platform)/event/[slug]/_utils/priceHistoryApi.ts:90-107` still has `[HERO_CHART_DEBUG]` console logging.
+
+Verdict:
+
+- Mostly correct. Remove debug logging and add telemetry for pricing failures.
+
+Claude tasks:
+
+- Remove `console.debug` and temporary `console.error` debug markers from `priceHistoryApi.ts`.
+- Add a thin central telemetry/log wrapper for CLOB read failures so empty charts are visible in production logs.
+- Confirm `/last-trades-prices` mapping keys use `token_id`, matching OpenAPI.
+- Confirm all chart intervals call only documented values.
+
+Acceptance:
+
+- Event cards, event hero charts, market charts, order books, best bid/ask, and last trade price agree with sampled Polymarket markets.
+- Illiquid markets degrade without throwing or spamming logs.
+
+## Phase 3 - CLOB Auth, Orders, Cancels, Open Orders
+
+Official evidence:
+
+- Authentication docs require CLOB trading/cancel/heartbeat endpoints to use all five L2 headers: `POLY_ADDRESS`, `POLY_API_KEY`, `POLY_PASSPHRASE`, `POLY_TIMESTAMP`, `POLY_SIGNATURE`.
+- CLOB OpenAPI `Order` schema requires `maker`, `signer`, `tokenId`, `makerAmount`, `takerAmount`, `side`, `expiration`, `timestamp`, `builder`, `signature`, `salt`, and `signatureType`; it states `expiration` is wire-only and not part of the V2 signed struct.
+- CLOB OpenAPI `SendOrder` requires top-level `order` and `owner`; `orderType` and `deferExec` are optional.
+- CLOB OpenAPI `/data/orders` supports `id`, `market`, `asset_id`, and `next_cursor`; it does not list a `maker` query parameter.
+- CLOB OpenAPI open-order examples use `order_type`, not `type`.
+- CLOB OpenAPI has `DELETE /order`, `DELETE /cancel-all`, and `DELETE /cancel-market-orders`.
+
+App evidence:
+
+- `src/lib/constants.ts:33-74` defines V2 EIP-712 domains and the 11-field Order struct.
+- `src/lib/orders/signing.ts:23-45` signs exactly those 11 fields.
+- `src/lib/orders/index.ts:123-162` sets maker, signer, `signature_type`, timestamp, metadata, and builder code.
+- `src/app/[locale]/(platform)/event/[slug]/_actions/store-order.ts:288-310` builds the V2 `/order` body.
+- `src/app/[locale]/(platform)/event/[slug]/_actions/store-order.ts:324-335` sends CLOB L2 headers.
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelForm.tsx:842-876` computes market-level neg-risk but signs using event-level neg-risk.
+- `src/app/api/open-orders/route.ts:116-132` sends undocumented `maker` to `/data/orders`.
+- `src/lib/clob-open-orders.ts:56-66` maps `type`, but the OpenAPI examples use `order_type`.
+- `src/app/[locale]/(platform)/event/[slug]/_actions/cancel-order.ts:34-61` uses `DELETE /order` with `orderID`.
+- `src/app/[locale]/(platform)/event/[slug]/_actions/cancel-market-orders.ts:63-93` uses `DELETE /cancel-market-orders` with `market` and `asset_id`.
+
+Verdict:
+
+- Order submit/cancel core is mostly correct.
+- Launch blockers remain: market-level neg-risk signing, open-order query/field mismatch, and live verification.
+
+Claude tasks:
+
+- Change `EventOrderPanelForm.tsx` to pass `isNegRiskMarket` into `getExchangeEip712Domain`.
+- Change profile/cash-out signing to prefer market-level `neg_risk`; do not OR event-level flags unless market value is absent.
+- Remove `maker` from `/data/orders` query or confirm live that CLOB accepts it; filter locally if needed.
+- Normalize `order_type` in `mapClobOpenOrder` in addition to `type`.
+- Consider sending explicit `deferExec: false` on `/order` to match docs examples.
+- Add live probes for order submit, cancel single, cancel market, cancel all, open orders, and builder-attributed trade lookup.
+
+Acceptance:
+
+- Normal and neg-risk buy/sell orders sign with the correct verifying contract.
+- `/data/orders` renders correct type, status, expiration, size, and market metadata.
+- Cancel routes return and display documented `canceled`/`not_canceled` results.
+
+## Phase 4 - Proxy Wallet, Relayer, Safe Execution
+
+Official evidence:
+
+- Builder overview says relayer access covers gas-free wallet deployment, approvals, order execution, and CTF operations.
+- Builder tiers say unverified builders have 100 relayer transactions/day and verified builders have 10,000/day.
+- Relayer OpenAPI `/submit` is authenticated with Builder API Key headers or Relayer API Key headers.
+- Relayer OpenAPI `/submit` returns immediately with `transactionID` and `state: STATE_NEW`; it explicitly says onchain `transactionHash` is not included and must be retrieved by polling `GET /transaction`.
+- Relayer OpenAPI `/nonce` takes the user's signer address and `type=PROXY|SAFE`.
+
+App evidence:
+
+- `src/lib/polymarket/relayer-auth.ts:34-57` builds `POLY_BUILDER_*` headers server-side.
+- `src/app/[locale]/(platform)/_actions/proxy-wallet.ts:145-176` submits `SAFE-CREATE` to `/submit`.
+- `src/app/[locale]/(platform)/_actions/proxy-wallet.ts:211` returns only `responsePayload.txHash`.
+- `src/app/[locale]/(platform)/_actions/approve-tokens.ts:28-57` reads `/nonce?address=<user.address>&type=SAFE`.
+- `src/app/[locale]/(platform)/_actions/approve-tokens.ts:109-155` submits Safe transactions and only extracts tx hash variants.
+- `src/app/[locale]/(platform)/portfolio/_actions/pending-deposit.ts:195-231` submits wrap transactions and only extracts tx hash variants.
+
+Verdict:
+
+- Relayer auth direction is correct, but response handling is wrong against the current OpenAPI.
+
+Claude tasks:
+
+- Update relayer submit actions to store `transactionID` and `state`, not only `txHash`.
+- Add a server action/helper to poll `GET /transaction?id=<transactionID>` and resolve `transactionHash`/state.
+- Update proxy wallet deployment status to handle `STATE_NEW`, pending, confirmed, failed, and deployed-bytecode checks.
+- Update approval and pending-deposit flows to show "submitted/pending" if only `transactionID` exists.
+- Confirm HMAC timestamp units live against relayer SDK/current API. Keep builder secrets server-only.
+
+Acceptance:
+
+- Proxy deployment, approval batch, and pending wrap all show a stable pending state immediately after `/submit`.
+- A later poll updates tx hash and deployed/confirmed state.
+- No flow assumes `/submit` returns tx hash.
+
+## Phase 5 - pUSD, Funding, Bridge, Withdrawals
+
+Official evidence:
+
+- pUSD docs say pUSD is the collateral token used for all trading on Polymarket.
+- pUSD docs say `CollateralOnramp.wrap(address _asset, address _to, uint256 _amount)` wraps USDC.e to pUSD and requires USDC.e approval to the Onramp.
+- pUSD docs say `CollateralOfframp.unwrap(address _asset, address _to, uint256 _amount)` unwraps pUSD to USDC.e and requires pUSD approval to the Offramp.
+- Bridge API OpenAPI lists `/supported-assets`, `/quote`, `/deposit`, `/withdraw`, and `/status/{address}`; introduction says Bridge is a separate fun.xyz proxy.
+
+App evidence:
+
+- `src/lib/contracts.ts:27-31` defines pUSD, Onramp, and Offramp addresses.
+- `src/lib/polymarket/onramp.ts:73-88` builds `wrap(USDC.e, recipient, amount)`.
+- `src/lib/polymarket/onramp.ts:100-115` builds `unwrap(USDC.e, recipient, amount)`.
+- `src/app/[locale]/(platform)/portfolio/_actions/pending-deposit.ts:124-128` builds a Safe transaction to wrap pending USDC.e.
+- App still uses Li.Fi endpoints under `/api/lifi/*` for general deposit/source-token UX.
+
+Verdict:
+
+- Onramp/offramp primitives are aligned with pUSD docs.
+- Full bridge parity is not built. Keeping Li.Fi is a product choice, but it is not the Polymarket Bridge API path.
+- Relayer transactionID handling affects this phase.
+
+Claude tasks:
+
+- Decide product path: keep Li.Fi + Safe pUSD wrap, or implement Polymarket Bridge API deposit/withdraw flows.
+- If keeping Li.Fi, document that it is Axes funding UX, not Polymarket Bridge API.
+- Make withdrawal unwrap pUSD to USDC.e before sending out, or explicitly disable withdrawal until complete.
+- Use relayer transaction polling for wrap/unwrap submission status.
+
+Acceptance:
+
+- User can get USDC.e into Safe, wrap into pUSD, and see pUSD tradable balance.
+- Withdrawal flow either works through Offramp/Bridge or is hidden with clear copy.
+
+## Phase 6 - CTF Split, Merge, Redeem, Convert
+
+Official evidence:
+
+- pUSD docs make pUSD the trading collateral.
+- Builder overview says relayer covers CTF operations.
+- Negative-risk docs say Gamma includes `negRisk` on events/markets and order placement uses neg-risk mode for neg-risk markets.
+
+App evidence:
+
+- `src/lib/safe/transactions.ts:419-485` defaults standard split/merge/redeem collateral to `COLLATERAL_TOKEN_ADDRESS`, which is USDC.e.
+- `src/lib/safe/transactions.ts:380-412` defaults neg-risk split/redeem to `UMA_NEG_RISK_ADAPTER_ADDRESS`.
+- `src/lib/safe/transactions.ts:461-473` defaults convert to `UMA_NEG_RISK_ADAPTER_ADDRESS`.
+- `src/app/[locale]/(platform)/_providers/TradingOnboardingProvider.tsx:539-550` explicitly approves `UMA_NEG_RISK_ADAPTER_ADDRESS`.
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventMergeSharesDialog.tsx:208-215` passes `UMA_NEG_RISK_ADAPTER_ADDRESS` for neg-risk merge.
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventSplitSharesDialog.tsx:207-218` calls affected helpers.
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelForm.tsx:1534-1543` claim-winnings flow calls affected redeem helpers.
+
+Verdict:
+
+- Blocked. These paths can submit wrong calldata/addresses for current Polymarket V2.
+
+Claude tasks:
+
+- Replace standard CTF collateral default with `PUSD_ADDRESS`.
+- Replace legacy UMA adapter defaults with current V2 adapter/exchange path verified from `../polymarket/ctf-exchange-v2`.
+- Fix onboarding approvals to include `NEG_RISK_ADAPTER_ADDRESS`, not legacy UMA adapter, unless local contract source proves otherwise.
+- Re-audit all call sites: split dialog, merge dialog, convert dialog, redeem from event page, won-markets portfolio card, sports redeem modal, profile merge hook.
+
+Acceptance:
+
+- Tiny-value split, merge, redeem, and neg-risk convert tests succeed on Polygon.
+- No V2 CTF operation points to USDC.e as collateral where pUSD is required.
+- No live flow points to legacy UMA adapter unless explicitly proven by ABI and live test.
+
+## Phase 7 - WebSockets, RTDS, Live Activity
+
+Official evidence:
+
+- Websocket overview lists Market `wss://ws-subscriptions-clob.polymarket.com/ws/market`, User `wss://ws-subscriptions-clob.polymarket.com/ws/user`, Sports `wss://sports-api.polymarket.com/ws`, and RTDS `wss://ws-live-data.polymarket.com`.
+- Market channel subscribes with `assets_ids`, `type: "market"`, and optional `custom_feature_enabled: true`.
+- User channel subscribes by condition ids in `markets` and requires auth credentials.
+- User channel docs warn never to expose API credentials in client-side code; use user channel only from server environments.
+- Market/User channels require `PING` every 10 seconds.
+- RTDS requires `PING` every 5 seconds.
+- RTDS docs support comments, crypto prices, and equity prices; only documented subscription types are supported.
+
+App evidence:
+
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventMarketChannelProvider.tsx:239-249` subscribes correctly to market channel.
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventMarketChannelProvider.tsx:328` opens `${WS_CLOB_URL}/ws/market`.
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventMarketChannelProvider.tsx:231-359` has reconnect logic but no heartbeat.
+- `src/app/[locale]/(platform)/event/[slug]/_hooks/useLiveCommentsChannel.ts:124-134` subscribes to RTDS comments with wildcard type and `event_slug` filter.
+- `src/app/[locale]/(platform)/event/[slug]/_hooks/useLiveCommentsChannel.ts:322-327` opens `WS_LIVE_DATA_URL` without RTDS heartbeat.
+- `src/app/[locale]/(platform)/activity/_components/ActivityFeed.tsx:296-305` subscribes to RTDS `activity/orders_matched`, which was not found in the official RTDS docs snapshot.
+- `src/app/[locale]/(platform)/(home)/_hooks/useLiveChartStream.ts:318-324` opens `WS_LIVE_DATA_URL` directly.
+- `rg` found no authenticated `/ws/user` implementation.
+
+Verdict:
+
+- Market channel shape is close, but production live stack is blocked by heartbeats, unsafe user-channel constraints, and unverified RTDS activity.
+
+Claude tasks:
+
+- Add `PING` every 10 seconds for market channel.
+- Add `PING` every 5 seconds for RTDS clients.
+- Do not put CLOB `apiKey/secret/passphrase` into browser websocket code. Either build a server-side user-channel bridge or keep polling `/api/open-orders`.
+- Verify RTDS comments filter shape live; if wildcard type is unsupported, subscribe only to documented comment event types.
+- Remove or feature-flag RTDS `activity/orders_matched` until officially verified.
+- Decide whether home live chart RTDS is official crypto/equity stream or a legacy Axes stream; feature-flag if not official.
+
+Acceptance:
+
+- Market page stays connected for 30+ minutes without heartbeat disconnects.
+- User order lifecycle updates via server-safe channel or polling.
+- No browser network frame contains CLOB API secret/passphrase.
+
+## Phase 8 - Comments, Profiles, Community
+
+Official evidence:
+
+- Gamma OpenAPI lists `GET /comments`, `GET /comments/{id}`, and `GET /comments/user_address/{user_address}`.
+- `GET /comments` supports `parent_entity_type`, `parent_entity_id`, `get_positions`, and `holders_only`.
+- Gamma API includes public profiles under `/public-profile` and `/profiles/user_address/{user_address}`.
+- API introduction says Gamma covers comments and public profiles.
+
+App evidence:
+
+- `src/app/api/comments/route.ts:22-49` lists local DB comments by `event_slug`.
+- `src/app/api/comments/route.ts:64-104` creates native local comments through better-auth session.
+- `src/lib/gamma/comments-sync.ts:54-133` seeds Gamma comments into local DB.
+- `src/lib/gamma/comments-sync.ts:228-240` calls Gamma `/comments` with `parent_entity_type=Event`, `parent_entity_id`, `limit`, `order=createdAt`, `ascending=false`.
+- `src/app/[locale]/(platform)/event/[slug]/_hooks/useInfiniteComments.ts:107-116` filters holders-only comments client-side by `comment.positions`.
+- Current local/Gamma comment rows return empty positions, so holders-only can hide all comments.
+- `src/app/[locale]/(platform)/settings/_components/SettingsProfileContent.tsx:122-128` posts profile updates to `COMMUNITY_URL`.
+
+Verdict:
+
+- Native comments are viable if product copy says "Axes comments seeded from Polymarket." They are not upstream Polymarket comments.
+- Holders-only and profile editing need fixes.
+
+Claude tasks:
+
+- Schedule Gamma comment sync.
+- Fix holders-only comments: either trust server filtering or hydrate positions using Gamma `get_positions=true`/Data API.
+- Add RTDS heartbeat or polling fallback.
+- Hide or replace `COMMUNITY_URL` profile editing with Gamma public-profile read-only behavior unless an official write path is confirmed.
+- Update copy so native local comments are not represented as posting to Polymarket.
+
+Acceptance:
+
+- Comments render after sync.
+- Local comment create/reply/delete/reaction works and is clearly Axes-native.
+- Holders-only mode does not empty the list incorrectly.
+
+## Phase 9 - Data API, Portfolio, Profile, Leaderboards, Rewards
+
+Official evidence:
+
+- Data API OpenAPI lists `/positions`, `/trades`, `/activity`, `/holders`, `/traded`, `/value`, `/oi`, `/live-volume`, `/closed-positions`, `/other`, `/v1/market-positions`, `/v1/builders/leaderboard`, `/v1/builders/volume`, and `/v1/leaderboard`.
+- Data API OpenAPI does not list root `/volume`.
+- Data API OpenAPI does not list `/referrers`.
+- CLOB OpenAPI lists rewards endpoints requiring CLOB L2 headers for user reward data.
+
+App evidence:
+
+- `src/lib/data-api/user.ts` maps `/activity`, `/positions`, `/closed-positions`, and `/other` shaped data.
+- `src/lib/data-api/profile-link-stats.ts:182-183` calls `/value` and root `/volume`.
+- `src/lib/data-api/profile-link-stats.ts:192-201` calls `/v1/leaderboard`.
+- `src/lib/data-api/fees.ts:12-40` only supports endpoint `'referrers'` and calls `/${endpoint}`.
+- `src/app/api/leaderboard/timeframe-pnl/route.ts` and profile hero cards still use `USER_PNL_URL`.
+
+Verdict:
+
+- Core Data API wrappers are partial.
+- Profile/affiliate/stat surfaces are not official-spec clean.
+
+Claude tasks:
+
+- Replace root `/volume` with documented `/live-volume`, `/traded`, `/v1/leaderboard`, or remove that stat.
+- Replace `/referrers` with official builder endpoints or hide affiliate revenue totals.
+- Replace/disable `USER_PNL_URL` timeframe PnL routes.
+- Add optional CLOB L2 reward endpoints only if authenticated rewards are part of launch scope.
+
+Acceptance:
+
+- Portfolio, positions, closed positions, activity, holders, leaderboards, and profile cards use only official endpoints or local DB.
+- Missing unsupported stats degrade with explicit copy, not broken requests.
+
+## Phase 10 - Builder Program, Fees, Referrals, Partnership
+
+Official evidence:
+
+- Builder overview says the app attaches `builderCode` to every order and volume is credited when the code is attached.
+- Builder fees docs say CLOB V2 builder code is native; old builder signing SDK/HMAC header flow is gone for orders.
+- Builder fees docs set maximum builder taker fee 100 bps and maker fee 50 bps.
+- CLOB OpenAPI `/builder/trades` requires `builder_code` query param.
+- Data API OpenAPI lists `/v1/builders/leaderboard` and `/v1/builders/volume`.
+
+App evidence:
+
+- `src/lib/orders/index.ts:13-19` resolves `POLYMARKET_BUILDER_CODE`.
+- `src/lib/orders/index.ts:158-162` puts builder code into order payload.
+- `src/hooks/useAffiliateOrderMetadata.ts` still models internal `tradeFeeBps`; V2 order signing ignores legacy fee fields.
+- `src/lib/safe/transactions.ts:104-116` defines local `setReferral` transaction ABI.
+- Admin/settings affiliate pages use `src/lib/data-api/fees.ts` unverified `/referrers`.
+
+Verdict:
+
+- Builder attribution in orders is correct.
+- Referral/affiliate economics are not official builder economics and need product/legal cleanup.
+
+Claude tasks:
+
+- Keep builder code on every order.
+- Build admin reporting from `/builder/trades`, `/v1/builders/leaderboard`, and `/v1/builders/volume`.
+- Remove fee/revenue promises backed by `/referrers`.
+- Verify `setReferral` ABI/current contract behavior before using it, or defer onchain referral locking.
+- Make product copy distinguish internal signup referrals from Polymarket builder fees.
+
+Acceptance:
+
+- Attributed live trade appears in official builder trade reporting.
+- Admin partnership dashboard does not depend on unsupported `/referrers`.
+
+## Phase 11 - Admin, Crons, Market Creation
+
+Official evidence:
+
+- API reference does not expose a public create-market API for builders.
+- Gamma is source of market/event truth for browsing.
+- Rate-limit docs set Gamma `/events`, `/tags`, `/comments`, CLOB, Data, and relayer limits.
+
+App evidence:
+
+- `vercel.json:4-17` schedules legacy crons, not new Gamma/tags/comments crons.
+- `src/app/api/sync/event-creations/route.ts:177-629` calls `CREATE_MARKET_URL` endpoints for market-config, pending, tx-confirm, prepare-auth, prepare, and finalize.
+- `src/app/[locale]/admin/events/calendar/_components/AdminCreateEventForm.tsx` has many `CREATE_MARKET_URL` calls, including `market-config`, `pending`, `tx-confirm`, `prepare-auth`, `prepare`, and `finalize`.
+- `src/app/[locale]/admin/(general)/_actions/update-general-settings.ts:146-165` calls external `GEOBLOCK_URL`.
+
+Verdict:
+
+- Admin browsing/settings are salvageable.
+- Admin market creation and external geoblock sync are not Polymarket cutover safe.
+
+Claude tasks:
+
+- Hide or disable admin create-market flows unless Polymarket grants an official market creation path.
+- Add cron schedules for Gamma, tags, Gamma comments.
+- Add admin health page for sync status and upstream errors.
+- Replace admin geoblock sync with local settings used by `src/proxy.ts`.
+- Review rate-limit impact of all crons against Polymarket limits.
+
+Acceptance:
+
+- Admin can manage local settings, visibility, categories, allowed Gamma sources, comments/moderation, and geoblock.
+- Admin cannot accidentally submit unsupported create-market requests to old Axes services.
+
+## Phase 12 - Testing, Live Probes, Launch Gate
+
+Required live probes:
+
+- Gamma: `/events/keyset`, `/tags`, `/comments`, event by slug, market by slug.
+- CLOB read: `/prices`, `/midpoint`, `/books`, `/last-trades-prices`, `/prices-history`, `/batch-prices-history`.
+- CLOB auth: create/derive API key, `/data/orders`, `POST /order`, `DELETE /order`, `DELETE /cancel-market-orders`, `DELETE /cancel-all`, `/builder/trades`.
+- Relayer: `/nonce`, `/submit`, `/transaction`, deployed check.
+- Websocket: market heartbeat 30 minutes, RTDS heartbeat 30 minutes, user-channel server-only or polling fallback.
+- pUSD/CTF: wrap, unwrap, split, merge, redeem, neg-risk convert.
+- Data API: positions, activity, holders, closed positions, value, leaderboard, builder leaderboard/volume.
+- Geoblock: blocked country, close-only country, allowed country, API mutation blocking.
+
+Required code checks:
+
+- Run unit tests for Gamma client/mapper/sync, CLOB order payload/signing, store order action, comments adapter, Data API mappers, safe transactions.
+- Add tests for market-level neg-risk domain selection.
+- Add tests for relayer submit response handling with `transactionID` and no tx hash.
+- Add tests for open-order `order_type` normalization.
+- Add tests for holders-only comments.
+
+Launch gate:
+
+- Do not launch full Polymarket trading until every P0 in Phase 0, 3, 4, 6, 7, 9, and 11 is closed.
+- If this must launch this week, scope the launch: read-only markets/prices/comments first, then trading for allowed geographies only after relayer, pUSD/CTF, neg-risk, and geoblock fixes are live-tested.
+
+## Claude Execution Order
+
+1. Security/compliance: redact/rotate secrets, set envs, implement geoblock.
+2. Crons/data: schedule Gamma/tags/comments, run full sync, verify admin source controls.
+3. Trading correctness: market-level neg-risk domain, open-orders `/data/orders` fixes, live order/cancel probes.
+4. Relayer correctness: transactionID/state handling and `/transaction` polling.
+5. pUSD/CTF correctness: collateral/adapters and all split/merge/redeem/convert call sites.
+6. Websocket stability: heartbeats, disable unverified activity topic, server-safe user lifecycle or polling.
+7. Comments/profile cleanup: holders-only, native comment copy, `COMMUNITY_URL` removal/hide.
+8. Data/admin cleanup: remove `/volume`, `/referrers`, `USER_PNL_URL`, `CREATE_MARKET_URL`, external `GEOBLOCK_URL`.
+9. Builder reporting: `/builder/trades`, `/v1/builders/leaderboard`, `/v1/builders/volume`.
+10. End-to-end live probe checklist and launch decision.
+
+## Final Readiness Opinion
+
+The app is a strong migration base and the UI/product shape fits Polymarket well. The code is not yet "legal, clean, perfect, and works" because production compliance gates and money-moving flows are incomplete. The highest-risk issues are geoblock, relayer response semantics, pUSD/CTF defaults, neg-risk signing domain, websocket/user lifecycle, and stale Axes endpoints.
+
+The next work should not be broad refactoring. It should be a targeted blocker-close sequence using the phases above, with live probes after each phase.

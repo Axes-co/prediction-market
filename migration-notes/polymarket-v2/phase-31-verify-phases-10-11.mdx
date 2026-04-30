@@ -1,0 +1,160 @@
+---
+title: Phase 31 - Verification of Phases 10/11 (admin/create-market + geoblock)
+status: verification-pass
+last_updated: 2026-04-30
+auditor: Claude (main thread, line-by-line)
+---
+
+# Phase 31 - Verification of Phases 10/11
+
+Independent verification of Codex's claims for Admin/Create-Market (Phase 22 lines 460-491) and Geoblock (Phase 22 lines 55-89, plus geoblock infrastructure already partially covered in Phase 23).
+
+## Phase 10 - Admin / Create-Market
+
+### Confirmations of Codex
+
+**`AdminCreateEventForm.tsx` is a 7,242-line surface with 6 `CREATE_MARKET_URL` fetch points.** `wc -l` confirms file size. `grep` for `CREATE_MARKET_URL` returns 6 distinct endpoints: `/market-config` (`:2754`), `/pending` (`:3022`), `/tx-confirm` (`:3237`), `/prepare-auth` (`:3324`), `/prepare` (`:3430`), `/finalize` (`:3527`). **Codex correct (Phase 22 line 472).**
+
+**`/api/sync/event-creations/route.ts` calls the same 6 CREATE_MARKET_URL endpoints** at lines 177, 198, 259, 306, 376, 629 (per `grep -rn "CREATE_MARKET_URL"`). **Confirmed.**
+
+**Polymarket exposes no public create-market API.** I confirmed this against `/tmp/polymarket-llms.txt` and the Gamma OpenAPI inventory. Markets are created by Polymarket internally; builders consume them via `/events/keyset`. Phase 22 line 462 is correct.
+
+**Admin geoblock still POSTs to `GEOBLOCK_URL`.** Already confirmed in Phase 23 (`update-general-settings.ts:146-165`).
+
+### New findings I add
+
+#### F1. The 7,242-line component is itself a launch risk
+
+`AdminCreateEventForm.tsx` is a single 7K-line client component with form state, signing flows, multi-step workflow management (`prepare-auth → prepare → finalize → tx-confirm`), and onchain market deployment. Even if `CREATE_MARKET_URL` were rewired to a working backend, the component is fragile and tightly coupled to its current backend's response shapes.
+
+Decision tree:
+1. **Disable admin create-market for launch.** Hide the route, keep the file (rollback safety). Admins can manage display/visibility of synced Polymarket events.
+2. **Keep create-market alive on a parallel backend.** Continue running the kuest-style create-market service (it's a separate Rust service) and deploy markets from there into Polymarket's CTF Exchange V2. Requires Polymarket's contract to accept third-party market creation, which it may not (need to verify against `../polymarket/ctf-exchange-v2`).
+
+For week-one launch, option (1) is the only safe choice.
+
+#### F2. `/api/sync/event-creations` runs unscheduled
+
+Per Phase 24 finding F2, this route exists but is not in `vercel.json` cron. It can still be triggered manually from admin or via direct HTTP. If admin create-market is hidden, this route should also be disabled or made admin-only.
+
+#### F3. Allowed-creator wallet model still active
+
+`/api/sync/events` (legacy) and `/api/sync/gamma` both consult `loadAllowedMarketCreatorWallets` / `AllowedMarketCreatorRepository.listGammaApiSources`. This is the kuest model where market creators are wallets recognized by the platform. On Polymarket cutover, Polymarket itself is the only "creator" — but the data model treats Polymarket's Gamma API as a `gamma_api` source row.
+
+**P1:** confirm that the allowed-creator UI in admin only shows Gamma API sources after cutover, not legacy "wallet" sources.
+
+## Phase 11 - Geoblock
+
+### Confirmations of Codex
+
+**Country header parsing exists.** `src/lib/geoblock-settings.ts:261` `REQUEST_COUNTRY_HEADERS = ['cf-ipcountry', 'x-vercel-ip-country', 'cloudfront-viewer-country']`. **Confirmed.**
+
+**`isCountryBlocked` function exists.** `src/lib/geoblock-settings.ts:371-377`. **Confirmed.**
+
+**Block list is stored per-deployment in DB settings.** `geoblock-settings.ts:329-332` `loadBlockedCountries()` reads `general.blocked_countries` row from settings table. **Confirmed.**
+
+**`/api/geoblock-status` returns advisory blocked status.** `src/app/api/geoblock-status/route.ts:9-23` reads headers + DB and returns `{ blocked, country }`. **Confirmed read-only.**
+
+**`src/proxy.ts` does not enforce geoblock.** Already verified in Phase 23. **Confirmed (Codex correct).**
+
+**Admin still syncs to external `GEOBLOCK_URL`.** Already verified in Phase 23 (`update-general-settings.ts:146-165`). **Confirmed.**
+
+**US is in `ALLOWED_COUNTRY_CODES`.** `geoblock-settings.ts:244 'US'`. This is the *parser* allow-list (a country must be a valid ISO code to be parsed, not "allowed in product"). Whether US is blocked is up to admin's `blocked_countries` setting.
+
+### New findings I add
+
+#### F4. `ALLOWED_COUNTRY_CODES` is mis-named
+
+The constant `ALLOWED_COUNTRY_CODES` at `geoblock-settings.ts:8` is a parser whitelist for ISO-3166 codes — it is NOT a list of countries allowed to use the product. The actual blocking is config-driven via `blocked_countries`. The naming creates confusion (a future reader sees "ALLOWED_COUNTRY_CODES" and assumes a positive allow-list, not a parser sanity check).
+
+**P2 cleanup:** rename to `KNOWN_ISO_3166_COUNTRY_CODES` or `RECOGNIZED_COUNTRY_CODES`. Not a launch blocker.
+
+#### F5. Geoblock endpoint and trading endpoint both need enforcement
+
+Polymarket geoblock docs (`https://docs.polymarket.com/api-reference/geoblock.md`) say orders from blocked regions get rejected by the CLOB. The frontend doesn't need to *prevent* the request — Polymarket will reject it. But the docs also say "builders should implement geoblock checks before users attempt to trade" so users don't see confusing errors.
+
+So enforcement strategy must be:
+1. **Page-level redirect** to `/geoblock` for blocked countries (UI ergonomics).
+2. **API-mutation block** for trading actions, returning a 403 before reaching CLOB (defense-in-depth + clearer error message).
+
+The current code does neither. Both need adding.
+
+#### F6. Default block list not seeded
+
+There is no migration / startup seeding of `blocked_countries`. A fresh deploy has the setting empty. Users from any country (including US, which Polymarket explicitly blocks) reach the trading flow.
+
+**P0:** seed `blocked_countries` at migration time with at least the Polymarket-blocked set. Per Polymarket docs the current blocked list includes US (and several others). Need to extract the canonical list from `https://docs.polymarket.com/api-reference/geoblock.md` and pre-seed it in `src/lib/db/migrations/`.
+
+#### F7. Geoblock check happens AFTER `/api/*` rate limit
+
+`src/proxy.ts:102-108` runs rate-limit, then returns `NextResponse.next()` for any `/api/*` route. To enforce country blocking on API routes, the country check needs to happen in this branch BEFORE returning. Current ordering in middleware doesn't matter for the `/api/*` case because there's no enforcement at all; this is a structural note for the fix.
+
+**P0 implementation note:** add country check inside the `/api/*` block, scoped to mutation routes (POST/DELETE/PATCH) AND specifically to trading-adjacent routes (`/api/store-order`, `/api/cancel-*`, `/api/relayer/*`, `/api/approve-tokens`, `/api/proxy-wallet`, `/api/comments` POST). Allow GET reads to bypass for users to see synced data even from blocked regions (or apply per-product policy).
+
+## Net Phase 10/11 P0 list
+
+### Phase 10 (admin/create-market)
+
+P0:
+
+1. **Disable / hide admin create-market UI** for launch. Replace the route's page export with a redirect to `/admin` or a feature-flagged "coming soon" banner. Keep the 7K-line component in the repo for rollback.
+
+2. **Disable `/api/sync/event-creations`** — return `503` until create-market product is decided.
+
+3. **Disable `syncGeoblockSettings` call in `update-general-settings.ts:146-165`** (also covered by Phase 23 P0 #3).
+
+P1:
+
+4. Replace admin affiliate page (which depends on `/referrers`) with builder reporting (Phase 30 P1 #8).
+
+### Phase 11 (geoblock)
+
+P0:
+
+1. **Enforce country blocking in `src/proxy.ts`** for both pages and API mutation routes. Code shape:
+   ```ts
+   const country = getRequestCountryCode(request.headers)
+   const blocked = isCountryBlocked(country, await loadBlockedCountries())
+   if (blocked && url.pathname.startsWith('/api/')) {
+     // For mutation routes, return 403 JSON
+     if (request.method !== 'GET') {
+       return NextResponse.json({ error: 'restricted_region' }, { status: 403 })
+     }
+   } else if (blocked) {
+     // For page routes, redirect to /geoblock
+     return NextResponse.redirect(new URL('/geoblock', request.url))
+   }
+   ```
+   Add this *before* the existing `/api/*` rate-limit branch.
+
+2. **Seed `blocked_countries` at migration time** with Polymarket's canonical blocked set (US + sanctioned jurisdictions). Pull from `https://docs.polymarket.com/api-reference/geoblock.md`.
+
+3. **Remove or disable `syncGeoblockSettings` external POST** (already noted).
+
+4. **Add `loadBlockedCountries` to a fast path / cached read** — middleware runs on every request, hitting the DB on every request kills performance. Cache for 60s in middleware.
+
+P2:
+
+5. Rename `ALLOWED_COUNTRY_CODES` to `RECOGNIZED_COUNTRY_CODES` to avoid confusion (F4).
+
+## Corrections to Codex
+
+| Codex framing | My correction |
+|---|---|
+| Phase 22 line 482 "Hide or disable admin create-market flows unless Polymarket grants an official market creation path" | Stronger: Polymarket does NOT have a public market creation API per current docs. There is no path to "grant"; builders consume markets, they do not author them. The decision is binary — disable. |
+| Phase 22 line 484 "Replace admin geoblock sync with local settings used by `src/proxy.ts`" | Concur. The DB-backed settings already exist; the only missing piece is wiring the middleware. The "external geoblock service" was a kuest-only architecture. |
+| Phase 22 line 80 "Add Vercel country/region geoblock enforcement in `src/proxy.ts` before page access and before trading/API mutations" | Add my F7 implementation note: the check must run BEFORE the `/api/*` rate-limit short-circuit at proxy.ts:102. Don't insert at the end of the middleware. |
+| Phase 22 line 81 "Ensure `/api/comments` read-only/listing can remain available if product wants comments in blocked regions" | Concur. Default policy: GET = allowed in blocked regions; POST/DELETE = blocked. Add explicit allowlist for read-only paths in middleware logic. |
+
+## Evidence anchors
+
+- `src/app/[locale]/admin/events/calendar/_components/AdminCreateEventForm.tsx` (7242 LOC, 6 `CREATE_MARKET_URL` calls)
+- `src/app/api/sync/event-creations/route.ts:177,198,259,306,376,629`
+- `src/lib/geoblock-settings.ts:8,244,261,329-332,360-369,371-377`
+- `src/proxy.ts:95-164` (no enforcement)
+- `src/app/api/geoblock-status/route.ts:9-23`
+- `src/app/[locale]/admin/(general)/_actions/update-general-settings.ts:146-165`
+
+## Next phase
+
+Move to final synthesis (phase-32-launch-plan.mdx).

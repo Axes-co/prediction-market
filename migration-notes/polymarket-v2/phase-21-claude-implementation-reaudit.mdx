@@ -1,0 +1,393 @@
+---
+title: Phase 21 - Claude Implementation Re-Audit
+status: corrective-audit
+last_updated: 2026-04-30
+---
+
+# Phase 21 - Claude Implementation Re-Audit
+
+This pass re-audits the V2 work that was already committed after the pre-migration baseline, the prior phase notes, the current app code, the official Polymarket docs/spec snapshots, and the local Polymarket builder example repositories in the parent folder.
+
+No application code was changed in this pass. The only intended change is this corrected audit record and targeted corrections to the prior audit.
+
+## Audit Basis
+
+Code baseline reviewed:
+
+- `b79f32d9..HEAD`
+- `504af585 schema(db): polymarket V2 columns, native comments, polymarket_users mirror`
+- `df8f30f8 feat(v2): trading wire - V2 EIP-712 typed data, contracts, order builder`
+- `163024d7 feat(v2): proxy wallet deploy via builder relayer, trading auth, approvals`
+- `3b83f564 feat(v2): order store/cancel actions emit V2 wire body with builder field`
+- `f72c8ee0 feat(v2): gamma sync (events, tags, comments) + polymarket_users mirror`
+- `f46b9969 feat(v2): client hooks pair BUY+SELL entries; admin allowed-creators`
+- `d82b00e4 chore(v2): i18n keys + env example + next.config + vercel.json + docs`
+- `d86e2d4c feat(v2): pin mainnet, V2 EIP-712 constants, drop dead /data/volumes sync`
+- `746b3f03 docs(v2): Phase 19 final master launch plan`
+
+Official/spec evidence reviewed:
+
+- `/tmp/polymarket-llms.txt`
+- `/tmp/polymarket-llms-full.txt`
+- `/tmp/polymarket-gamma-openapi.yaml`
+- `/tmp/polymarket-clob-openapi.yaml`
+- `/tmp/polymarket-data-openapi.yaml`
+- `/tmp/polymarket-relayer-openapi.yaml`
+- `/tmp/polymarket-bridge-openapi.yaml`
+- `/tmp/polymarket-asyncapi-market.json`
+- `/tmp/polymarket-asyncapi-user.json`
+- `/tmp/polymarket-asyncapi-sports.json`
+
+Local Polymarket examples reviewed:
+
+- `../polymarket/wagmi-safe-builder-example`
+- `../polymarket/magic-safe-builder-example`
+- `../polymarket/turnkey-safe-builder-example`
+- `../polymarket/magic-proxy-builder-example`
+- `../polymarket/ctf-exchange-v2`
+
+## Executive Result
+
+Claude implemented the CLOB V2 order shape, builder code field, proxy wallet maker model, relayer submission direction, Gamma sync direction, pricing endpoint pairing, and native comments direction substantially correctly.
+
+The implementation is not launch-ready. The blockers are not small polish issues; they affect production safety and live trading correctness:
+
+- Production envs and default URLs still fall back to Axes hosts in `next.config.ts`.
+- New Gamma/tags/comment sync routes are not scheduled in `vercel.json`.
+- Geoblock status routes exist, but `src/proxy.ts` does not enforce blocking.
+- pUSD/CTF split, merge, redeem, convert, and approval paths still contain USDC.e and legacy UMA adapter defaults.
+- Event order signing uses event-level neg-risk for the EIP-712 domain instead of the active market's neg-risk value.
+- Relayer `/submit` handling expects transaction hashes directly, but current Relayer OpenAPI returns `transactionID` plus state and requires polling `/transaction` for the onchain hash.
+- Open-orders code sends an undocumented `maker` query param to `/data/orders` and reads `type`, while the current OpenAPI documents `order_type`.
+- Websocket clients do not send required PING heartbeats, no authenticated user channel was found, and RTDS activity topic usage is unverified.
+- Profile, affiliate, admin, and community flows still depend on old or unverified endpoints.
+- Prior Phase 16 and Phase 19 docs contain stale conclusions and sensitive credential material; treat them as obsolete until redacted.
+
+## Phase-by-Phase Re-Audit
+
+### Phase 0 - Security, Docs, Environment
+
+Status: blocked.
+
+Correct work found:
+
+- Server-side relayer builder auth is centralized in `src/lib/polymarket/relayer-auth.ts`.
+- The local app does not expose the example repo's builder-signing route that would return builder headers to the browser.
+
+Findings:
+
+- `next.config.ts` still defaults `GAMMA_URL`, `CLOB_URL`, `DATA_URL`, `RELAYER_URL`, `WS_CLOB_URL`, `WS_LIVE_DATA_URL`, `GEOBLOCK_URL`, `USER_PNL_URL`, `COMMUNITY_URL`, and create-market URLs to Axes domains.
+- Phase 16 and Phase 19 migration notes include sensitive env/credential material. Do not publish those docs as-is.
+- Env naming must be made explicit: the current relayer helper reads `POLYMARKET_BUILDER_SECRET`, not `POLYMARKET_BUILDER_API_SECRET`.
+
+Required correction:
+
+- Rotate/redact any exposed Polymarket credentials before deployment or push.
+- Set all production Vercel envs explicitly; do not rely on `next.config.ts` defaults.
+- Mark Phase 16 as obsolete because it describes old 12-field signing and builder HMAC order submission.
+
+### Phase 1 - Markets, Events, Tags, Gamma Sync
+
+Status: mostly correct, but cron scheduling blocks launch.
+
+Correct work found:
+
+- `src/lib/gamma/client.ts` uses Polymarket Gamma endpoints and keyset pagination for `/events/keyset`.
+- `src/lib/gamma/mapper.ts` maps V2-relevant event and market fields, including CLOB token ids, condition ids, neg-risk flags, liquidity, volume, restricted flag, creators, tags, and comment count.
+- `src/lib/gamma/repository.ts` persists events, markets, outcomes, tags, source records, and sync metadata.
+- `src/lib/gamma/tags-sync.ts` syncs standalone tags.
+- `src/app/api/sync/gamma/route.ts`, `src/app/api/sync/tags/route.ts`, and `src/app/api/sync/gamma-comments/route.ts` require cron auth.
+
+Findings:
+
+- `vercel.json` only schedules `/api/sync/events`, `/api/sync/resolution`, and `/api/sync/translations`; it does not schedule `/api/sync/gamma`, `/api/sync/tags`, or `/api/sync/gamma-comments`.
+- If no enabled Gamma source exists and `GAMMA_URL` is absent, the Gamma sync source list can be empty even though `GammaClient` has a Polymarket default.
+- Outcome upsert uses conflict-do-nothing on `token_id`, so changed outcome labels or indexes will not be refreshed automatically.
+
+Required correction:
+
+- Add Vercel schedules for Gamma events, tags, and Gamma comments.
+- Make the source fallback explicit and visible in admin/sync logs.
+- Decide whether outcome metadata should be updated on conflict.
+
+### Phase 2 - Pricing, Charts, Order Books
+
+Status: mostly correct.
+
+Correct work found:
+
+- `src/lib/clob.ts` builds both `BUY` and `SELL` price query entries for each token id.
+- Event mid-price hooks use `BUY` as ask and `SELL` as bid, and fall back to `/midpoint`.
+- Price history code uses `/prices-history` and `/batch-prices-history`.
+- Order book code uses `/books` and `/last-trades-prices`, accepting both `asset_id` and `token_id`.
+- Old active `/data/volumes` calls were not found in reviewed runtime paths.
+
+Findings:
+
+- `src/app/[locale]/(platform)/event/[slug]/_components/priceHistoryApi.ts` still contains temporary hero chart debug logging.
+- Price-history errors are mostly swallowed into empty series; this is safe for UX but can hide production integration failure.
+
+Required correction:
+
+- Remove debug logs.
+- Add production telemetry or admin sync visibility for CLOB pricing failures.
+
+### Phase 3 - Trading, CLOB Order Wire, Builder Attribution
+
+Status: core order wire mostly correct, but market-level neg-risk signing is wrong.
+
+Correct work found:
+
+- `src/lib/constants.ts` defines V2 EIP-712 order types with the 11 signed fields required by current Polymarket CLOB V2: `salt`, `maker`, `signer`, `tokenId`, `makerAmount`, `takerAmount`, `side`, `signatureType`, `timestamp`, `metadata`, and `builder`.
+- `src/lib/orders/index.ts` sets `maker` to the proxy wallet when present, `signer` to the EOA, `signatureType` to proxy mode, and `builder` to the bytes32 builder code.
+- `src/lib/orders/signing.ts` signs only the V2 signed fields.
+- `src/app/[locale]/(platform)/event/[slug]/_actions/store-order.ts` sends the expected `/order` body shape with top-level `order`, `owner`, `orderType`, and optional `expiration`.
+- CLOB `/order` uses user L2 auth headers, not builder HMAC headers.
+- Cancel routes use the CLOB delete endpoints for single, market, and all cancels.
+
+Findings:
+
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelForm.tsx` computes `isNegRiskMarket` from the active market, but signs with `getExchangeEip712Domain(isNegRiskEnabled)`, where `isNegRiskEnabled` is event-level. This is a confirmed bug. The signing domain must use the active market's neg-risk flag.
+- `src/app/[locale]/(platform)/profile/_components/PublicPositionsList.tsx` cash-out signing derives neg-risk from `event_enable_neg_risk || neg_risk`; this can over-classify if event-level and market-level data disagree.
+- Live order submission, cancel, market order, limit order, GTD, and cash-out paths still need production or staging verification against the official CLOB.
+
+Required correction:
+
+- Use market-level neg-risk for every EIP-712 exchange domain decision.
+- Keep event-level neg-risk only for display/metadata unless a market-level value is unavailable and explicitly logged.
+- Verify builder trades with `/builder/trades?builder_code=<code>`.
+- Fix `/data/orders` usage: remove or live-verify the undocumented `maker` query parameter and normalize `order_type` in addition to legacy `type`.
+
+### Phase 4 - Wallet, Proxy, Relay, pUSD Onramp
+
+Status: mostly correct direction, but live verification is still required.
+
+Correct work found:
+
+- Reown/Wagmi can remain for launch; no forced Magic migration is required by the reviewed builder docs.
+- `src/lib/safe-proxy.ts` derives Safe proxy address and signatures using the local Polymarket example pattern.
+- `src/app/[locale]/(platform)/profile/_actions/proxy-wallet.ts` submits `SAFE-CREATE` through the relayer with server-side builder headers.
+- `src/app/[locale]/(platform)/profile/_actions/approve-tokens.ts` gets Safe nonce and submits batched approvals through relayer `/submit`.
+- `src/app/[locale]/(platform)/profile/_actions/trading-auth.ts` creates CLOB L2 auth and no longer needs per-user relayer creds for the server-side builder model.
+- `src/lib/polymarket/onramp.ts` builds USDC.e to pUSD wrap and pUSD to USDC.e unwrap calldata.
+- `src/app/[locale]/(platform)/portfolio/_actions/pending-deposit.ts` submits pending deposit wrap through the Safe relayer flow.
+
+Findings:
+
+- Relayer nonce/signature behavior should be compared against the current builder SDK with a live small transaction.
+- Server-side relayer auth timestamp uses milliseconds, matching local examples, but this should be validated live.
+- The app stores placeholder relayer credential fields for backwards compatibility; confirm no runtime path expects real per-user relayer credentials.
+- Current Relayer OpenAPI says `POST /submit` returns `transactionID` and `state: STATE_NEW`; it does not return `txHash`. `src/app/[locale]/(platform)/_actions/proxy-wallet.ts`, `src/app/[locale]/(platform)/_actions/approve-tokens.ts`, and `src/app/[locale]/(platform)/portfolio/_actions/pending-deposit.ts` currently extract tx-hash variants and do not poll `GET /transaction`.
+
+Required correction:
+
+- Run a clean new-user flow: connect EOA, derive proxy, deploy proxy, create CLOB key, approve tokens, wrap USDC.e to pUSD.
+- Verify no builder credential appears in browser JS, browser network responses, logs, or client env.
+- Store relayer `transactionID` and state, then poll `GET /transaction?id=<transactionID>` until a transaction hash or terminal state is available.
+
+### Phase 5 - pUSD, CTF Split, Merge, Redeem, Convert
+
+Status: blocked.
+
+Correct work found:
+
+- V2 contract constants exist for pUSD, CTF Exchange, NegRisk Exchange, Conditional Tokens, Onramp, Offramp, and Safe factory.
+- Approval helper defaults include pUSD and V2 exchanges in `src/lib/safe/transactions.ts`.
+
+Findings:
+
+- `src/lib/safe/transactions.ts` still defaults standard split, merge, and redeem collateral to `COLLATERAL_TOKEN_ADDRESS`, which is USDC.e.
+- `src/lib/safe/transactions.ts` still defaults neg-risk split, redeem, and convert helpers to `UMA_NEG_RISK_ADAPTER_ADDRESS`.
+- `src/app/[locale]/(platform)/profile/_components/TradingOnboardingProvider.tsx` overrides approval targets with `UMA_NEG_RISK_ADAPTER_ADDRESS`, omitting the current `NEG_RISK_ADAPTER_ADDRESS`.
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventMergeSharesDialog.tsx` passes `UMA_NEG_RISK_ADAPTER_ADDRESS` for neg-risk merge paths.
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventSplitSharesDialog.tsx`, `src/app/[locale]/(platform)/profile/_hooks/useMergePositionsAction.ts`, `SportsRedeemModal.tsx`, and portfolio won-market flows call helpers affected by the stale collateral/adapter defaults.
+
+Required correction:
+
+- Replace USDC.e collateral defaults with pUSD for V2 CTF split/merge/redeem paths.
+- Replace legacy UMA adapter usage with the current V2 adapter or exchange contract path proven by `../polymarket/ctf-exchange-v2`.
+- Run live tiny-value split, merge, redeem, and neg-risk conversion tests before launch.
+
+### Phase 6 - WebSockets
+
+Status: blocked for production stability.
+
+Correct work found:
+
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventMarketChannelProvider.tsx` connects to `${WS_CLOB_URL}/ws/market`.
+- Market subscriptions use token ids in `assets_ids`.
+- Market channel handles `book`, `last_trade_price`, and `best_bid_ask`.
+- Comment and home chart RTDS clients exist.
+
+Findings:
+
+- No reviewed websocket client sends the required market/user `PING` every 10 seconds.
+- No reviewed RTDS client sends the required RTDS `PING` every 5 seconds.
+- No authenticated `/ws/user` implementation was found.
+- `src/app/[locale]/(platform)/activity/_components/ActivityFeed.tsx` uses RTDS `activity/orders_matched`, but this topic was not present in the official RTDS docs/spec snapshot reviewed.
+
+Required correction:
+
+- Add heartbeat handling to every market/user websocket and RTDS client.
+- Implement authenticated user websocket for order/trade lifecycle or document and test a polling fallback.
+- Verify or remove RTDS `activity/orders_matched`.
+
+### Phase 7 - Comments
+
+Status: partially correct, with launch UX bugs.
+
+Correct work found:
+
+- `src/app/api/comments/route.ts` implements native local comment read/write.
+- `src/lib/gamma/comments-sync.ts` seeds Gamma comments into local comments and mirrors Polymarket users.
+- `src/lib/comments/polymarket-adapter.ts` maps Gamma comments into app comment shape.
+- `src/app/api/sync/gamma-comments/route.ts` exists and requires cron auth.
+- RTDS comments hook exists.
+
+Findings:
+
+- `/api/sync/gamma-comments` is not scheduled.
+- Local comment writes do not publish upstream to Polymarket. That is acceptable only if the product states that Axes comments are native comments seeded from Polymarket.
+- `src/app/[locale]/(platform)/event/[slug]/_hooks/useInfiniteComments.ts` applies a client-side holders-only filter using `comment.positions`, but DB/Gamma comments currently return `positions: []`. The holders-only view can incorrectly hide all comments.
+- RTDS comments client lacks heartbeat.
+- RTDS `event_slug` filter and wildcard type should be live-verified.
+- Gamma comment sync seeds top-level event comments; replies are not proven synced.
+
+Required correction:
+
+- Schedule the comments sync.
+- Fix holders-only filtering so it trusts the server result or hydrates positions.
+- Add RTDS heartbeat or polling fallback.
+- Update product copy so users do not assume their comments publish to Polymarket unless an upstream write API is implemented.
+
+### Phase 8 - Data API, Profile, Portfolio, Leaderboards
+
+Status: partial.
+
+Correct work found:
+
+- `src/lib/data-api/user.ts` uses official-shaped `/activity`, `/other`, `/positions`, and `/closed-positions`.
+- Holders and trades wrappers exist.
+- Value and leaderboard wrappers exist for official endpoints.
+
+Findings:
+
+- `src/lib/data-api/profile-link-stats.ts` calls `/volume`, but `/volume` was not found in the official Data API OpenAPI snapshot reviewed. The official spec includes `/live-volume`, not a root `/volume` endpoint.
+- `src/lib/data-api/fees.ts` calls `/referrers`, which was not found in the official Data API OpenAPI snapshot reviewed.
+- `src/app/api/leaderboard/timeframe-pnl/route.ts` and `src/app/[locale]/(platform)/profile/_components/PublicProfileHeroCards.tsx` still use `USER_PNL_URL`.
+- `src/app/[locale]/(platform)/settings/_components/SettingsProfileContent.tsx` still uses `COMMUNITY_URL`.
+
+Required correction:
+
+- Replace or disable `USER_PNL_URL` chart flows.
+- Replace or disable `COMMUNITY_URL` settings flows.
+- Replace `/volume` and `/referrers` with official endpoints or mark those surfaces unavailable.
+
+### Phase 9 - Referrals, Partnership, Builder Fees
+
+Status: partial.
+
+Correct work found:
+
+- `src/lib/auth.ts` tracks internal signup referral cookie data.
+- `src/hooks/useAffiliateOrderMetadata.ts` can keep internal attribution metadata, and V2 order signing ignores legacy fee fields.
+- `src/lib/orders/index.ts` signs official builder code in the V2 `builder` field.
+
+Findings:
+
+- Internal referral tracking is not official builder economics.
+- Affiliate admin/settings pages rely on unverified `/referrers`.
+- `src/lib/safe/transactions.ts` includes `setReferral` transaction builders against V2 exchanges, but this must be verified against the current deployed ABI and product/legal expectations before launch.
+
+Required correction:
+
+- Use builder code, builder trades, builder fees, and builder tiers for partnership reporting.
+- Keep signup referral attribution local unless official referral mechanics are confirmed.
+- Do not show unverified referrer revenue totals in production.
+
+### Phase 10 - Admin And Create-Market
+
+Status: blocked for full cutover.
+
+Correct work found:
+
+- Admin can operate on local DB records after Gamma sync.
+- Allowed creators/source controls exist for Gamma ingestion.
+
+Findings:
+
+- Admin create-market flows still reference `CREATE_MARKET_URL`.
+- `src/app/api/sync/event-creations/route.ts` still uses create-market infrastructure.
+- Admin affiliate page still combines local referral data with unverified fee/referrer totals.
+- Admin geoblock settings still sync to external `GEOBLOCK_URL`.
+
+Required correction:
+
+- Disable create-market flows unless Polymarket market creation permission and API path are confirmed.
+- Replace admin affiliate revenue views with official builder reporting or hide them.
+- Remove external geoblock sync if the target architecture is Vercel middleware geoblocking.
+
+### Phase 11 - Geoblock
+
+Status: blocked.
+
+Correct work found:
+
+- `src/lib/geoblock-settings.ts` parses Vercel, Cloudflare, and CloudFront country headers.
+- `/api/geoblock-status` reports detected country and block state.
+- `/geoblock` route exists.
+
+Findings:
+
+- `src/proxy.ts` does not enforce geoblock blocking for pages.
+- `src/proxy.ts` returns early for `/api/*` rate limiting, so trading/API mutation routes are not geoblocked.
+- Admin settings still POST to `GEOBLOCK_URL`, which conflicts with the requested Vercel IP middleware architecture.
+
+Required correction:
+
+- Enforce country blocking in `src/proxy.ts` before app/page access.
+- Enforce or explicitly allowlist API routes. Trading mutations must be guarded.
+- Remove or disable external geoblock sync.
+
+## Corrections To Earlier Phase Notes
+
+Phase 16:
+
+- Mark obsolete. It claims the old 12-field signed order model and builder HMAC headers for `/order`. Current official CLOB V2 uses an 11-field signed order with a signed `builder` bytes32 field, while `/order` uses user L2 headers.
+- Redact and rotate any credential material present in the note.
+
+Phase 18 and `v2-spec.md`:
+
+- These are closer to current truth for CLOB V2 signing: 11 signed fields, signed builder code, `expiration` present only in the wire body, and user L2 auth for `/order`.
+
+Phase 19:
+
+- Treat as a planning snapshot, not a readiness statement. It includes sensitive env material and still assumes several flows are ready that this re-audit shows are blocked.
+
+Phase 20:
+
+- Strengthen the neg-risk finding from "verify" to "confirmed bug" for event order signing.
+- Treat root `/volume` and `/referrers` as unverified because they were not present in the official Data API OpenAPI snapshot reviewed.
+- Add the holders-only comments bug.
+- Keep websocket heartbeat/user-channel issues as launch blockers.
+
+## Launch Blockers In Priority Order
+
+1. Rotate/redact credentials and remove sensitive migration material from publishable docs.
+2. Set explicit production Polymarket envs in Vercel; do not rely on Axes defaults.
+3. Schedule `/api/sync/gamma`, `/api/sync/tags`, and `/api/sync/gamma-comments`.
+4. Enforce geoblock in `src/proxy.ts` for pages and trading/API mutations.
+5. Fix pUSD collateral and current adapter usage for CTF split, merge, redeem, and neg-risk conversion.
+6. Fix relayer `/submit` response handling by storing `transactionID`/state and polling `/transaction`.
+7. Fix market-level neg-risk EIP-712 domain selection for all order/cash-out paths.
+8. Fix `/data/orders` query/response normalization.
+9. Add websocket and RTDS heartbeats, and implement user websocket or polling fallback.
+10. Replace or disable `USER_PNL_URL`, `COMMUNITY_URL`, `CREATE_MARKET_URL`, root `/volume`, and `/referrers` usages.
+11. Fix comments holders-only filtering and schedule comment seed sync.
+12. Verify live small-value flows: proxy deploy, CLOB auth, approvals, pUSD wrap, buy, sell, cancel, cash-out, split, merge, redeem, and builder trade attribution.
+
+## Final Launch Position
+
+Current code is a strong V2 migration base, not a deployable full cutover. The highest-risk code Claude wrote is not the CLOB order body; it is the surrounding production integration layer that determines whether trades sign on the correct exchange, whether positions can be managed with pUSD, whether live data stays connected, whether blocked regions are actually blocked, and whether old Axes services are still required.
+
+Do not launch full production trading until the blockers above are closed and live-tested.

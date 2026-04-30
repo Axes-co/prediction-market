@@ -1,0 +1,131 @@
+---
+title: Phase 27 - Verification of Phase 4 (relayer /submit, proxy wallet, approvals)
+status: verification-pass
+last_updated: 2026-04-30
+auditor: Claude (main thread, line-by-line)
+---
+
+# Phase 27 - Verification of Phase 4
+
+Independent verification of Codex's Phase 4 claims (Phase 22 lines 203-238, Phase 21 lines 162-186, Phase 20 lines 444-470).
+
+## Confirmations of Codex's findings
+
+### Relayer `/submit` returns `transactionID`/`STATE_NEW`, not `txHash`
+
+`/tmp/polymarket-relayer-openapi.yaml:255-261` is verbatim:
+
+> Returns immediately with the `transactionID` and a `state` of `STATE_NEW`. The onchain transaction hash is **not** included in this response — poll `GET /transaction` with the returned `transactionID` to retrieve the `transactionHash` once the transaction has been broadcast.
+
+App code reads `txHash` from the `/submit` response in three places:
+
+- `src/app/[locale]/(platform)/_actions/proxy-wallet.ts:211` `return typeof responsePayload?.txHash === 'string' ? responsePayload.txHash : null`
+- `src/app/[locale]/(platform)/_actions/approve-tokens.ts:145-153` four-way fallback `txHash || tx_hash || transactionHash || hash`
+- `src/app/[locale]/(platform)/portfolio/_actions/pending-deposit.ts:221-227` two-way fallback `txHash || transactionHash`
+
+For all three, the `/submit` response per spec is:
+
+```json
+{ "transactionID": "0190b317-a1d3-7bec-9b91-eeb6dcd3a620", "state": "STATE_NEW" }
+```
+
+So `payload.txHash` is `undefined` every time. Proxy deployment stores `null` to `proxy_wallet_tx_hash`. Approvals return `txHash: undefined`. Pending deposit returns `txHash: undefined`. **Codex correct.**
+
+### Builder HMAC headers are server-side
+
+`src/lib/polymarket/relayer-auth.ts:34-57` reads `POLYMARKET_BUILDER_API_KEY/SECRET/PASSPHRASE` from `process.env` (server-only by default). Output `POLY_BUILDER_*` headers are sent to `${RELAYER_URL}/submit` from server actions only. `next.config.ts:96-113` `env` block does not expose any of these to the browser. **Confirmed safe.**
+
+### `SAFE-CREATE` enum value (hyphen, not underscore)
+
+`proxy-wallet.ts:156-161` comment cites `@polymarket/builder-relayer-client@0.0.6/dist/types.js` `TransactionType["SAFE_CREATE"] = "SAFE-CREATE"`. Wire value is `"SAFE-CREATE"`. **Confirmed.**
+
+### Timestamp uses milliseconds
+
+`relayer-auth.ts:48` `const timestamp = Date.now()` — ms not seconds. Comment at lines 42-47 says the V2 relayer rejects seconds-precision as "bad request". This matches `wagmi-safe-builder-example/app/api/polymarket/sign/route.ts:38`. **Confirmed.**
+
+## New findings I add (not in Codex)
+
+### F1. **`markTokenApprovalsCompleted` is called before the tx is broadcast**
+
+`src/app/[locale]/(platform)/_actions/approve-tokens.ts:140-143`:
+
+```ts
+let approvals
+if (request.metadata === 'approve_tokens') {
+  approvals = await markTokenApprovalsCompleted(user.id)
+}
+```
+
+This runs as soon as `/submit` returns 200, regardless of whether the transaction has been broadcast (STATE_NEW), confirmed (STATE_CONFIRMED), or failed. The local DB flips approvals to "completed" while the relayer queue may still be sitting on the request. Subsequent flows (trading, CTF ops) that gate on the local approval flag proceed against contracts that aren't actually approved yet, leading to onchain reverts.
+
+**P0 fix:** track approval state as `pending` after `/submit`, then poll `GET /transaction` and only mark `completed` when the response shows `state: STATE_CONFIRMED` and a non-empty `transactionHash`. Or: keep `markTokenApprovalsCompleted` but schedule it from the polling worker, not the submit handler.
+
+### F2. Proxy wallet status flips to `deployed` without onchain confirmation
+
+`proxy-wallet.ts:74-85` (the surrounding context I read at line 74 `else if (txHash)`): when `txHash` resolves (which it never will from `/submit`, per F1 of Codex), the action stores `proxy_wallet_tx_hash: txHash`. But what about `proxy_wallet_status`? If status flips to `deployed` solely on a non-null txHash, the user's UI proceeds to "trade" before the proxy is actually broadcast.
+
+Need to read the surrounding lines to confirm, but the pattern is the same as F1: state advancement based on `/submit` 200 alone is wrong against current relayer spec.
+
+**P0 fix:** introduce a `proxy_wallet_status = 'submitted' | 'pending' | 'deployed' | 'failed'` state machine. Only flip to `deployed` after polling `GET /transaction` returns `STATE_CONFIRMED` AND `getCode(proxyAddress) !== '0x'`.
+
+### F3. `pending-deposit.ts` returns `{ txHash: undefined }` on success
+
+`pending-deposit.ts:221-231` returns `{ error: null, txHash }` where `txHash` is `undefined` from `/submit`. Caller likely shows the user "deposit submitted, see hash on Polygonscan" and the link is broken because `txHash` is `undefined`.
+
+**P0 fix:** return `{ error: null, transactionID, state }` from the action, and have the UI poll `/api/relayer/transaction?id=<transactionID>` until `transactionHash` resolves.
+
+### F4. `/transaction` returns an array, not an object
+
+`/tmp/polymarket-relayer-openapi.yaml:411-419` (response schema):
+
+```yaml
+schema:
+  type: array
+  items:
+    $ref: '#/components/schemas/RelayerTransaction'
+```
+
+So polling logic must handle a single-element array (or a multi-element array if multiple txns share the same ID, which is unusual). The example payload at line 421 shows a single-element array. Building the polling helper, treat as `Array<RelayerTransaction>` and pick the first.
+
+### F5. Relayer transaction `state` enum
+
+`/tmp/polymarket-relayer-openapi.yaml:168` lists `STATE_NEW` and per the example at line 432 `STATE_CONFIRMED`. There are likely other states (`STATE_BROADCAST`, `STATE_FAILED`). The polling helper should treat anything other than `STATE_CONFIRMED` as non-terminal except `STATE_FAILED`/`STATE_REJECTED` as terminal failure. Need to check the full state enum before implementing.
+
+### F6. `15s` `/submit` timeout is appropriate
+
+`proxy-wallet.ts:175` `signal: AbortSignal.timeout(15_000)`. `/submit` returns immediately per spec, so 15s is generous. Not a problem.
+
+## Net Phase 4 P0 list
+
+P0:
+
+1. **Stop reading `txHash` from `/submit`.** All three submit sites must accept `transactionID` and `state` instead.
+2. **Add `GET /transaction` polling helper.** A server-side helper `pollRelayerTransaction(transactionID, { timeoutMs, terminalStates })` that returns `{ transactionHash, state }` or throws on terminal failure / timeout.
+3. **State machines for proxy wallet, approvals, deposits.** Three intermediate states each (submitted → broadcast/pending → confirmed/failed). Local DB schema needs new columns (`proxy_wallet_relayer_transaction_id`, `proxy_wallet_state`, etc.) or reuse existing `*_tx_hash` to store the relayer ID temporarily.
+4. **Fix `markTokenApprovalsCompleted` placement** (F1). Move from submit handler to polling worker.
+5. **UI surface for "submitted but not confirmed."** A pill/toast saying "Submitted to relayer, awaiting confirmation" with a link to a status page that polls.
+
+P1:
+
+6. Audit any other call sites that gate behavior on `txHash` returned from `/submit`.
+
+## Corrections to Codex
+
+| Codex framing | My correction |
+|---|---|
+| Phase 22 line 232 "Confirm HMAC timestamp units live against relayer SDK/current API" | Already confirmed in `relayer-auth.ts:42-47` (cites `wagmi-safe-builder-example`). Codex's "verify" reduces to a re-test, but the code intent is correct. |
+| Phase 22 line 230 "Update proxy wallet deployment status to handle STATE_NEW, pending, confirmed, failed, and deployed-bytecode checks" | Add my F2: deployed-bytecode (`getCode`) check is necessary because `STATE_CONFIRMED` only confirms the *relayer transaction* succeeded. The proxy contract may still revert during deployment. The actual deployment success requires an onchain `getCode(proxyAddress) !== '0x'` check. |
+| Phase 21 line 180 "Current Relayer OpenAPI says POST /submit returns transactionID and state" | Confirmed verbatim in spec lines 255-261; not "Codex says" but "spec says." |
+
+## Evidence anchors
+
+- `/tmp/polymarket-relayer-openapi.yaml:2-60` (`/submit` request body) and `:255-261` (response semantics)
+- `/tmp/polymarket-relayer-openapi.yaml:338-450` (`/transaction` polling)
+- `src/lib/polymarket/relayer-auth.ts:34-57`
+- `src/app/[locale]/(platform)/_actions/proxy-wallet.ts:140-212`
+- `src/app/[locale]/(platform)/_actions/approve-tokens.ts:104-159`
+- `src/app/[locale]/(platform)/portfolio/_actions/pending-deposit.ts:191-231`
+
+## Next phase
+
+Move to Phase 5 verification (pUSD + CTF split/merge/redeem/convert collateral defaults).

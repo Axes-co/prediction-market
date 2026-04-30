@@ -1,0 +1,106 @@
+---
+title: Phase 24 - Verification of Phase 1 (Gamma sync, crons, mapper coverage)
+status: verification-pass
+last_updated: 2026-04-30
+auditor: Claude (main thread, line-by-line)
+---
+
+# Phase 24 - Verification of Phase 1
+
+Independent verification of Codex's Phase 1 claims (Phase 21 lines 89-112, Phase 22 lines 90-126, Phase 20 lines 350-389).
+
+## Confirmations of Codex's findings
+
+### Crons missing for Gamma/tags/Gamma-comments
+
+`vercel.json:4-17` schedules exactly three crons:
+- `/api/sync/events` `*/5 * * * *`
+- `/api/sync/resolution` `*/5 * * * *`
+- `/api/sync/translations` `0 */6 * * *`
+
+The three new Gamma routes exist and require cron auth (`grep -c "isCronAuthorized" src/app/api/sync/{tags,gamma-comments,events}/route.ts` => 2 each), but none of `/api/sync/gamma`, `/api/sync/tags`, `/api/sync/gamma-comments`, or `/api/sync/event-creations` is scheduled. **Codex correct.**
+
+### Gamma client targets Polymarket by default
+
+`src/lib/gamma/client.ts:13` `const DEFAULT_BASE_URL = 'https://gamma-api.polymarket.com'`. Constructor at line 27 resolves `options.baseUrl ?? process.env.GAMMA_URL ?? DEFAULT_BASE_URL`. The `/events/keyset` builder at lines 35-49 sends `limit, closed=false, active=true, archived=false, include_tags=true, order, ascending=false` and `after_cursor` only when present. Matches `polymarket-gamma-openapi.yaml:1069-1102` (keyset spec) including the `next_cursor → after_cursor` round-trip rule documented at lines 876-878. **Codex correct.**
+
+### Sync source fallback can collapse to empty list
+
+`src/lib/gamma/sync.ts:100-119` resolves sources by:
+1. Caller-provided `sourceUrls` (route override).
+2. Allowed-creator records via `AllowedMarketCreatorRepository.listGammaApiSources()`.
+3. Single fallback constructed from `process.env.GAMMA_URL`.
+
+If neither caller-provided nor allowed-creator sources exist AND `GAMMA_URL` is unset, sync.ts:118 returns `[]`. The `GammaClient` default (`https://gamma-api.polymarket.com`) is **bypassed** because the fallback string is empty. The sync silently completes with zero sources processed. **Codex correct (Phase 21 line 104).**
+
+### Outcome upsert is insert-only
+
+`src/lib/gamma/repository.ts:295-300` does `db.insert(outcomesTable).values(allOutcomes).onConflictDoNothing({ target: outcomesTable.token_id })`. There is no `doUpdateSet`. Once a token_id exists, future Gamma changes to outcome label or index for that token are dropped. **Codex correct.**
+
+## New findings I add (not in Codex)
+
+### F1. `/api/sync/events` is not a no-op; it is an active legacy sync
+
+`src/app/api/sync/events/route.ts:26` defines `PNL_SUBGRAPH_URL = 'https://api.goldsky.com/api/public/project_cmfbr456t4gud01w483uu2d9d/subgraphs/pnl-subgraph/1.0.0/gn'`. This route reads onchain conditions from a Goldsky PnL subgraph and upserts events/markets/conditions/sports tables — independently of Gamma. With the current `vercel.json`, this is the cron actually running every 5 minutes.
+
+Implication: on Polymarket cutover, the Goldsky subgraph is owned by kuest's stack (it indexes V1 contracts and the `pnl-subgraph` schema). It will not pick up V2 markets created on `0xE111…996B` or neg-risk V2 `0xe2222…0F59`. Leaving this cron in place while running Gamma in parallel risks event/market table churn from two different sources of truth.
+
+Codex flagged this as "decide whether `/api/sync/events` is legacy" (Phase 22 line 116). The decision is forced: **disable** before launch unless explicitly proven that the subgraph indexes V2.
+
+### F2. `/api/sync/event-creations` exists but is not scheduled
+
+`ls src/app/api/sync/` shows `event-creations` directory. Phase 21 line 320 mentions this calls `CREATE_MARKET_URL` infrastructure. With no cron, it relies on manual triggers, which is consistent with admin-driven create flows. Confirm dead-code or wire it intentionally; do not leave it accidentally callable.
+
+### F3. Cursor wrap behavior is implicit
+
+`src/lib/gamma/sync.ts:188` comment: "A null cursor means we exhausted the source; next run wraps back to the start of the volume-sorted feed to refresh top events." `src/lib/gamma/lock.ts:loadGammaSyncCursors` returns persisted cursors; when `nextCursors[source.sourceUrl] = null` is persisted, the next run starts at `null` (top of feed). This is correct behavior, but it is not surfaced in admin UI, so an operator cannot tell whether the sync is still backfilling or has wrapped.
+
+Codex did flag "admin sync visibility" (Phase 22 line 119); F3 confirms it is needed not just for errors but for cursor lifecycle.
+
+### F4. `mapTags` runs even when no event upsert occurred
+
+`sync.ts:375` `await linkEventTags(eventResult.eventId, mapTags(gammaEvent.tags))` runs unconditionally per event. That is correct for tag drift, but it is not gated on `eventResult.changed`. On a fully steady-state sync this writes even when nothing changed. Not a launch blocker; potential noise in DB writes / cache-tag fanout.
+
+## Net Phase 1 P0 list (post-verification)
+
+P0:
+
+1. Add to `vercel.json`:
+   - `/api/sync/gamma` — schedule TBD; default suggestion `*/5 * * * *`.
+   - `/api/sync/tags` — `0 */6 * * *` is sufficient; tags don't drift fast.
+   - `/api/sync/gamma-comments` — `*/15 * * * *` keeps RTDS fallback fresh.
+
+2. Make the Gamma fallback explicit in `sync.ts:117-118`: when no allowed-creator sources are registered AND `GAMMA_URL` is unset, fall back to `https://gamma-api.polymarket.com` (the same default `GammaClient` already uses), instead of returning `[]`. Silent zero-source sync hides misconfiguration.
+
+3. Decide on `/api/sync/events`: either disable in `vercel.json` or document that it co-exists with Gamma sync and resolve which side wins on conflict. Two writers to `events`/`markets`/`conditions` without a tiebreaker is a launch foot-gun.
+
+4. Change `repository.ts:295-300` to `doUpdateSet({ outcome_text: sql\`excluded.outcome_text\`, outcome_index: sql\`excluded.outcome_index\` })` for `outcomes`. Insert-only is fine for `condition_id`, not for outcome metadata.
+
+P1:
+
+5. Surface sync state in admin: per-source last cursor, last success time, last error, inserted/updated counts (Codex Phase 22 line 119).
+
+6. Disable or hide `/api/sync/event-creations` until create-market is decided.
+
+## Corrections to Codex
+
+| Codex framing | My correction |
+|---|---|
+| Phase 22 line 116 "Decide whether `/api/sync/events` is legacy" | Not optional. The route reads a Goldsky subgraph that does not index Polymarket V2; leaving it on creates two competing writers to `events`/`markets`. P0 to disable. |
+| Phase 21 line 105 "If no enabled Gamma source exists and `GAMMA_URL` is absent, the Gamma sync source list can be empty even though `GammaClient` has a Polymarket default" | Confirmed and elevated: this is a silent failure mode. Sync returns success with zero sources processed. Add explicit fallback OR a startup-time warning. |
+| Phase 22 line 118 "Update outcome rows on conflict if Gamma outcome labels or indexes change" | Same, with implementation detail: `onConflictDoUpdate` should only update `outcome_text` and `outcome_index`; `token_id` and `condition_id` must stay immutable to preserve foreign keys. |
+
+## Evidence anchors
+
+- `vercel.json:4-17`
+- `src/lib/gamma/client.ts:13-49`
+- `src/lib/gamma/sync.ts:100-119,375,188-189`
+- `src/lib/gamma/repository.ts:289-300`
+- `src/app/api/sync/gamma/route.ts:7-33`
+- `src/app/api/sync/events/route.ts:26` (Goldsky subgraph URL)
+- `/tmp/polymarket-gamma-openapi.yaml:1069-1102` (events/keyset spec)
+- `/tmp/polymarket-gamma-openapi.yaml:1445-1510` (comments endpoints)
+
+## Next phase
+
+Move to Phase 2 verification (pricing/charts/order books).

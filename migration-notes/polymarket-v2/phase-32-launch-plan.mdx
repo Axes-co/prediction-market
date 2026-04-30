@@ -1,0 +1,303 @@
+---
+title: Phase 32 - Master launch plan (post-verification)
+status: synthesis
+last_updated: 2026-04-30
+auditor: Claude (main thread, line-by-line)
+supersedes: phase-19-final-master-plan, phase-20-current-launch-audit, phase-22-full-api-reference-app-audit
+---
+
+# Phase 32 - Master Launch Plan
+
+This plan consolidates the verified blockers from Phase 23-31. Every P0 below is backed by file:line evidence I personally read and matched against the official Polymarket spec snapshots in `/tmp/polymarket-*-openapi.yaml` and the docs in `/tmp/polymarket-llms-full.txt`.
+
+**Do not start coding until the user signs off on this plan.** The user explicitly asked for audit + plan, not implementation.
+
+## Working agreement (per `feedback_audit_methodology.md`)
+
+- Main thread does the work. No sub-agents for architecture or implementation.
+- Live evidence required for every "shipped" claim (curl probe, tx hash, DB delta).
+- Phase by phase. Don't skip ahead.
+- 3-way live testing where possible (axes vs kuest vs polymarket production).
+- Senior code only. No patches over root causes.
+
+## Execution priority order
+
+The 12 verified P0 blockers below are ordered by **blast radius if violated** (highest first), not by build difficulty. A user can lose money or be exposed to compliance risk if any of P0-1 through P0-6 are violated; the rest are "broken UX, not lost funds."
+
+### P0-1. Geoblock enforcement (compliance, blast = legal)
+
+Code change required in `src/proxy.ts`. Read country from headers, redirect blocked pages, return 403 on blocked API mutations. Seed `blocked_countries` settings row at migration time from Polymarket's canonical list.
+
+**Files to edit:**
+- `src/proxy.ts:95-108` — add country check before the `/api/*` rate-limit short-circuit
+- `src/lib/db/migrations/<new>` — seed Polymarket-blocked country list
+- `src/app/[locale]/admin/(general)/_actions/update-general-settings.ts:146-165` — disable `syncGeoblockSettings` external POST
+
+**Evidence:** Phase 23, Phase 31. `src/proxy.ts` has no country read; `geoblock-settings.ts:371` has the check function but nothing calls it from middleware.
+
+**Acceptance:**
+- `curl -H "x-vercel-ip-country: US" https://<deploy>/event/<slug>` → 307 redirect to `/geoblock`.
+- `curl -H "x-vercel-ip-country: US" -X POST https://<deploy>/api/store-order` → 403 `{"error":"restricted_region"}`.
+- `curl -H "x-vercel-ip-country: GB" https://<deploy>/event/<slug>` → 200 (or whatever non-US/non-blocked allowed).
+- Allowed-country GET to `/api/comments` works (read still public).
+
+### P0-2. CTF collateral defaults (blast = user shares evaporate)
+
+Three builders in `src/lib/safe/transactions.ts` default to USDC.e instead of pUSD. Three more default to legacy UMA neg-risk adapter instead of V2 NEG_RISK_ADAPTER. Onboarding approves the wrong neg-risk adapter. Merge dialog passes the legacy adapter explicitly.
+
+**Files to edit:**
+- `src/lib/safe/transactions.ts:419-438` `buildSplitPositionTransaction` — change `COLLATERAL_TOKEN_ADDRESS` default → `PUSD_ADDRESS`
+- `src/lib/safe/transactions.ts:440-459` `buildMergePositionTransaction` — same
+- `src/lib/safe/transactions.ts:480-498` `buildRedeemPositionTransaction` — same
+- `src/lib/safe/transactions.ts:380-396` `buildNegRiskSplitPositionTransaction` — change `UMA_NEG_RISK_ADAPTER_ADDRESS` default → `NEG_RISK_ADAPTER_ADDRESS`
+- `src/lib/safe/transactions.ts:398-417` `buildNegRiskRedeemPositionTransaction` — same
+- `src/lib/safe/transactions.ts:461-478` `buildConvertPositionsTransaction` — same
+- `src/app/[locale]/(platform)/_providers/TradingOnboardingProvider.tsx:539-551` — add `NEG_RISK_ADAPTER_ADDRESS` to `spenders` and `operators`
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventMergeSharesDialog.tsx:214` — replace `UMA_NEG_RISK_ADAPTER_ADDRESS` with `NEG_RISK_ADAPTER_ADDRESS` (or use ConditionalTokens directly per V2 ABI verification)
+
+**Verification gate before deploy:** read `../polymarket/ctf-exchange-v2/contracts/` to confirm V2 split/merge/redeem/convert ABI signatures match `negRiskAdapterAbi` and `conditionalTokensAbi`. If divergent, swap ABI.
+
+**Acceptance (live, on Polygon mainnet, tiny value):**
+- pUSD split → user receives YES + NO ERC1155 tokens against `PUSD_ADDRESS`-collateralized positionId namespace.
+- pUSD merge → user receives back pUSD.
+- pUSD redeem on resolved market → user receives pUSD per outcome.
+- Neg-risk split via V2 adapter → user receives correct neg-risk position tokens.
+
+### P0-3. Order signing neg-risk domain bug (blast = orders fail silently)
+
+Event order panel signs against event-level neg-risk; profile cash-out OR's event-level + market-level. Both wrong for markets where market-level disagrees with event-level. Signature is invalid against the actual contract.
+
+**Files to edit:**
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventOrderPanelForm.tsx:876` — change `getExchangeEip712Domain(isNegRiskEnabled)` → `getExchangeEip712Domain(isNegRiskMarket)`
+- `src/app/[locale]/(platform)/profile/_components/PublicPositionsList.tsx:694` — change OR to market-level-first:
+  ```ts
+  isNegRisk = typeof payload?.data?.neg_risk === 'boolean'
+    ? payload.data.neg_risk
+    : Boolean(payload?.data?.event_enable_neg_risk)
+  ```
+
+**Evidence:** Phase 26.
+
+**Acceptance:** unit test that constructs a market with `neg_risk = true` and event with `enable_neg_risk = false` (and reverse), asserts signing uses the correct verifying contract address.
+
+### P0-4. Relayer `/submit` response handling (blast = orphaned tx state)
+
+`/submit` returns `transactionID` + `STATE_NEW`, not `txHash`. Three call sites read `txHash` directly and either store `null` or wrong-undefined. Approvals are marked `completed` immediately on `/submit` 200 — before they're broadcast.
+
+**Files to edit:**
+- `src/app/[locale]/(platform)/_actions/proxy-wallet.ts:211` — return `{ transactionID, state }` instead of `txHash`. Update caller (`proxy-wallet.ts:74-85`) to handle pending state.
+- `src/app/[locale]/(platform)/_actions/approve-tokens.ts:140-153` — gate `markTokenApprovalsCompleted` on confirmation, not on `/submit` 200.
+- `src/app/[locale]/(platform)/portfolio/_actions/pending-deposit.ts:221-231` — return `{ transactionID, state }`.
+- New file: `src/lib/polymarket/relayer-poll.ts` exporting `pollRelayerTransaction(transactionID, { timeoutMs })` that polls `GET /transaction?id=<id>` until `STATE_CONFIRMED`/`STATE_FAILED`/timeout.
+- Schema migration: add `proxy_wallet_relayer_transaction_id`, `proxy_wallet_state` columns. Or reuse existing columns if naming permits.
+
+**Evidence:** Phase 27.
+
+**Acceptance:**
+- `POST /api/proxy-wallet/deploy` returns 200 with `{ transactionID, state: "STATE_NEW" }`.
+- Background worker (or client polling) updates status to "deployed" once `getCode(proxyAddress)` returns non-empty AND relayer state = STATE_CONFIRMED.
+- Approvals do not flip to "completed" in DB until both relayer state confirmed AND on-chain `getApproval` reads non-zero.
+
+### P0-5. Production env defaults still axes.co (blast = silent misroute)
+
+12 URLs in `next.config.ts:101-112` default to `*.axes.co`. Misconfigured deploy silently routes to dead infra.
+
+**Files to edit:**
+- `next.config.ts:96-113` — replace fallbacks with explicit production values OR throw at startup if unset. Pattern:
+  ```ts
+  GAMMA_URL: assertEnv(process.env.GAMMA_URL, 'GAMMA_URL'),
+  ```
+- `.env.example` — add `POLYMARKET_BUILDER_API_KEY`, `POLYMARKET_BUILDER_SECRET`, `POLYMARKET_BUILDER_PASSPHRASE`, `POLYMARKET_BUILDER_CODE`, `RELAYER_URL`, `WS_CLOB_URL`, `WS_LIVE_DATA_URL`, `BRIDGE_URL` (if used).
+- `.env.example:5` — replace kuest auth.kuest.com reference with Polymarket equivalent.
+
+**Evidence:** Phase 23.
+
+**Acceptance:** production deploy with missing env throws at startup, not at first user request.
+
+### P0-6. `setReferral` ABI verification (blast = onboarding reverts)
+
+`TradingOnboardingProvider.tsx:552-559` adds `setReferral` transactions to the new-user approval batch. If the V2 exchange's `setReferral(address, address, uint256)` signature doesn't match, every new-user onboarding reverts (the batch is atomic).
+
+**Files to verify (read, then decide):**
+- `../polymarket/ctf-exchange-v2/contracts/CTFExchange.sol` (or equivalent) — confirm `setReferral` selector and parameter shape.
+- `src/lib/safe/transactions.ts:104-116` — local ABI fragment.
+- `src/lib/safe/transactions.ts:308-318` — `buildSetReferralTransactions` call site.
+
+**Decision tree:**
+- If ABI matches: keep in batch; verify with one tiny live tx.
+- If ABI mismatch or function doesn't exist on V2: pull `setReferral` out of `TradingOnboardingProvider:552-559` batch entirely. Run as a separate opt-in transaction post-onboarding so it cannot revert the approval batch.
+
+**Evidence:** Phase 30.
+
+### P0-7. Schedule Gamma sync crons (blast = stale market data)
+
+Three new sync routes exist but are not in `vercel.json`. The legacy `/api/sync/events` is scheduled but reads from a Goldsky V1 subgraph that does not index V2.
+
+**Files to edit:**
+- `vercel.json:4-17` — add:
+  ```json
+  { "path": "/api/sync/gamma",          "schedule": "*/5 * * * *" },
+  { "path": "/api/sync/tags",           "schedule": "0 */6 * * *" },
+  { "path": "/api/sync/gamma-comments", "schedule": "*/15 * * * *" }
+  ```
+- `vercel.json:5-8` — remove or comment out the legacy `/api/sync/events` cron (or document why it co-exists).
+- `src/lib/gamma/sync.ts:117-118` — make Gamma fallback explicit (use `https://gamma-api.polymarket.com` when no allowed-creator source registered).
+- `src/lib/gamma/repository.ts:295-300` — replace `onConflictDoNothing` on outcomes with `onConflictDoUpdate({ target: outcomesTable.token_id, set: { outcome_text, outcome_index } })`.
+
+**Evidence:** Phase 24.
+
+**Acceptance:** fresh DB Vercel deploy populates Polymarket events within 5 minutes, every market has condition_id + clob_token_ids + outcomes + active flags.
+
+### P0-8. Open-orders `/data/orders` shape (blast = wrong UI)
+
+Sends undocumented `maker` query; reads response field `type` while spec says `order_type`. Result: every order shows "GTC" regardless of actual type. Filter by maker may be silently ignored.
+
+**Files to edit:**
+- `src/app/api/open-orders/route.ts:117-118` — remove `maker` query param. CLOB filters by authenticated API key automatically.
+- `src/app/api/open-orders/route.ts:35` — change `type?: ClobOrderType` to `order_type?: ClobOrderType`.
+- `src/lib/clob-open-orders.ts:16-17` — change `type?: string | null` to `order_type?: string | null`.
+- `src/lib/clob-open-orders.ts:59` — read `order.order_type` (legacy fallback `order.type` for kuest if needed).
+
+**Evidence:** Phase 26.
+
+**Acceptance:** open orders page shows correct type (FOK, FAK, GTC, GTD).
+
+### P0-9. WebSocket heartbeats + RTDS topic fix (blast = broken live UX)
+
+No PING in any ws client, RTDS comments filter mismatched, `topic: 'activity'` undocumented.
+
+**Files to edit:**
+- `src/app/[locale]/(platform)/event/[slug]/_components/EventMarketChannelProvider.tsx:231-359` — add 10s PING `setInterval`.
+- `src/app/[locale]/(platform)/event/[slug]/_hooks/useLiveCommentsChannel.ts:124-134`:
+  - Add 5s PING `setInterval`.
+  - Replace `type: '*'` with explicit four types (`comment_created`, `comment_removed`, `reaction_created`, `reaction_removed`).
+  - Replace `filters: { event_slug }` with `filters: { parentEntityID: <gamma_event_id>, parentEntityType: 'Event' }`.
+- `src/app/[locale]/(platform)/activity/_components/ActivityFeed.tsx:296-305` — feature-flag the `topic: 'activity'` subscription. Replace with `/activity` Data API polling until live-verified.
+- `src/app/[locale]/(platform)/(home)/_hooks/useLiveChartStream.ts` — if it opens RTDS, add 5s PING.
+
+**Evidence:** Phase 29.
+
+**Acceptance:** market page stays connected for 30 minutes without reconnect; comments render live for synced events; activity feed renders without RTDS or via documented polling.
+
+### P0-10. Holders-only comment filter (blast = empty list)
+
+Client-side filter wipes the list because `comment.positions` is always `[]` from local DB.
+
+**Files to edit:**
+- `src/app/[locale]/(platform)/event/[slug]/_hooks/useInfiniteComments.ts:107-116` — remove client-side filter; trust server `holders_only=true` query.
+
+**Evidence:** Phase 30.
+
+**Acceptance:** holders-only toggle returns server-filtered comments (or all comments if no holder positions).
+
+### P0-11. Replace USER_PNL_URL / COMMUNITY_URL / `/volume` / `/referrers`
+
+These four kuest-only endpoints have no Polymarket equivalent. Either replace with documented endpoints or hide.
+
+**Files to edit:**
+- `src/lib/data-api/profile-link-stats.ts:183` — replace `/volume` with `/v1/leaderboard?user=...&orderBy=VOLUME&limit=1` (single-row response) OR remove the volume stat.
+- `src/lib/data-api/fees.ts` — delete `fetchFeeReceiverTotals` and the `/referrers` call. Replace consumer pages with builder reporting (P1) or hide.
+- `src/app/[locale]/admin/affiliate/page.tsx:101` — replace with builder reporting page.
+- `src/app/[locale]/(platform)/settings/affiliate/page.tsx:40` — same.
+- `src/app/[locale]/(platform)/profile/_components/PublicProfileHeroCards.tsx:458` — disable timeframe PnL chart card OR replace with `/v1/leaderboard` data.
+- `src/app/api/leaderboard/timeframe-pnl/route.ts:5` — delete or stub.
+- `src/app/[locale]/(platform)/settings/_components/SettingsProfileContent.tsx:57` — disable profile editing UI (no public Polymarket profile-write API).
+- `src/lib/community-auth.ts:99` — delete or stub.
+
+**Evidence:** Phase 30.
+
+**Acceptance:** no production fetch hits `*.axes.co` or `community.axes.co` or `user-pnl-api.axes.co`.
+
+### P0-12. Disable admin create-market
+
+The 7,242-line `AdminCreateEventForm.tsx` and the 6 `CREATE_MARKET_URL` endpoints in `/api/sync/event-creations` cannot work against Polymarket production.
+
+**Files to edit:**
+- Admin route page (e.g., `src/app/[locale]/admin/events/calendar/page.tsx`) — replace export with a "feature unavailable" placeholder or redirect.
+- `src/app/api/sync/event-creations/route.ts` — return 503 until decided.
+- Keep `AdminCreateEventForm.tsx` in repo for rollback.
+
+**Evidence:** Phase 31.
+
+## P1 (post-launch, ordered by user-visibility)
+
+1. Build admin builder-reporting page from `/v1/builders/leaderboard`, `/v1/builders/volume`, `/builder/trades?builder_code=<code>`.
+2. Implement authenticated `/ws/user` server-side bridge for real-time order/trade lifecycle (replaces the polling fallback).
+3. Fix `/midpoint` response field name `mid` → `mid_price` (Phase 25 F1).
+4. Add `custom_feature_enabled: true` to market channel subscription (Phase 29 F1).
+5. Surface relayer transaction state in UI ("submitted, awaiting confirmation").
+6. Validate `interval` enum at price-history boundary (Phase 25 F4).
+7. Reconcile comment count drift between Gamma and native comments (Phase 30 F2).
+8. Audit reconnect backoff in `EventMarketChannelProvider.tsx` (Phase 29 F4).
+9. Fail-fast on missing `POLYMARKET_BUILDER_CODE` in production (Phase 26 F1).
+10. Build sports websocket integration if sports product launches.
+
+## P2 (cleanup, no user impact)
+
+1. Drop V1 fields (`nonce`, `fee_rate_bps`, `taker`) from `BlockchainOrder` type and `serializeOrder` after V2.2 (Phase 26 F4).
+2. Switch to 256-bit salt (Phase 26 F3).
+3. Use `/midpoints` (plural) for batch midpoint queries (Phase 25 F3).
+4. Rename `ALLOWED_COUNTRY_CODES` → `RECOGNIZED_COUNTRY_CODES` (Phase 31 F4).
+5. Tighten `next.config.ts:env` to only public URLs (Phase 23 P2).
+6. Add `gamma_auth` to RTDS comments subscription for logged-in users (Phase 29 F3).
+7. Decide `/api/sync/events` co-exist policy or delete (Phase 24 F1).
+
+## Live verification gates (gate launch on these)
+
+1. `curl https://gamma-api.polymarket.com/events/keyset?limit=5` returns 200 + events array.
+2. `curl https://clob.polymarket.com/midpoint?token_id=<token>` returns `{ "mid_price": "0.50" }`.
+3. `curl -H "POLY_API_KEY: ..." -H "POLY_ADDRESS: ..." -H "POLY_SIGNATURE: ..." -H "POLY_PASSPHRASE: ..." -H "POLY_TIMESTAMP: ..." https://clob.polymarket.com/data/orders` returns user's open orders.
+4. `curl -X POST -H "POLY_BUILDER_*: ..." -d '<safe-tx>' https://relayer-v2.polymarket.com/submit` returns `{ transactionID, state: "STATE_NEW" }`.
+5. `curl https://relayer-v2.polymarket.com/transaction?id=<transactionID>` returns array with `transactionHash` once broadcast.
+6. WebSocket connect to `wss://ws-subscriptions-clob.polymarket.com/ws/market` + subscribe + send PING every 10s + stay alive 30 minutes.
+7. WebSocket connect to `wss://ws-live-data.polymarket.com` + subscribe to `comments` with `parentEntityID` filter + send PING every 5s + receive `comment_created` events.
+8. Tiny pUSD split + merge round-trip on Polygon (any small market): user ends with same pUSD balance, sees yes/no token transitions in the middle.
+9. Tiny limit-order BUY against an active Polymarket market via the app's order panel: order appears on `/data/orders` with correct `order_type`. Cancel: order removed.
+10. Builder-attributed trade verification: after a tiny order matches, `curl /builder/trades?builder_code=0x23a45b95...` shows the trade.
+
+If any of 1-10 fails, do not launch.
+
+## Decisions deferred to user
+
+1. **Wallet provider:** keep Reown + Wagmi (current) vs migrate to Magic + Wagmi (Polymarket's canonical example). Recommendation: keep Reown for launch, migrate post-launch only if there's a UX driver.
+2. **Comments product position:** "Axes comments seeded from Polymarket" (current native model) vs "Polymarket comments only (read-only)" (no native posting). Recommendation: native model, with explicit "your comment is on Axes, not Polymarket" copy.
+3. **Bridge / Funding UX:** keep Li.Fi + onramp wrap (current) vs implement Polymarket Bridge API. Recommendation: keep current; document as "Axes funding UX, not Polymarket Bridge."
+4. **Withdrawal flow:** build pUSD → USDC.e offramp via `CollateralOfframp.unwrap` vs hide withdraw UI. Recommendation: build for launch since not having withdrawal is unacceptable.
+5. **Admin create-market:** disable for launch (recommended) vs keep parallel kuest-style backend running. Recommendation: disable.
+
+## What I will NOT do without explicit user approval
+
+- Edit any source file (this audit is read-only per user's "for now don't code" directive).
+- Push or PR.
+- Launch live probes against Polymarket production with operator credentials (those probes need to be run by the user since they reveal operator wallet activity).
+- Rotate any credentials.
+- Modify `vercel.json` or env values in any deploy environment.
+
+## Index of verification docs (chronological)
+
+- `phase-23-verify-phase-0-env-security.mdx` — env defaults, secret hygiene, geoblock posture.
+- `phase-24-verify-phase-1-gamma-sync.mdx` — Gamma sync, crons, mapper, repository.
+- `phase-25-verify-phase-2-pricing.mdx` — pricing, charts, order books, `/midpoint` field name bug.
+- `phase-26-verify-phase-3-trading.mdx` — CLOB order signing, neg-risk domain bug, `/data/orders`.
+- `phase-27-verify-phase-4-relayer.mdx` — `/submit` response handling, approvals state machine.
+- `phase-28-verify-phase-5-ctf.mdx` — pUSD/CTF collateral defaults, V2 adapter usage.
+- `phase-29-verify-phase-6-ws.mdx` — websocket heartbeats, user channel, RTDS topic.
+- `phase-30-verify-phases-7-8-9.mdx` — comments holders-only, data API drift, builder vs internal referrals.
+- `phase-31-verify-phases-10-11.mdx` — admin create-market, geoblock enforcement.
+- `phase-32-launch-plan.mdx` — this file.
+
+## Final readiness opinion
+
+The migration base is sound. The CLOB order body, EIP-712 V2 domain, builder code attribution, Gamma sync direction, and pricing endpoint inventory are all correct. The launch is blocked by:
+
+1. Infra gates (env, crons, geoblock).
+2. Wire-shape bugs (relayer response, neg-risk domain, `/data/orders` field).
+3. Asset-moving correctness (pUSD vs USDC.e, V2 vs UMA adapters).
+4. Live-data plumbing (heartbeats, RTDS filter shape).
+5. Stale Axes endpoints (USER_PNL, COMMUNITY, /volume, /referrers, CREATE_MARKET).
+
+None of these are speculative. Every one has a file:line citation in this plan and a Polymarket spec citation backing it. The remaining work is tactical fixes plus tiny-value live verification, not refactoring.
+
+**Estimated implementation time** assuming senior-level execution and no context drift: 2-3 working days for all P0s + 1 day for the live-probe verification gates. Faster than that risks shipping a regression.
+
+**Ready to proceed when:** the user reviews this plan, picks a P0 sequence (suggested: P0-7 → P0-1 → P0-5 → P0-8 → P0-3 → P0-4 → P0-2 → P0-6 → P0-9 → P0-10 → P0-11 → P0-12, ordered by build-on-build dependency), and confirms whether to start coding or to do further audit on anything I covered above.

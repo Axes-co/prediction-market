@@ -1,0 +1,167 @@
+---
+title: Phase 30 - Verification of Phases 7/8/9 (comments, data API, referrals)
+status: verification-pass
+last_updated: 2026-04-30
+auditor: Claude (main thread, line-by-line)
+---
+
+# Phase 30 - Verification of Phases 7/8/9
+
+Independent verification of Codex's claims for Comments (Phase 22 lines 352-388), Data API/Profile/Portfolio (Phase 22 lines 390-422), Builder/Referrals (Phase 22 lines 424-458).
+
+## Phase 7 - Comments
+
+### Confirmations of Codex
+
+**Holders-only client filter wipes the list.** `src/app/[locale]/(platform)/event/[slug]/_hooks/useInfiniteComments.ts:68-69` sends `holders_only=true` to `/api/comments`. Same hook at `:107-116` ALSO applies `flattened.filter(comment => hasPositivePositions(comment.positions))`. The local DB comment row schema does not store `positions` (the native comment table is event-scoped, not position-scoped). Every native comment has `comment.positions = []`, so `hasPositivePositions([])` = false, so holders-only mode renders zero comments. **Confirmed (Codex correct, Phase 22 line 368).**
+
+**Native comments do not publish upstream.** `/api/comments POST` writes only to the local DB; no fetch to Gamma. **Confirmed.**
+
+**`/api/sync/gamma-comments` not scheduled.** Already covered in Phase 24 (Phase 1 verification).
+
+### New findings I add
+
+#### F1. Live RTDS comments filter mismatch (carryover from Phase 29)
+
+`useLiveCommentsChannel.ts:131` filter is `{ event_slug }`, but Polymarket RTDS payload carries `parentEntityID` + `parentEntityType` (per `/tmp/polymarket-llms-full.txt:4287-4302`). Native comments served from local DB ARE keyed by `event_slug`, but RTDS events from Polymarket are keyed by gamma event ID. Two different filter spaces.
+
+**P0:** rebuild the filter to use the gamma event ID for RTDS, while still using `event_slug` for the REST query. They're separate stores.
+
+#### F2. Comment count drift between local and Polymarket
+
+The Gamma event payload includes `commentCount` which `gamma/mapper.ts` carries forward. Local native comments do not increment Polymarket's count. So an event seeded with 30 Gamma comments + 5 local native comments will show "30" on the count badge but render 35 in the list. This is a UX inconsistency.
+
+**P1:** decide whether the count reflects synced + native or only synced. If the latter, separate badges.
+
+## Phase 8 - Data API / Profile / Portfolio / Leaderboards
+
+### Confirmations of Codex
+
+**`/volume` is not a documented endpoint.** `/tmp/polymarket-data-openapi.yaml` paths inventory:
+
+```
+/positions (494)  /trades (612)  /activity (710)
+/holders (834)    /traded (892)  /value (968)
+/oi (1008)        /live-volume (1043)  /closed-positions (1076)
+/other (1182)     /v1/builders/leaderboard (1319)
+/v1/builders/volume (1374)  /v1/leaderboard (1413)
+```
+
+No `/volume`. `src/lib/data-api/profile-link-stats.ts:183` calls `/volume`. **Codex correct (Phase 22 line 414).**
+
+**`/referrers` is not a documented endpoint.** Same OpenAPI; `/referrers` is absent. `src/lib/data-api/fees.ts:13,40` calls `/${endpoint}` with `endpoint = 'referrers'`. **Codex correct (Phase 22 line 415).**
+
+**`USER_PNL_URL` and `COMMUNITY_URL` still wired.** Active call sites:
+
+- `USER_PNL_URL`:
+  - `src/app/[locale]/(platform)/profile/_components/PublicProfileHeroCards.tsx:458`
+  - `src/app/api/leaderboard/timeframe-pnl/route.ts:5`
+- `COMMUNITY_URL`:
+  - `src/app/[locale]/(platform)/settings/_components/SettingsProfileContent.tsx:57`
+  - `src/lib/community-auth.ts:99`
+
+`grep -rnE "USER_PNL_URL|COMMUNITY_URL" src/` returns 4 active sites. **Confirmed.**
+
+### New findings I add
+
+#### F3. `/v1/leaderboard` parameters need verification
+
+`profile-link-stats.ts:184-191` builds `/leaderboard?user=...&timePeriod=all&orderBy=PNL&category=overall&limit=1&offset=0`. The Data API openapi defines `/v1/leaderboard` (line 1413), but the route uses `${leaderboardApiUrl}/leaderboard` — without the `/v1` prefix. Need to read `leaderboardApiUrl` to determine if it's a different host or same host with `/v1` baked in.
+
+**P1:** verify exact URL shape against `data-api.polymarket.com/v1/leaderboard`.
+
+#### F4. `setReferral` ABI / contract verification missing
+
+`src/lib/safe/transactions.ts:106` defines `setReferral` function fragment, `:312` encodes call. Codex (Phase 22 line 442) said "verify against current CTF Exchange V2 ABI before use." I cannot verify the ABI from src/ alone — the V2 exchange contract source is in `../polymarket/ctf-exchange-v2/`. If `setReferral` isn't in the V2 ABI, this transaction reverts.
+
+**P0 verification:** read `../polymarket/ctf-exchange-v2/contracts/CTFExchange.sol` (or equivalent) and confirm `setReferral(address referrer, address affiliate, uint256 affiliateSharePercent)` exists with the same selector. If not, this entire affiliate flow is broken on V2.
+
+#### F5. Affiliate fee promise without backing data
+
+`src/app/[locale]/admin/affiliate/page.tsx:101` and `src/app/[locale]/(platform)/settings/affiliate/page.tsx:40` call `fetchFeeReceiverTotals({ endpoint: 'referrers' })`. Both pages aggregate the response with `sumFeeTotals` / `sumFeeVolumes` and render numbers. With no documented `/referrers` endpoint, the page either:
+1. Returns an error (4xx/5xx) — pages show stub state, or
+2. Returns empty array — pages show "$0 / 0 vol".
+
+Either way, the user sees a misleading or broken display. **Codex correct (Phase 22 line 414).**
+
+## Phase 9 - Referrals / Partnership / Builder Fees
+
+### Confirmations of Codex
+
+**Builder code is signed in every order.** `src/lib/orders/index.ts:13-19,158-162` confirmed in Phase 26.
+
+**Internal affiliate metadata is separate from builder fees.** `useAffiliateOrderMetadata` exposes `referrerAddress`, `affiliateAddress`, `affiliateSharePercent`, used by `setReferral` (`safe/transactions.ts:104-116, 308-318`). V2 order signing ignores legacy fee fields per Codex (Phase 22 line 437). **Confirmed.**
+
+**Internal referrals are not Polymarket builder fees.** Two systems:
+- Internal: signup referral cookie + DB record, used for product analytics + onchain `setReferral`.
+- Builder: signed bytes32 builder code on every order, reportable via `/builder/trades` and `/v1/builders/leaderboard`.
+
+These are not equivalent. Internal referral economics depend on the V2 contract ABI for `setReferral`; builder economics depend on Polymarket's tier mechanics.
+
+### New findings I add
+
+#### F6. Builder reporting infra not built
+
+`grep` for `builder/trades` returns no consumer in `src/`. The Data API has `/v1/builders/leaderboard` and `/v1/builders/volume`, but no admin page consumes them. The CLOB has `/builder/trades?builder_code=<code>` (per `/tmp/polymarket-clob-openapi.yaml:1319-`), no consumer.
+
+**P1:** build an admin page that pulls `/v1/builders/leaderboard` (where the code stands), `/v1/builders/volume` (cumulative volume), and `/builder/trades?builder_code=<our_code>` (per-trade breakdown). Replaces affiliate-page displays.
+
+#### F7. `setReferral` on-chain transaction fires from onboarding
+
+`TradingOnboardingProvider.tsx:552-559` adds `setReferral` transactions to the approval batch. If F4 is right and the ABI doesn't match, the entire approval batch reverts — every new user's onboarding fails. This is high-blast-radius.
+
+**P0:** confirm setReferral ABI on V2 exchanges OR pull `setReferral` out of the onboarding batch and run as a separate optional step that won't bring down approvals.
+
+## Net P0/P1 list (Phases 7/8/9 combined)
+
+P0:
+
+1. **Fix holders-only filter** — change `useInfiniteComments.ts:115` to trust the server result (`return flattened`) when `holders_only=true` was sent server-side, OR populate `comment.positions` from a position-fetcher when the user toggles holders-only. Stop wiping comments client-side.
+
+2. **Fix RTDS comments filter** — already covered in Phase 29 P0 #3.
+
+3. **Replace `/volume` with `/live-volume` or `/v1/leaderboard`** in `profile-link-stats.ts:183` — pick the documented endpoint that matches the surfaced stat (lifetime volume vs current volume). Live verify against `data-api.polymarket.com/live-volume?user=<address>`.
+
+4. **Replace or hide `/referrers` paths** in `fees.ts:13,40` — if Polymarket exposes no equivalent, hide the affiliate revenue/volume cards (admin + settings) until builder reporting is built.
+
+5. **Disable or remove `USER_PNL_URL` consumers** — `PublicProfileHeroCards.tsx:458` and `/api/leaderboard/timeframe-pnl/route.ts:5`. These are read-only stat surfaces; degrade gracefully or hide.
+
+6. **Disable or remove `COMMUNITY_URL` consumers** — `SettingsProfileContent.tsx:57` and `community-auth.ts:99`. Profile editing UI must either hit a different backend or be disabled.
+
+7. **Verify `setReferral` ABI** before launch (F4/F7). If wrong, pull from onboarding batch.
+
+P1:
+
+8. Build admin builder-reporting page consuming `/v1/builders/leaderboard`, `/v1/builders/volume`, and `/builder/trades?builder_code=<code>`.
+
+9. Reconcile comment count drift between Gamma `commentCount` and native comments.
+
+## Corrections to Codex
+
+| Codex framing | My correction |
+|---|---|
+| Phase 22 line 380 "Fix holders-only comments: either trust server filtering or hydrate positions using Gamma `get_positions=true`/Data API" | Concur. Specific code change: remove the client-side filter at line 115, OR replace `hasPositivePositions(comment.positions)` with a fetcher of position data per comment author. The first is far simpler. |
+| Phase 22 line 382 "Hide or replace `COMMUNITY_URL` profile editing with Gamma public-profile read-only behavior unless an official write path is confirmed" | Stronger: I did not find any official Gamma public-profile write endpoint in `/tmp/polymarket-gamma-openapi.yaml`. `/profiles/user_address/{user_address}` is GET-only. Profile editing on Polymarket has no public write API. Hide or build a local-only profile model. |
+| Phase 22 line 414 "Replace root `/volume` with documented `/live-volume`, `/traded`, `/v1/leaderboard`, or remove that stat" | The replacement depends on the surfaced semantic. `/volume` is presumably *lifetime* volume per user. `/live-volume` is *currently active* volume. `/traded` is *executed* volume. None is a 1:1 replacement. Likely correct mapping: lifetime user volume = `/v1/leaderboard?user=...&orderBy=VOLUME` (single-row response). |
+| Phase 22 line 415 "Replace `/referrers` with official builder endpoints or hide affiliate revenue totals" | Concur. The replacement is **builder reporting**, not "referrer reporting" — the two are different mechanics. Internal referrers are local; builder fees are Polymarket protocol. |
+| Phase 21 line 300 "`setReferral` transaction builders against V2 exchanges, but this must be verified" | Stronger framing: this transaction is in the onboarding batch (`TradingOnboardingProvider.tsx:552`). If the ABI is wrong, every new-user onboarding reverts. **Pull from batch as P0 and run as opt-in post-onboarding.** |
+
+## Evidence anchors
+
+- `src/lib/data-api/profile-link-stats.ts:182-201`
+- `src/lib/data-api/fees.ts:13,40`
+- `src/app/[locale]/admin/affiliate/page.tsx:101`
+- `src/app/[locale]/(platform)/settings/affiliate/page.tsx:40`
+- `src/app/[locale]/(platform)/event/[slug]/_hooks/useInfiniteComments.ts:68-69,107-116`
+- `src/lib/safe/transactions.ts:104-116,308-318`
+- `src/app/[locale]/(platform)/_providers/TradingOnboardingProvider.tsx:552-559`
+- `src/app/[locale]/(platform)/profile/_components/PublicProfileHeroCards.tsx:458`
+- `src/app/api/leaderboard/timeframe-pnl/route.ts:5`
+- `src/app/[locale]/(platform)/settings/_components/SettingsProfileContent.tsx:57`
+- `src/lib/community-auth.ts:99`
+- `/tmp/polymarket-data-openapi.yaml` paths inventory (494, 612, 710, 834, 892, 968, 1008, 1043, 1076, 1182, 1319, 1374, 1413) — no `/volume`, no `/referrers`
+- `/tmp/polymarket-llms-full.txt:4245-4310` (RTDS comments shape)
+
+## Next phase
+
+Move to Phase 10/11 verification (admin/create-market + geoblock).
