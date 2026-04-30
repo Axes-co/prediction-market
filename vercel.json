@@ -27,7 +27,7 @@
       "schedule": "0 */6 * * *"
     }
   ],
-  "ignoreCommand": "git log -1 --pretty=%B | grep -q '\\[skip deploy\\]' && exit 0 || exit 1",
+  "ignoreCommand": "exit 1",
   "git": {
     "deploymentEnabled": {
       "main": true,
