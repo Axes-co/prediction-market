@@ -23,6 +23,20 @@ describe('platform navigation helpers', () => {
     expect(tags[2].childs).toEqual([{ slug: 'ukraine', name: 'Ukraine', count: 9 }])
   })
 
+  it('places the persisted breaking category between trending and new', () => {
+    const tags = buildPlatformNavigationTags({
+      trendingLabel: 'Trending',
+      breakingLabel: 'Breaking',
+      newLabel: 'New',
+      mainTags: [
+        { slug: 'breaking', name: 'Breaking', childs: [] },
+        { slug: 'politics', name: 'Politics', childs: [] },
+      ],
+    })
+
+    expect(tags.map(tag => tag.slug)).toEqual(['trending', 'breaking', 'new', 'politics'])
+  })
+
   it('creates a child-parent map from main tags', () => {
     expect(buildChildParentMap([
       { slug: 'politics', childs: [{ slug: 'trump', name: 'Trump' }] },

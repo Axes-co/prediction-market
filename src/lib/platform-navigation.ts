@@ -94,6 +94,7 @@ export interface ResolvedPlatformNavigationSelection {
 }
 
 interface BuildPlatformNavigationTagsParams {
+  breakingLabel?: string
   globalChilds?: PlatformNavigationChild[]
   mainTags: PlatformNavigationTag[]
   newLabel: string
@@ -107,19 +108,30 @@ export function buildChildParentMap(tags: Array<Pick<PlatformNavigationTag, 'slu
 }
 
 export function buildPlatformNavigationTags({
+  breakingLabel,
   mainTags,
   globalChilds = [],
   trendingLabel,
   newLabel,
 }: BuildPlatformNavigationTagsParams): PlatformNavigationTag[] {
   const sharedChilds = globalChilds.map(child => ({ ...child }))
-  const baseTags = mainTags.map(tag => ({
+  const breakingTag = mainTags.find(tag => tag.slug === 'breaking')
+  const baseTags = mainTags.filter(tag => tag.slug !== 'breaking').map(tag => ({
     ...tag,
     childs: (tag.childs ?? []).map(child => ({ ...child })),
   }))
+  const breakingNavigationTag = breakingTag
+    ? {
+        slug: 'breaking',
+        name: breakingTag.name || breakingLabel || 'Breaking',
+        childs: (breakingTag.childs ?? []).map(child => ({ ...child })),
+        sidebarItems: breakingTag.sidebarItems,
+      }
+    : null
 
   return [
     { slug: 'trending', name: trendingLabel, childs: sharedChilds },
+    ...(breakingNavigationTag ? [breakingNavigationTag] : []),
     { slug: 'new', name: newLabel, childs: sharedChilds.map(child => ({ ...child })) },
     ...baseTags,
   ]
