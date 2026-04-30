@@ -22,6 +22,8 @@ DO
 $$
 DECLARE
   desired_record RECORD;
+  slug_match_id SMALLINT;
+  name_match_id SMALLINT;
 BEGIN
   FOR desired_record IN
     SELECT * FROM (VALUES
@@ -41,17 +43,60 @@ BEGIN
       ('Elections', 'elections', 13)
     ) AS t(name, slug, display_order)
   LOOP
-    -- Slug match: row already keyed on the desired slug. Realign name and flags.
-    UPDATE tags
-    SET name = desired_record.name,
-        is_main_category = TRUE,
-        display_order = desired_record.display_order,
-        is_hidden = FALSE,
-        hide_events = FALSE,
-        updated_at = NOW()
+    SELECT id INTO slug_match_id
+    FROM tags
     WHERE slug = desired_record.slug;
 
-    IF NOT FOUND THEN
+    SELECT id INTO name_match_id
+    FROM tags
+    WHERE name = desired_record.name;
+
+    IF slug_match_id IS NOT NULL
+      AND name_match_id IS NOT NULL
+      AND slug_match_id <> name_match_id THEN
+      -- Both unique keys already exist on different rows. Merge the stale
+      -- name row into the canonical slug row before realigning the canonical
+      -- row's name, otherwise the update below can still trip tags_name_key.
+      INSERT INTO event_tags (event_id, tag_id)
+      SELECT event_id, slug_match_id
+      FROM event_tags
+      WHERE tag_id = name_match_id
+      ON CONFLICT DO NOTHING;
+
+      INSERT INTO tag_translations (tag_id, locale, name, source_hash, is_manual)
+      SELECT slug_match_id, locale, name, source_hash, is_manual
+      FROM tag_translations
+      WHERE tag_id = name_match_id
+      ON CONFLICT (tag_id, locale) DO NOTHING;
+
+      UPDATE tags AS canonical
+      SET gamma_tag_id = CASE
+            WHEN canonical.gamma_tag_id IS NULL THEN duplicate.gamma_tag_id
+            ELSE canonical.gamma_tag_id
+          END,
+          updated_at = NOW()
+      FROM tags AS duplicate
+      WHERE canonical.id = slug_match_id
+        AND duplicate.id = name_match_id;
+
+      DELETE FROM tags
+      WHERE id = name_match_id;
+
+      name_match_id := slug_match_id;
+    END IF;
+
+    IF slug_match_id IS NOT NULL THEN
+      -- Slug match: row already keyed on the desired slug. Realign name and flags.
+      UPDATE tags
+      SET name = desired_record.name,
+          is_main_category = TRUE,
+          display_order = desired_record.display_order,
+          is_hidden = FALSE,
+          hide_events = FALSE,
+          updated_at = NOW()
+      WHERE id = slug_match_id;
+
+    ELSIF name_match_id IS NOT NULL THEN
       -- Slug missing but name might already exist with a stale slug. Migrate it.
       UPDATE tags
       SET slug = desired_record.slug,
@@ -60,20 +105,19 @@ BEGIN
           is_hidden = FALSE,
           hide_events = FALSE,
           updated_at = NOW()
-      WHERE name = desired_record.name;
+      WHERE id = name_match_id;
 
-      IF NOT FOUND THEN
-        -- Neither key exists. Insert fresh.
-        INSERT INTO tags (name, slug, is_main_category, display_order, is_hidden, hide_events)
-        VALUES (
-          desired_record.name,
-          desired_record.slug,
-          TRUE,
-          desired_record.display_order,
-          FALSE,
-          FALSE
-        );
-      END IF;
+    ELSE
+      -- Neither key exists. Insert fresh.
+      INSERT INTO tags (name, slug, is_main_category, display_order, is_hidden, hide_events)
+      VALUES (
+        desired_record.name,
+        desired_record.slug,
+        TRUE,
+        desired_record.display_order,
+        FALSE,
+        FALSE
+      );
     END IF;
   END LOOP;
 
