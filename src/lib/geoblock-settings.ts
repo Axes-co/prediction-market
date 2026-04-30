@@ -1,4 +1,6 @@
-import { SettingsRepository } from '@/lib/db/queries/settings'
+import { and, eq } from 'drizzle-orm'
+import { settings as settingsTable } from '@/lib/db/schema/settings/tables'
+import { db } from '@/lib/drizzle'
 
 const GENERAL_SETTINGS_GROUP = 'general'
 export const BLOCKED_COUNTRIES_SETTINGS_KEY = 'blocked_countries'
@@ -326,9 +328,28 @@ export function getBlockedCountriesFromSettings(settings?: SettingsMap) {
   return parseBlockedCountriesFromSettingsValue(rawValue)
 }
 
+// Called from middleware (`src/proxy.ts`) and route handlers — both run in
+// Next.js Web Handler contexts where the `'use cache'` directive can't
+// establish a cache scope. Going through `SettingsRepository.getSettings()`
+// (which is `'use cache'`) would trigger
+//   "cacheTag() can only be called inside a 'use cache' function"
+// on every request. Read the single setting row directly; `proxy.ts` keeps a
+// 60s in-memory cache so DB load stays flat.
 export async function loadBlockedCountries() {
-  const { data } = await SettingsRepository.getSettings()
-  return getBlockedCountriesFromSettings(data ?? undefined)
+  try {
+    const rows = await db
+      .select({ value: settingsTable.value })
+      .from(settingsTable)
+      .where(and(
+        eq(settingsTable.group, GENERAL_SETTINGS_GROUP),
+        eq(settingsTable.key, BLOCKED_COUNTRIES_SETTINGS_KEY),
+      ))
+      .limit(1)
+    return parseBlockedCountriesFromSettingsValue(rows[0]?.value)
+  }
+  catch {
+    return []
+  }
 }
 
 export function validateBlockedCountriesInput(rawValue: string | null | undefined): BlockedCountriesValidationResult {
