@@ -182,13 +182,21 @@ export default function NavigationTabs() {
   return (
     <nav className="sticky top-15 z-20 bg-background md:top-17">
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-border" />
-      <div className="container mx-auto flex w-full min-w-0">
+      {/*
+        Polymarket pins the "More" menu (Activity / Leaderboard) at the right
+        edge while category tags scroll independently. Putting both inside a
+        single overflow-x-auto container made the More menu drift off-screen
+        with the tags. Fix is structural: a flex row with the scrollable tag
+        pane (`flex-1 min-w-0 overflow-x-auto`) and a pinned More cell
+        (`shrink-0`). Tags scroll, More menu does not.
+      */}
+      <div className="container mx-auto flex h-12 w-full min-w-0 items-center">
         <div
           id="navigation-main-tags"
           ref={containerRef}
           className={cn(
             `
-              flex h-12 w-full min-w-0 snap-x snap-mandatory scroll-px-3 items-center overflow-x-auto text-sm
+              flex h-full min-w-0 flex-1 snap-x snap-mandatory scroll-px-3 items-center overflow-x-auto text-sm
               font-medium
             `,
             showLeftShadow && showRightShadow
@@ -223,10 +231,10 @@ export default function NavigationTabs() {
               {index === 1 && <div className="mx-3 h-5 w-px shrink-0 bg-border" />}
             </div>
           ))}
+        </div>
 
-          <div className="flex snap-start items-center">
-            <NavigationMoreMenu />
-          </div>
+        <div className="flex h-full shrink-0 items-center pl-3">
+          <NavigationMoreMenu />
         </div>
       </div>
     </nav>

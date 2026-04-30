@@ -9,10 +9,13 @@ describe('tagsSync mapping', () => {
       { id: '101867', label: 'product marekt fit', slug: 'product-marekt-fit' },
     ])
     expect(result).toHaveLength(3)
+    expect(result[0]?.gammaTagId).toBe('1')
     expect(result[0]?.forceHide).toBe(true)
+    expect(result[1]?.gammaTagId).toBe('439')
     expect(result[1]?.isCarousel).toBe(true)
     expect(result[1]?.forceShow).toBe(true)
     expect(result[1]?.isMainCategory).toBe(true)
+    expect(result[2]?.gammaTagId).toBe('101867')
     expect(result[2]?.forceShow).toBe(false)
     expect(result[2]?.isCarousel).toBe(false)
   })

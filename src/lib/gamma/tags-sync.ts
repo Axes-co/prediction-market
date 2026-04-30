@@ -14,8 +14,9 @@ const TAGS_SYNC_LOCK_FILTER = and(
   eq(subgraphSyncs.subgraph_name, TAGS_SYNC_SOURCE_NAME),
 )
 
-const DEFAULT_LIMIT = 500
-const MAX_LIMIT = 500
+const DEFAULT_PAGE_SIZE = 500
+const MAX_PAGE_SIZE = 500
+const DEFAULT_MAX_PAGES = 50
 const DEFAULT_TIMEOUT_MS = 20_000
 
 export interface TagsSyncResult {
@@ -23,12 +24,16 @@ export interface TagsSyncResult {
   inserted: number
   updated: number
   skipped: number
+  pagesFetched: number
   lockBusy: boolean
   errors: string[]
 }
 
 export interface TagsSyncOptions {
+  /** Per-page size, max 500 per Gamma's `/tags` limit. */
   limit?: number
+  /** Soft cap on pages per run. Default 50 (~25k tags). */
+  maxPages?: number
   baseUrl?: string
   fetcher?: typeof fetch
   requestTimeoutMs?: number
@@ -46,6 +51,7 @@ export async function runTagsSync(options: TagsSyncOptions = {}): Promise<TagsSy
     inserted: 0,
     updated: 0,
     skipped: 0,
+    pagesFetched: 0,
     lockBusy: false,
     errors: [],
   }
@@ -57,29 +63,41 @@ export async function runTagsSync(options: TagsSyncOptions = {}): Promise<TagsSy
   }
 
   try {
-    const limit = clampLimit(options.limit ?? DEFAULT_LIMIT)
+    const limit = clampLimit(options.limit ?? DEFAULT_PAGE_SIZE)
+    const maxPages = options.maxPages && options.maxPages > 0 ? options.maxPages : DEFAULT_MAX_PAGES
     const baseUrl = (options.baseUrl ?? process.env.GAMMA_URL ?? 'https://gamma-api.polymarket.com').replace(/\/$/, '')
     const fetcher = options.fetcher ?? fetch
-    const url = `${baseUrl}/tags?limit=${limit}&order=updatedAt&ascending=false`
+    const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS
 
-    const tags = await fetchTags(url, fetcher, options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS)
-    result.fetched = tags.length
+    // Polymarket's `/tags` doesn't expose a cursor — pagination is offset-only.
+    // Walk pages until either the response is shorter than `limit` (last page)
+    // or we hit `maxPages`. Persist each page's mapped tags incrementally so a
+    // mid-run failure still upserts the pages we did get.
+    let offset = 0
+    while (result.pagesFetched < maxPages) {
+      const url = `${baseUrl}/tags?limit=${limit}&offset=${offset}&order=updatedAt&ascending=false`
+      const page = await fetchTags(url, fetcher, requestTimeoutMs)
+      result.pagesFetched += 1
 
-    if (tags.length === 0) {
-      await releaseTagsSyncLock('completed', { totalProcessed: 0 })
-      return result
+      if (page.length === 0) {
+        break
+      }
+
+      result.fetched += page.length
+
+      const mapped = mapTags(page)
+      if (mapped.length > 0) {
+        const upsertResult = await upsertStandaloneTags(mapped)
+        result.inserted += upsertResult.inserted
+        result.updated += upsertResult.updated
+        result.skipped += mapped.length - (upsertResult.inserted + upsertResult.updated)
+      }
+
+      if (page.length < limit) {
+        break
+      }
+      offset += limit
     }
-
-    const mapped = mapTags(tags)
-    if (mapped.length === 0) {
-      await releaseTagsSyncLock('completed', { totalProcessed: 0 })
-      return result
-    }
-
-    const upsertResult = await upsertStandaloneTags(mapped)
-    result.inserted = upsertResult.inserted
-    result.updated = upsertResult.updated
-    result.skipped = mapped.length - (upsertResult.inserted + upsertResult.updated)
 
     await releaseTagsSyncLock('completed', {
       totalProcessed: result.fetched,
@@ -120,9 +138,9 @@ async function fetchTags(url: string, fetcher: typeof fetch, timeoutMs: number):
 
 function clampLimit(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
-    return DEFAULT_LIMIT
+    return DEFAULT_PAGE_SIZE
   }
-  return Math.min(Math.trunc(value), MAX_LIMIT)
+  return Math.min(Math.trunc(value), MAX_PAGE_SIZE)
 }
 
 async function acquireTagsSyncLock(): Promise<boolean> {
