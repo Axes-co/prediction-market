@@ -31,6 +31,7 @@ import { useAffiliateOrderMetadata } from '@/hooks/useAffiliateOrderMetadata'
 import { useAppKit } from '@/hooks/useAppKit'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
+import { useWalletSignatureGate } from '@/hooks/useWalletSignatureGate'
 import { fetchOrderBookSummary } from '@/lib/clob'
 import { getExchangeEip712Domain, ORDER_SIDE, ORDER_TYPE, OUTCOME_INDEX } from '@/lib/constants'
 import { formatAmountInputValue, formatCentsLabel } from '@/lib/formatters'
@@ -635,6 +636,7 @@ function useSellPositionFlow({
   ensureTradingReady,
   openTradeRequirements,
   runWithSignaturePrompt,
+  requireSignatureWallet,
   signTypedDataAsync,
   resolveOutcomeIndex,
 }: {
@@ -651,6 +653,7 @@ function useSellPositionFlow({
   ensureTradingReady: () => boolean
   openTradeRequirements: (options?: { forceTradingAuth?: boolean }) => void
   runWithSignaturePrompt: ReturnType<typeof useSignaturePromptRunner>['runWithSignaturePrompt']
+  requireSignatureWallet: () => Promise<void>
   signTypedDataAsync: ReturnType<typeof useSignTypedData>['signTypedDataAsync']
   resolveOutcomeIndex: (position: PublicPosition) => number
 }) {
@@ -880,6 +883,7 @@ function useSellPositionFlow({
 
     let signature: string
     try {
+      await requireSignatureWallet()
       signature = await runWithSignaturePrompt(() => signOrderPayload({
         payload,
         domain: orderDomain,
@@ -891,7 +895,7 @@ function useSellPositionFlow({
         handleOrderCancelledFeedback()
         return
       }
-      handleOrderErrorFeedback('Trade failed', 'We could not sign your order. Please try again.')
+      handleOrderErrorFeedback('Trade failed', error instanceof Error ? error.message : 'We could not sign your order. Please try again.')
       return
     }
 
@@ -981,6 +985,7 @@ function useSellPositionFlow({
     makerAddress,
     openWalletModal,
     queryClient,
+    requireSignatureWallet,
     resolveOutcomeIndex,
     runWithSignaturePrompt,
     sellModalPayload,
@@ -1017,6 +1022,7 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
     signatureType,
     canSell,
   } = useUserTradingContext(userAddress)
+  const requireSignatureWallet = useWalletSignatureGate(user?.address)
 
   const marketStatusFilter: 'active' | 'closed' = 'active'
   const minAmountFilter = 'All'
@@ -1131,6 +1137,7 @@ export default function PublicPositionsList({ userAddress }: PublicPositionsList
     ensureTradingReady,
     openTradeRequirements,
     runWithSignaturePrompt,
+    requireSignatureWallet,
     signTypedDataAsync,
     resolveOutcomeIndex,
   })

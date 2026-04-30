@@ -32,6 +32,7 @@ import { Input } from '@/components/ui/input'
 import { SAFE_BALANCE_QUERY_KEY } from '@/hooks/useBalance'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
+import { useWalletSignatureGate } from '@/hooks/useWalletSignatureGate'
 import { defaultNetwork } from '@/lib/appkit'
 import { DEFAULT_ERROR_MESSAGE, MICRO_UNIT } from '@/lib/constants'
 import { formatAmountInputValue, formatCurrency, formatSharesLabel } from '@/lib/formatters'
@@ -223,6 +224,7 @@ function EventConvertPositionsDialogContent({
   const isMobile = useIsMobile()
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const requireSignatureWallet = useWalletSignatureGate(user?.address)
   const checkboxBaseId = useId()
   const [amount, setAmount] = useState('0')
   const [step, setStep] = useState<'select' | 'review'>('select')
@@ -345,6 +347,7 @@ function EventConvertPositionsDialogContent({
     setSubmitState('signing')
 
     try {
+      await requireSignatureWallet()
       const nonceResult = await getSafeNonceAction()
       if (nonceResult.error || !nonceResult.nonce) {
         if (isTradingAuthRequiredError(nonceResult.error)) {
@@ -497,7 +500,8 @@ function EventConvertPositionsDialogContent({
     }
     catch (error) {
       console.error('Failed to submit convert operation.', error)
-      toast.error('We could not submit your convert request. Please try again.')
+      const message = error instanceof Error ? error.message : 'We could not submit your convert request. Please try again.'
+      toast.error(message)
     }
     finally {
       setSubmitState('idle')

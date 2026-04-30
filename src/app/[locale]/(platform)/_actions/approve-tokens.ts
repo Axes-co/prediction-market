@@ -48,19 +48,16 @@ export async function getSafeNonceAction(): Promise<SafeNonceResult> {
     return { error: DEFAULT_ERROR_MESSAGE }
   }
 
-  // V2 relayer auth is server-level builder credentials, not per-user. The
-  // Safe nonce read is itself unauthenticated (returns nonce from chain), but
-  // the SDK signs it for parity with the rest of the relayer surface.
+  // The official relayer SDK reads nonce as a plain GET; signing the query
+  // string can make the relayer reject otherwise-valid Safe transactions.
   const query = `address=${encodeURIComponent(user.address)}&type=SAFE`
   const path = `/nonce?${query}`
 
   try {
-    const builderHeaders = buildRelayerHeaders('GET', path)
     const response = await fetch(`${relayerUrl}${path}`, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
-        ...builderHeaders,
       },
       signal: AbortSignal.timeout(10_000),
     })

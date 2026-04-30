@@ -29,6 +29,7 @@ import { Input } from '@/components/ui/input'
 import { SAFE_BALANCE_QUERY_KEY } from '@/hooks/useBalance'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
+import { useWalletSignatureGate } from '@/hooks/useWalletSignatureGate'
 import { defaultNetwork } from '@/lib/appkit'
 import { DEFAULT_CONDITION_PARTITION, DEFAULT_ERROR_MESSAGE, MICRO_UNIT } from '@/lib/constants'
 import { NEG_RISK_ADAPTER_ADDRESS, ZERO_COLLECTION_ID } from '@/lib/contracts'
@@ -95,6 +96,7 @@ export default function EventMergeSharesDialog({
   const isMobile = useIsMobile()
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const requireSignatureWallet = useWalletSignatureGate(user?.address)
   const { amount, setAmount, error, setError, isSubmitting, setIsSubmitting, resetFormState } = useMergeSharesFormState()
 
   function formatFullPrecision(value: number) {
@@ -192,6 +194,7 @@ export default function EventMergeSharesDialog({
     setIsSubmitting(true)
 
     try {
+      await requireSignatureWallet()
       const nonceResult = await getSafeNonceAction()
       if (nonceResult.error || !nonceResult.nonce) {
         if (isTradingAuthRequiredError(nonceResult.error)) {
@@ -345,7 +348,8 @@ export default function EventMergeSharesDialog({
     }
     catch (error) {
       console.error('Failed to submit merge operation.', error)
-      toast.error(t('We could not submit your merge request. Please try again.'))
+      const message = error instanceof Error ? error.message : t('We could not submit your merge request. Please try again.')
+      toast.error(message)
     }
     finally {
       setIsSubmitting(false)

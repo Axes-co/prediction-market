@@ -16,6 +16,7 @@ import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer'
 import { SAFE_BALANCE_QUERY_KEY } from '@/hooks/useBalance'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
+import { useWalletSignatureGate } from '@/hooks/useWalletSignatureGate'
 import { defaultNetwork } from '@/lib/appkit'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { formatCurrency, formatSharesLabel } from '@/lib/formatters'
@@ -281,6 +282,7 @@ function useRedeemClaimSubmission({
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
   const { ensureTradingReady, openTradeRequirements } = useTradingOnboarding()
+  const requireSignatureWallet = useWalletSignatureGate(user?.address)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   async function submitClaim() {
@@ -305,6 +307,7 @@ function useRedeemClaimSubmission({
     setIsSubmitting(true)
 
     try {
+      await requireSignatureWallet()
       const nonceResult = await getSafeNonceAction()
       if (nonceResult.error || !nonceResult.nonce) {
         if (isTradingAuthRequiredError(nonceResult.error)) {
@@ -407,7 +410,8 @@ function useRedeemClaimSubmission({
     }
     catch (error) {
       console.error('Failed to submit claim.', error)
-      toast.error('We could not submit your claim. Please try again.')
+      const message = error instanceof Error ? error.message : 'We could not submit your claim. Please try again.'
+      toast.error(message)
     }
     finally {
       setIsSubmitting(false)

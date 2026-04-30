@@ -37,6 +37,7 @@ import { useCurrentTimestamp } from '@/hooks/useCurrentTimestamp'
 import { useHasHydrated } from '@/hooks/useHasHydrated'
 import { useOutcomeLabel } from '@/hooks/useOutcomeLabel'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
+import { useWalletSignatureGate } from '@/hooks/useWalletSignatureGate'
 import { defaultNetwork } from '@/lib/appkit'
 import { CLOB_ORDER_TYPE, DEFAULT_ERROR_MESSAGE, getExchangeEip712Domain, ORDER_SIDE, ORDER_TYPE, OUTCOME_INDEX } from '@/lib/constants'
 import { resolveEventPagePath } from '@/lib/events-routing'
@@ -747,6 +748,7 @@ export default function EventOrderPanelForm({
   const currentTimestamp = useCurrentTimestamp({ intervalMs: 60_000 })
   const normalizeOutcomeLabel = useOutcomeLabel()
   const user = useUser()
+  const requireSignatureWallet = useWalletSignatureGate(user?.address)
   const addLocalOrderFillNotification = useNotifications(state => state.addLocalOrderFillNotification)
   const state = useOrder()
   const queryClient = useQueryClient()
@@ -1285,6 +1287,7 @@ export default function EventOrderPanelForm({
 
     let signature: string
     try {
+      await requireSignatureWallet()
       signature = await runWithSignaturePrompt(() => signOrderPayload({
         payload,
         domain: orderDomain,
@@ -1297,7 +1300,8 @@ export default function EventOrderPanelForm({
         return
       }
 
-      handleOrderErrorFeedback(t('Trade failed'), t('We could not sign your order. Please try again.'))
+      const message = error instanceof Error ? error.message : t('We could not sign your order. Please try again.')
+      handleOrderErrorFeedback(t('Trade failed'), message)
       return
     }
 
@@ -1519,6 +1523,7 @@ export default function EventOrderPanelForm({
     setIsClaimSubmitting(true)
 
     try {
+      await requireSignatureWallet()
       const nonceResult = await getSafeNonceAction()
       if (nonceResult.error || !nonceResult.nonce) {
         if (isTradingAuthRequiredError(nonceResult.error)) {
@@ -1635,7 +1640,8 @@ export default function EventOrderPanelForm({
     }
     catch (error) {
       console.error('Failed to submit claim.', error)
-      toast.error(t('We could not submit your claim. Please try again.'))
+      const message = error instanceof Error ? error.message : t('We could not submit your claim. Please try again.')
+      toast.error(message)
     }
     finally {
       setIsClaimSubmitting(false)

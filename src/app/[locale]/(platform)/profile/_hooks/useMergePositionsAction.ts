@@ -12,6 +12,7 @@ import { getSafeNonceAction, submitSafeTransactionAction } from '@/app/[locale]/
 import { fetchLockedSharesByCondition } from '@/app/[locale]/(platform)/profile/_utils/PublicPositionsUtils'
 import { SAFE_BALANCE_QUERY_KEY } from '@/hooks/useBalance'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
+import { useWalletSignatureGate } from '@/hooks/useWalletSignatureGate'
 import { defaultNetwork } from '@/lib/appkit'
 import { DEFAULT_CONDITION_PARTITION, DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { UMA_NEG_RISK_ADAPTER_ADDRESS, ZERO_COLLECTION_ID } from '@/lib/contracts'
@@ -49,6 +50,7 @@ export function useMergePositionsAction({
   const [mergeBatchCount, setMergeBatchCount] = useState(0)
   const addLocalOrderFillNotification = useNotifications(state => state.addLocalOrderFillNotification)
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const requireSignatureWallet = useWalletSignatureGate(user?.address)
 
   const handleMergeAll = useCallback(async () => {
     if (!hasMergeableMarkets) {
@@ -69,6 +71,7 @@ export function useMergePositionsAction({
     }
 
     try {
+      await requireSignatureWallet()
       setIsMergeProcessing(true)
 
       const [availabilityByCondition, nonceResult] = await Promise.all([
@@ -261,7 +264,8 @@ export function useMergePositionsAction({
     }
     catch (error) {
       console.error('Failed to submit merge operation.', error)
-      toast.error('We could not submit your merge request. Please try again.')
+      const message = error instanceof Error ? error.message : 'We could not submit your merge request. Please try again.'
+      toast.error(message)
     }
     finally {
       setIsMergeProcessing(false)
@@ -275,6 +279,7 @@ export function useMergePositionsAction({
     openTradeRequirements,
     positionsByCondition,
     queryClient,
+    requireSignatureWallet,
     runWithSignaturePrompt,
     signMessageAsync,
     addLocalOrderFillNotification,

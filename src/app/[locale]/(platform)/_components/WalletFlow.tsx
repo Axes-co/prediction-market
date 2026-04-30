@@ -14,6 +14,7 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import { useProxyDepositBalance } from '@/hooks/useProxyDepositBalance'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
 import { useSiteIdentity } from '@/hooks/useSiteIdentity'
+import { useWalletSignatureGate } from '@/hooks/useWalletSignatureGate'
 import { MAX_AMOUNT_INPUT } from '@/lib/amount-input'
 import { defaultNetwork } from '@/lib/appkit'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
@@ -130,6 +131,7 @@ function useWalletSendHandler({
   handleWithdrawModalChange,
   openTradeRequirements,
   runWithSignaturePrompt,
+  requireSignatureWallet,
   signMessageAsync,
 }: {
   user: WalletFlowProps['user']
@@ -142,6 +144,7 @@ function useWalletSendHandler({
   handleWithdrawModalChange: (next: boolean) => void
   openTradeRequirements: ReturnType<typeof useTradingOnboarding>['openTradeRequirements']
   runWithSignaturePrompt: ReturnType<typeof useSignaturePromptRunner>['runWithSignaturePrompt']
+  requireSignatureWallet: () => Promise<void>
   signMessageAsync: ReturnType<typeof useSignMessage>['signMessageAsync']
 }) {
   return useCallback(async (event?: React.FormEvent<HTMLFormElement>) => {
@@ -162,6 +165,7 @@ function useWalletSendHandler({
 
     setIsWalletSending(true)
     try {
+      await requireSignatureWallet()
       const nonceResult = await getSafeNonceAction()
       if (nonceResult.error || !nonceResult.nonce) {
         if (isTradingAuthRequiredError(nonceResult.error)) {
@@ -263,6 +267,7 @@ function useWalletSendHandler({
   }, [
     handleWithdrawModalChange,
     openTradeRequirements,
+    requireSignatureWallet,
     runWithSignaturePrompt,
     setIsWalletSending,
     setPendingWithdrawals,
@@ -344,6 +349,7 @@ export function WalletFlow({
   const isMobile = useIsMobile()
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const requireSignatureWallet = useWalletSignatureGate(user?.address)
   const { depositView, setDepositView, handleDepositModalChange } = useDepositViewState(onDepositOpenChange)
   const {
     walletSendTo,
@@ -381,6 +387,7 @@ export function WalletFlow({
     handleWithdrawModalChange,
     openTradeRequirements,
     runWithSignaturePrompt,
+    requireSignatureWallet,
     signMessageAsync,
   })
 

@@ -28,6 +28,7 @@ import { Input } from '@/components/ui/input'
 import { SAFE_BALANCE_QUERY_KEY } from '@/hooks/useBalance'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
+import { useWalletSignatureGate } from '@/hooks/useWalletSignatureGate'
 import { defaultNetwork } from '@/lib/appkit'
 import { DEFAULT_CONDITION_PARTITION, DEFAULT_ERROR_MESSAGE, MICRO_UNIT } from '@/lib/constants'
 import { ZERO_COLLECTION_ID } from '@/lib/contracts'
@@ -108,6 +109,7 @@ export default function EventSplitSharesDialog({
   const isMobile = useIsMobile()
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const requireSignatureWallet = useWalletSignatureGate(user?.address)
   const { amount, setAmount, error, setError, isSubmitting, setIsSubmitting } = useSplitFormState()
 
   function resetFormState() {
@@ -191,6 +193,7 @@ export default function EventSplitSharesDialog({
     setIsSubmitting(true)
 
     try {
+      await requireSignatureWallet()
       const nonceResult = await getSafeNonceAction()
       if (nonceResult.error || !nonceResult.nonce) {
         if (isTradingAuthRequiredError(nonceResult.error)) {
@@ -350,7 +353,8 @@ export default function EventSplitSharesDialog({
     }
     catch (error) {
       console.error('Failed to submit split operation.', error)
-      toast.error(t('We could not submit your split request. Please try again.'))
+      const message = error instanceof Error ? error.message : t('We could not submit your split request. Please try again.')
+      toast.error(message)
     }
     finally {
       setIsSubmitting(false)

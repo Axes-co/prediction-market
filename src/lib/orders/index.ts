@@ -12,6 +12,7 @@ import { toMicro } from '@/lib/formatters'
  */
 function resolveBuilderCode(): `0x${string}` {
   const configured = process.env.POLYMARKET_BUILDER_CODE?.trim()
+    || process.env.POLY_BUILDER_CODE?.trim()
   if (configured && /^0x[a-f0-9]{64}$/i.test(configured)) {
     return configured as `0x${string}`
   }

@@ -20,6 +20,7 @@ import {
 import { useAppKit } from '@/hooks/useAppKit'
 import { useProxyWalletPolling } from '@/hooks/useProxyWalletPolling'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
+import { useWalletSignatureGate } from '@/hooks/useWalletSignatureGate'
 import { defaultNetwork } from '@/lib/appkit'
 import { authClient } from '@/lib/auth-client'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
@@ -235,6 +236,7 @@ function useEnableFlowReset({
 }
 
 function useProxyWalletSignatureFlow({
+  user,
   shouldShowFundAfterProxy,
   refreshSessionUserState,
   resetEnableFlowState,
@@ -248,6 +250,7 @@ function useProxyWalletSignatureFlow({
   setEnableModalOpen,
   setFundModalOpen,
 }: {
+  user: User | null
   shouldShowFundAfterProxy: boolean
   refreshSessionUserState: () => Promise<void>
   resetEnableFlowState: () => void
@@ -263,11 +266,13 @@ function useProxyWalletSignatureFlow({
 }) {
   const { signTypedDataAsync } = useSignTypedData()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const requireSignatureWallet = useWalletSignatureGate(user?.address)
 
   return useCallback(async () => {
     setProxyWalletError(null)
 
     try {
+      await requireSignatureWallet()
       setProxyStep('signing')
       const domain = getSafeProxyDomain()
 
@@ -347,6 +352,7 @@ function useProxyWalletSignatureFlow({
     resetEnableFlowState,
     resetPendingFundState,
     runWithSignaturePrompt,
+    requireSignatureWallet,
     setEnableModalOpen,
     setFundModalOpen,
     setProxyStep,
@@ -375,6 +381,7 @@ function useTradingAuthSignatureFlow({
 }) {
   const { signTypedDataAsync } = useSignTypedData()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const requireSignatureWallet = useWalletSignatureGate(user?.address)
 
   const handleTradingAuthSignature = useCallback(async () => {
     if (!user?.address) {
@@ -385,6 +392,7 @@ function useTradingAuthSignatureFlow({
     setTradingAuthError(null)
 
     try {
+      await requireSignatureWallet()
       setTradingAuthStep('signing')
       const timestamp = Math.floor(Date.now() / 1000).toString()
       const message = buildTradingAuthMessage({
@@ -449,6 +457,7 @@ function useTradingAuthSignatureFlow({
     }
   }, [
     refreshSessionUserState,
+    requireSignatureWallet,
     runWithSignaturePrompt,
     setRequiresTradingAuthRefresh,
     setTradingAuthError,
@@ -481,6 +490,7 @@ function useTokenApprovalsFlow({
 }) {
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
+  const requireSignatureWallet = useWalletSignatureGate(user?.address)
 
   return useCallback(async () => {
     if (!user?.proxy_wallet_address) {
@@ -496,6 +506,7 @@ function useTokenApprovalsFlow({
     setTokenApprovalError(null)
 
     try {
+      await requireSignatureWallet()
       setApprovalsStep('signing')
       const nonceResult = await getSafeNonceAction()
       if (nonceResult.error || !nonceResult.nonce) {
@@ -611,6 +622,7 @@ function useTokenApprovalsFlow({
     }
   }, [
     refreshSessionUserState,
+    requireSignatureWallet,
     runWithSignaturePrompt,
     setApprovalsStep,
     setRequiresTradingAuthRefresh,
@@ -932,6 +944,7 @@ function TradingOnboardingProviderContent({
   })
 
   const handleProxyWalletSignature = useProxyWalletSignatureFlow({
+    user,
     shouldShowFundAfterProxy,
     refreshSessionUserState,
     resetEnableFlowState,

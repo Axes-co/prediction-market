@@ -70,12 +70,10 @@ async function fetchSafeNonce(args: { userAddress: string }): Promise<string | n
   }
   const path = `/nonce?address=${encodeURIComponent(args.userAddress)}&type=SAFE`
   try {
-    const builderHeaders = buildRelayerHeaders('GET', path)
     const response = await fetch(`${relayerUrl}${path}`, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
-        ...builderHeaders,
       },
       signal: AbortSignal.timeout(10_000),
     })

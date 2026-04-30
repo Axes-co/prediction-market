@@ -24,6 +24,7 @@ import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog'
 import { SAFE_BALANCE_QUERY_KEY } from '@/hooks/useBalance'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
 import { useSiteIdentity } from '@/hooks/useSiteIdentity'
+import { useWalletSignatureGate } from '@/hooks/useWalletSignatureGate'
 import { defaultNetwork } from '@/lib/appkit'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { formatCurrency, formatPercent } from '@/lib/formatters'
@@ -170,6 +171,7 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
   const queryClient = useQueryClient()
   const user = useUser()
+  const requireSignatureWallet = useWalletSignatureGate(user?.address)
   const router = useRouter()
   const site = useSiteIdentity()
 
@@ -211,6 +213,7 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
     setIsSubmitting(true)
 
     try {
+      await requireSignatureWallet()
       const nonceResult = await getSafeNonceAction()
       if (nonceResult.error || !nonceResult.nonce) {
         if (isTradingAuthRequiredError(nonceResult.error)) {
@@ -323,7 +326,8 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
     }
     catch (error) {
       console.error('Failed to submit claim.', error)
-      toast.error('We could not submit your claim. Please try again.')
+      const message = error instanceof Error ? error.message : 'We could not submit your claim. Please try again.'
+      toast.error(message)
     }
     finally {
       setIsSubmitting(false)

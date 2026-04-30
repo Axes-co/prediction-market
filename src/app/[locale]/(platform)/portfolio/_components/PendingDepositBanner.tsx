@@ -14,6 +14,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { SAFE_BALANCE_QUERY_KEY } from '@/hooks/useBalance'
 import { usePendingUsdcDeposit } from '@/hooks/usePendingUsdcDeposit'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
+import { useWalletSignatureGate } from '@/hooks/useWalletSignatureGate'
 import { useRouter } from '@/i18n/navigation'
 import { defaultNetwork } from '@/lib/appkit'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
@@ -82,6 +83,7 @@ function usePendingDepositSwap({
   invalidateTradeBalance,
   openTradeRequirements,
   runWithSignaturePrompt,
+  requireSignatureWallet,
   signMessageAsync,
 }: {
   step: PendingDepositStep
@@ -95,6 +97,7 @@ function usePendingDepositSwap({
   invalidateTradeBalance: () => void
   openTradeRequirements: ReturnType<typeof useTradingOnboarding>['openTradeRequirements']
   runWithSignaturePrompt: ReturnType<typeof useSignaturePromptRunner>['runWithSignaturePrompt']
+  requireSignatureWallet: () => Promise<void>
   signMessageAsync: ReturnType<typeof useSignMessage>['signMessageAsync']
 }) {
   const handleConfirm = useCallback(async () => {
@@ -131,6 +134,7 @@ function usePendingDepositSwap({
     setStep('signing')
 
     try {
+      await requireSignatureWallet()
       const buildResult = await buildPendingUsdcSwapAction({
         amount: assetToWrap.rawBase,
         asset: assetToWrap.asset,
@@ -218,6 +222,7 @@ function usePendingDepositSwap({
     openTradeRequirements,
     pendingBalance,
     refetchPendingDeposit,
+    requireSignatureWallet,
     runWithSignaturePrompt,
     setStatusMessage,
     setStep,
@@ -239,6 +244,7 @@ export default function PendingDepositBanner() {
   const user = useUser()
   const userAddress = user?.address ?? null
   const userProxyWalletAddress = user?.proxy_wallet_address ?? null
+  const requireSignatureWallet = useWalletSignatureGate(userAddress)
   const { openTradeRequirements } = useTradingOnboarding()
   const {
     open,
@@ -265,6 +271,7 @@ export default function PendingDepositBanner() {
     invalidateTradeBalance,
     openTradeRequirements,
     runWithSignaturePrompt,
+    requireSignatureWallet,
     signMessageAsync,
   })
 
