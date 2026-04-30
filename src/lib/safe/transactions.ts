@@ -17,7 +17,6 @@ import {
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
   PUSD_ADDRESS,
   SAFE_MULTISEND_ADDRESS,
-  UMA_NEG_RISK_ADAPTER_ADDRESS,
   ZERO_COLLECTION_ID,
 } from '@/lib/contracts'
 
@@ -96,20 +95,6 @@ const conditionalTokensAbi = [
       { name: 'parentCollectionId', type: 'bytes32' },
       { name: 'conditionId', type: 'bytes32' },
       { name: 'indexSets', type: 'uint256[]' },
-    ],
-    outputs: [],
-  },
-] as const
-
-const exchangeReferralAbi = [
-  {
-    name: 'setReferral',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'referrer', type: 'address' },
-      { name: 'affiliate', type: 'address' },
-      { name: 'affiliatePercentage', type: 'uint256' },
     ],
     outputs: [],
   },
@@ -285,37 +270,6 @@ export function buildApproveTokenTransactions(options?: ApproveOptions): SafeTra
   return transactions
 }
 
-interface ReferralOptions {
-  referrer: `0x${string}`
-  affiliate?: `0x${string}`
-  affiliateSharePercent?: number
-  exchanges?: `0x${string}`[]
-}
-
-export function buildSetReferralTransactions(options: ReferralOptions): SafeTransaction[] {
-  const referrer = options.referrer
-  if (!referrer || referrer === zeroAddress) {
-    return []
-  }
-
-  const affiliate = options.affiliate ?? zeroAddress
-  const sharePercent = Math.max(0, Math.min(100, Math.trunc(options.affiliateSharePercent ?? 0)))
-  const affiliatePercentage = affiliate === zeroAddress ? 0n : BigInt(sharePercent)
-  // Empty array means "skip referral writes" (e.g., already locked).
-  const exchanges = options.exchanges ?? [CTF_EXCHANGE_ADDRESS, NEG_RISK_CTF_EXCHANGE_ADDRESS]
-
-  return exchanges.map(exchange => ({
-    to: exchange,
-    value: '0',
-    data: encodeFunctionData({
-      abi: exchangeReferralAbi,
-      functionName: 'setReferral',
-      args: [referrer, affiliate, affiliatePercentage],
-    }),
-    operation: SafeOperationType.Call,
-  }))
-}
-
 export function buildSendErc20Transaction(params: {
   token: `0x${string}`
   to: `0x${string}`
@@ -388,7 +342,7 @@ export function buildNegRiskSplitPositionTransaction(args: NegRiskSplitArgs): Sa
   })
 
   return {
-    to: (args.contract ?? UMA_NEG_RISK_ADAPTER_ADDRESS) as `0x${string}`,
+    to: (args.contract ?? NEG_RISK_ADAPTER_ADDRESS) as `0x${string}`,
     value: '0',
     data,
     operation: SafeOperationType.Call,
@@ -409,7 +363,7 @@ export function buildNegRiskRedeemPositionTransaction(args: NegRiskRedeemArgs): 
   })
 
   return {
-    to: (args.contract ?? UMA_NEG_RISK_ADAPTER_ADDRESS) as `0x${string}`,
+    to: (args.contract ?? NEG_RISK_ADAPTER_ADDRESS) as `0x${string}`,
     value: '0',
     data,
     operation: SafeOperationType.Call,
@@ -421,7 +375,7 @@ export function buildSplitPositionTransaction(args: ConditionalPositionArgs): Sa
     abi: conditionalTokensAbi,
     functionName: 'splitPosition',
     args: [
-      (args.collateralToken ?? COLLATERAL_TOKEN_ADDRESS) as `0x${string}`,
+      (args.collateralToken ?? PUSD_ADDRESS) as `0x${string}`,
       (args.parentCollectionId ?? ZERO_COLLECTION_ID) as `0x${string}`,
       args.conditionId,
       normalizePartition(args.partition),
@@ -442,7 +396,7 @@ export function buildMergePositionTransaction(args: ConditionalPositionArgs): Sa
     abi: conditionalTokensAbi,
     functionName: 'mergePositions',
     args: [
-      (args.collateralToken ?? COLLATERAL_TOKEN_ADDRESS) as `0x${string}`,
+      (args.collateralToken ?? PUSD_ADDRESS) as `0x${string}`,
       (args.parentCollectionId ?? ZERO_COLLECTION_ID) as `0x${string}`,
       args.conditionId,
       normalizePartition(args.partition),
@@ -470,7 +424,7 @@ export function buildConvertPositionsTransaction(args: ConvertPositionsArgs): Sa
   })
 
   return {
-    to: (args.contract ?? UMA_NEG_RISK_ADAPTER_ADDRESS) as `0x${string}`,
+    to: (args.contract ?? NEG_RISK_ADAPTER_ADDRESS) as `0x${string}`,
     value: '0',
     data,
     operation: SafeOperationType.Call,
@@ -482,7 +436,7 @@ export function buildRedeemPositionTransaction(args: ConditionalRedeemArgs): Saf
     abi: conditionalTokensAbi,
     functionName: 'redeemPositions',
     args: [
-      (args.collateralToken ?? COLLATERAL_TOKEN_ADDRESS) as `0x${string}`,
+      (args.collateralToken ?? PUSD_ADDRESS) as `0x${string}`,
       (args.parentCollectionId ?? ZERO_COLLECTION_ID) as `0x${string}`,
       args.conditionId,
       normalizePartition(args.indexSets),

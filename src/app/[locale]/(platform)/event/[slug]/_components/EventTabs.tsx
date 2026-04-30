@@ -42,6 +42,7 @@ export default function EventTabs({
   const { data: commentMetrics } = useCommentMetrics(event.slug)
   const { status: liveCommentsStatus } = useLiveCommentsChannel({
     eventSlug: event.slug,
+    gammaEventId: event.gamma_event_id ?? null,
     user,
     enabled: activeTab === 'comments',
   })

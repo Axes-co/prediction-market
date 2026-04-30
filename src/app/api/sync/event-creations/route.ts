@@ -718,7 +718,9 @@ async function runSync() {
   }
 }
 
-async function handleRequest(request: Request) {
+// Kept for rollback if a parallel create-market backend ever returns. Wire
+// the route handlers below back to this function to re-enable.
+async function _handleRequest(request: Request) {
   const auth = request.headers.get('authorization')
   if (!isCronAuthorized(auth, process.env.CRON_SECRET)) {
     return NextResponse.json({ error: 'Unauthenticated.' }, { status: 401 })
@@ -737,10 +739,23 @@ async function handleRequest(request: Request) {
   }
 }
 
-export async function GET(request: Request) {
-  return handleRequest(request)
+// Polymarket V2 has no public market-creation API. The kuest-style worker
+// below (`handleRequest`, plus `CREATE_MARKET_URL` calls in this file) is kept
+// in place for rollback if a parallel create-market backend ever returns, but
+// the route itself returns 503 so cron and manual callers cannot drive a
+// half-disabled flow against a non-existent backend. Re-enable by routing the
+// handlers back to `handleRequest`.
+function unavailableResponse() {
+  return NextResponse.json(
+    { error: 'event_creation_disabled', detail: 'Market creation is not available on the Polymarket integration.' },
+    { status: 503, headers: { 'Cache-Control': 'no-store' } },
+  )
 }
 
-export async function POST(request: Request) {
-  return handleRequest(request)
+export async function GET(_request: Request) {
+  return unavailableResponse()
+}
+
+export async function POST(_request: Request) {
+  return unavailableResponse()
 }

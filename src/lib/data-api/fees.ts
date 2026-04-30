@@ -1,5 +1,3 @@
-import { buildDataApiUrl, normalizeDataApiAddress } from '@/lib/data-api/client'
-
 export interface FeeReceiverTotal {
   exchange: string
   receiver: string
@@ -18,38 +16,16 @@ interface FeeReceiverTotalsParams {
   offset?: number
 }
 
-export async function fetchFeeReceiverTotals({
-  endpoint,
-  address,
-  exchange,
-  tokenId,
-  limit = 100,
-  offset = 0,
-}: FeeReceiverTotalsParams): Promise<FeeReceiverTotal[]> {
-  const params = new URLSearchParams()
-  params.set('address', normalizeDataApiAddress(address))
-  if (exchange) {
-    params.set('exchange', normalizeDataApiAddress(exchange))
-  }
-  if (tokenId) {
-    params.set('tokenId', tokenId)
-  }
-  params.set('limit', Math.min(Math.max(limit, 1), 500).toString())
-  params.set('offset', Math.max(offset, 0).toString())
-
-  const response = await fetch(buildDataApiUrl(`/${endpoint}`, params), {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
-  })
-
-  if (!response.ok) {
-    throw new Error(`Data API request failed: ${endpoint} (${response.status})`)
-  }
-
-  return response.json() as Promise<FeeReceiverTotal[]>
+export async function fetchFeeReceiverTotals(_params: FeeReceiverTotalsParams): Promise<FeeReceiverTotal[]> {
+  // The Polymarket Data API does not document a `/referrers` endpoint
+  // (`https://docs.polymarket.com/api-reference/data-api-openapi.yaml`).
+  // Internal Axes referral attribution is tracked locally only; partnership
+  // economics flow through the official `builder` field on signed orders and
+  // are reported via the documented `/v1/builders/leaderboard` and
+  // `/v1/builders/volume` endpoints. Until those views are wired, this call
+  // returns an empty list so admin/affiliate pages render a clean zero state
+  // instead of failing.
+  return []
 }
 
 export function sumFeeTotals(totals: FeeReceiverTotal[]): bigint {

@@ -13,13 +13,16 @@ import { SafeOperationType } from '@/lib/safe/transactions'
  * V2 settles trades in pUSD, but we keep the user-facing UX in USDC. The
  * Onramp/Offramp pair handles 1:1 conversion onchain:
  *
- *   - `Onramp.wrap(USDC.e, recipient, amount)` pulls USDC.e from `recipient`
- *     and mints `amount` pUSD to `recipient`. Requires a prior
- *     `USDC.e.approve(Onramp, amount)` (covered in
- *     `buildApproveTokenTransactions` so the onboarding batch handles it once).
- *   - `Offramp.unwrap(USDC.e, recipient, amount)` does the reverse.
+ *   - `Onramp.wrap(asset, recipient, amount)` pulls `asset` from `recipient`
+ *     and mints `amount` pUSD to `recipient`.
+ *   - `Offramp.unwrap(asset, recipient, amount)` does the reverse.
  *
- * Function signatures verbatim from `docs.polymarket.com/concepts/pusd.md`:
+ * The deployed `CollateralOnramp` at `COLLATERAL_ONRAMP_ADDRESS` accepts
+ * BOTH native (Circle) USDC at `0x3c499c…` and bridged USDC.e at
+ * `0x2791bca1…`. The pUSD docs only documented USDC.e; the on-chain ABI is
+ * looser. Verified against the deployed contract source.
+ *
+ * Function signatures (verbatim from the deployed contract):
  *   `function wrap(address _asset, address _to, uint256 _amount) external`
  *   `function unwrap(address _asset, address _to, uint256 _amount) external`
  */

@@ -235,6 +235,25 @@ function useMarketChannelConnection({
 
     let isActive = true
     let ws: WebSocket | null = null
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+
+    function startHeartbeat() {
+      stopHeartbeat()
+      // Polymarket market/user channels close after ~10s of silence; the docs
+      // require a `PING` text frame every 10s. Server replies with `PONG`.
+      heartbeatTimer = setInterval(() => {
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send('PING')
+        }
+      }, 10_000)
+    }
+
+    function stopHeartbeat() {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer)
+        heartbeatTimer = null
+      }
+    }
 
     function handleOpen() {
       if (!ws) {
@@ -247,6 +266,7 @@ function useMarketChannelConnection({
         markets: [],
         custom_feature_enabled: true,
       }))
+      startHeartbeat()
     }
 
     function handleMessage(eventMessage: MessageEvent<string>) {
@@ -315,6 +335,7 @@ function useMarketChannelConnection({
     }
 
     function handleClose() {
+      stopHeartbeat()
       if (isActive) {
         setConnectionStatus('offline')
         scheduleReconnect()
@@ -346,6 +367,7 @@ function useMarketChannelConnection({
 
     return function teardownMarketChannelConnection() {
       isActive = false
+      stopHeartbeat()
       clearReconnect()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       if (ws) {

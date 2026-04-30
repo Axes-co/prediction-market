@@ -4,6 +4,11 @@ import createMiddleware from 'next-intl/middleware'
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import {
+  getRequestCountryCode,
+  isCountryBlocked,
+  loadBlockedCountries,
+} from '@/lib/geoblock-settings'
+import {
   buildPredictionResultsInternalRoutePath,
   hasPredictionResultsFilterSearchParams,
   PREDICTION_RESULTS_SORT_PARAM,
@@ -15,6 +20,36 @@ import { routing } from './i18n/routing'
 
 const intlMiddleware = createMiddleware(routing)
 const protectedPrefixes = ['/settings', '/portfolio', '/admin']
+
+const BLOCKED_COUNTRIES_CACHE_TTL_MS = 60_000
+let blockedCountriesCache: { value: string[], expiresAt: number } | null = null
+
+async function getBlockedCountriesCached(): Promise<string[]> {
+  const now = Date.now()
+  if (blockedCountriesCache && blockedCountriesCache.expiresAt > now) {
+    return blockedCountriesCache.value
+  }
+  const value = await loadBlockedCountries()
+  blockedCountriesCache = { value, expiresAt: now + BLOCKED_COUNTRIES_CACHE_TTL_MS }
+  return value
+}
+
+const GEOBLOCK_API_ALLOWED_PATHS = new Set([
+  '/api/geoblock-status',
+  '/api/auth',
+])
+
+function isGeoblockedApiPath(pathname: string, method: string) {
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return false
+  }
+  for (const allowed of GEOBLOCK_API_ALLOWED_PATHS) {
+    if (pathname === allowed || pathname.startsWith(`${allowed}/`)) {
+      return false
+    }
+  }
+  return true
+}
 type Locale = (typeof routing.locales)[number]
 const { rewrite: rewriteMarkdownExtensionWithLocale } = rewritePath(
   '/:locale/docs{/*path}.mdx',
@@ -99,12 +134,31 @@ export default async function proxy(request: NextRequest) {
     return NextResponse.next()
   }
 
+  const country = getRequestCountryCode(request.headers)
+  const blockedCountries = await getBlockedCountriesCached()
+  const isBlocked = isCountryBlocked(country, blockedCountries)
+
+  if (isBlocked && url.pathname.startsWith('/api/')) {
+    if (isGeoblockedApiPath(url.pathname, request.method)) {
+      return NextResponse.json(
+        { error: 'restricted_region', country },
+        { status: 403, headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
+  }
+
   if (url.pathname.startsWith('/api/')) {
     const rateLimited = await applyRateLimit(request)
     if (rateLimited) {
       return rateLimited
     }
     return NextResponse.next()
+  }
+
+  if (isBlocked) {
+    const pathnameLocale = getLocaleFromPathname(url.pathname)
+    const locale = resolveRequestLocale(pathnameLocale)
+    return NextResponse.redirect(new URL(withLocale('/geoblock', locale), request.url))
   }
 
   const markdownPath = rewriteMarkdownExtensionWithLocale(url.pathname) || rewriteMarkdownExtensionDefaultLocale(url.pathname)

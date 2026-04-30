@@ -285,13 +285,22 @@ function useLiveActivityStream({
   const seenIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(function subscribeLiveActivityStream() {
-    if (!wsUrl || !allowedCreatorWallets) {
+    // RTDS docs (https://docs.polymarket.com/market-data/websocket/rtds.md)
+    // explicitly support only `comments`, `crypto_prices`, and `equity_prices`
+    // and state "Only the subscription types documented below are supported."
+    // The `topic: 'activity', type: 'orders_matched'` shape used previously is
+    // not in that allowlist. Until Polymarket exposes a documented activity
+    // stream, this client is gated behind an explicit env flag and falls back
+    // to the REST `/api/event-activity` polling already wired in the page.
+    const rtdsActivityEnabled = process.env.NEXT_PUBLIC_RTDS_ACTIVITY_ENABLED === 'true'
+    if (!wsUrl || !allowedCreatorWallets || !rtdsActivityEnabled) {
       return
     }
     wsUrlRef.current = wsUrl
 
     let isActive = true
     let ws: WebSocket | null = null
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 
     function buildSubscriptionPayload(action: 'subscribe' | 'unsubscribe') {
       return JSON.stringify({
@@ -305,11 +314,28 @@ function useLiveActivityStream({
       })
     }
 
+    function startHeartbeat() {
+      stopHeartbeat()
+      heartbeatTimer = setInterval(() => {
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send('PING')
+        }
+      }, 5_000)
+    }
+
+    function stopHeartbeat() {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer)
+        heartbeatTimer = null
+      }
+    }
+
     function handleOpen() {
       if (!ws) {
         return
       }
       ws.send(buildSubscriptionPayload('subscribe'))
+      startHeartbeat()
     }
 
     function handleMessage(eventMessage: MessageEvent<string>) {
@@ -414,6 +440,7 @@ function useLiveActivityStream({
     }
 
     function handleClose() {
+      stopHeartbeat()
       if (!isActive) {
         return
       }
@@ -448,6 +475,7 @@ function useLiveActivityStream({
 
     return function teardownLiveActivityStream() {
       isActive = false
+      stopHeartbeat()
       clearReconnect()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       if (ws) {

@@ -691,7 +691,9 @@ function useSellPositionFlow({
         if (response.ok) {
           const payload = await response.json()
           const outcomes = payload?.data?.outcomes ?? []
-          isNegRisk = Boolean(payload?.data?.event_enable_neg_risk || payload?.data?.neg_risk)
+          isNegRisk = typeof payload?.data?.neg_risk === 'boolean'
+            ? payload.data.neg_risk
+            : Boolean(payload?.data?.event_enable_neg_risk)
           const matchedOutcome = outcomes.find((outcome: { outcome_index?: number }) =>
             outcome.outcome_index === resolvedOutcomeIndex,
           )

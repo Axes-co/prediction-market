@@ -13,6 +13,7 @@ interface ClobOpenOrderLike {
   side?: string | null
   size_matched?: string | number | null
   status?: string | null
+  order_type?: string | null
   type?: string | null
 }
 
@@ -56,7 +57,7 @@ export function mapClobOpenOrder<TMarket extends UserOpenOrder['market'], TOrder
   return {
     id: order.id,
     side,
-    type: normalizeClobOrderType(order.type),
+    type: normalizeClobOrderType(order.order_type ?? order.type),
     status: order.status || 'live',
     price: priceValue,
     maker_amount: makerAmount,

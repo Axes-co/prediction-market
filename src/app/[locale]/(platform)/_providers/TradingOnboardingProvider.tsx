@@ -17,7 +17,6 @@ import {
   useOptionalTradingOnboarding,
   useTradingOnboarding,
 } from '@/app/[locale]/(platform)/_providers/TradingOnboardingContext'
-import { useAffiliateOrderMetadata } from '@/hooks/useAffiliateOrderMetadata'
 import { useAppKit } from '@/hooks/useAppKit'
 import { useProxyWalletPolling } from '@/hooks/useProxyWalletPolling'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
@@ -27,10 +26,9 @@ import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import {
   CONDITIONAL_TOKENS_CONTRACT,
   CTF_EXCHANGE_ADDRESS,
+  NEG_RISK_ADAPTER_ADDRESS,
   NEG_RISK_CTF_EXCHANGE_ADDRESS,
-  UMA_NEG_RISK_ADAPTER_ADDRESS,
 } from '@/lib/contracts'
-import { fetchReferralLocked } from '@/lib/exchange'
 import {
   getSafeProxyDomain,
   SAFE_PROXY_CREATE_PROXY_MESSAGE,
@@ -40,7 +38,6 @@ import {
 import {
   aggregateSafeTransactions,
   buildApproveTokenTransactions,
-  buildSetReferralTransactions,
   getSafeTxTypedData,
   packSafeSignature,
 } from '@/lib/safe/transactions'
@@ -460,27 +457,12 @@ function useTradingAuthSignatureFlow({
     user,
   ])
 
-  const resolveReferralExchanges = useCallback(async (safeAddress: `0x${string}`) => {
-    const exchanges = [
-      CTF_EXCHANGE_ADDRESS as `0x${string}`,
-      NEG_RISK_CTF_EXCHANGE_ADDRESS as `0x${string}`,
-    ]
-    const results = await Promise.all(
-      exchanges.map(exchange => fetchReferralLocked(exchange, safeAddress)),
-    )
-    if (results.includes(null)) {
-      console.warn('Failed to read referral status; skipping locked/unknown exchanges.')
-    }
-    return exchanges.filter((_, index) => results[index] === false)
-  }, [])
-
-  return { handleTradingAuthSignature, resolveReferralExchanges }
+  return { handleTradingAuthSignature }
 }
 
 function useTokenApprovalsFlow({
   user,
   tradingAuthSatisfied,
-  resolveReferralExchanges,
   refreshSessionUserState,
   setApprovalsStep,
   setTokenApprovalError,
@@ -490,7 +472,6 @@ function useTokenApprovalsFlow({
 }: {
   user: User | null
   tradingAuthSatisfied: boolean
-  resolveReferralExchanges: (safeAddress: `0x${string}`) => Promise<`0x${string}`[]>
   refreshSessionUserState: () => Promise<void>
   setApprovalsStep: (value: ApprovalsStep) => void
   setTokenApprovalError: (value: string | null) => void
@@ -500,7 +481,6 @@ function useTokenApprovalsFlow({
 }) {
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
-  const affiliateMetadata = useAffiliateOrderMetadata()
 
   return useCallback(async () => {
     if (!user?.proxy_wallet_address) {
@@ -533,30 +513,24 @@ function useTokenApprovalsFlow({
         return
       }
 
-      const referralExchanges = await resolveReferralExchanges(
-        user.proxy_wallet_address as `0x${string}`,
-      )
       const transactions = buildApproveTokenTransactions({
         spenders: [
           CONDITIONAL_TOKENS_CONTRACT as `0x${string}`,
           CTF_EXCHANGE_ADDRESS as `0x${string}`,
           NEG_RISK_CTF_EXCHANGE_ADDRESS as `0x${string}`,
-          UMA_NEG_RISK_ADAPTER_ADDRESS as `0x${string}`,
+          NEG_RISK_ADAPTER_ADDRESS as `0x${string}`,
         ],
         operators: [
           CTF_EXCHANGE_ADDRESS as `0x${string}`,
           NEG_RISK_CTF_EXCHANGE_ADDRESS as `0x${string}`,
-          UMA_NEG_RISK_ADAPTER_ADDRESS as `0x${string}`,
+          NEG_RISK_ADAPTER_ADDRESS as `0x${string}`,
         ],
       })
-      transactions.push(
-        ...buildSetReferralTransactions({
-          referrer: affiliateMetadata.referrerAddress,
-          affiliate: affiliateMetadata.affiliateAddress,
-          affiliateSharePercent: affiliateMetadata.affiliateSharePercent,
-          exchanges: referralExchanges,
-        }),
-      )
+      // Polymarket V2 CTF Exchange does not implement `setReferral`. Internal
+      // referral attribution is tracked locally via signup cookie + DB only,
+      // and via the signed `builder` field on every order. Bundling a non-
+      // existent function call into the atomic Safe-tx batch reverts the
+      // entire approval flow for new users, so the call must stay out.
       const aggregated = aggregateSafeTransactions(transactions)
       const typedData = getSafeTxTypedData({
         chainId: defaultNetwork.id,
@@ -636,9 +610,7 @@ function useTokenApprovalsFlow({
       setApprovalsStep('idle')
     }
   }, [
-    affiliateMetadata,
     refreshSessionUserState,
-    resolveReferralExchanges,
     runWithSignaturePrompt,
     setApprovalsStep,
     setRequiresTradingAuthRefresh,
@@ -974,7 +946,7 @@ function TradingOnboardingProviderContent({
     setFundModalOpen,
   })
 
-  const { handleTradingAuthSignature, resolveReferralExchanges } = useTradingAuthSignatureFlow({
+  const { handleTradingAuthSignature } = useTradingAuthSignatureFlow({
     user,
     refreshSessionUserState,
     setTradingAuthError,
@@ -985,7 +957,6 @@ function TradingOnboardingProviderContent({
   const handleApproveTokens = useTokenApprovalsFlow({
     user,
     tradingAuthSatisfied,
-    resolveReferralExchanges,
     refreshSessionUserState,
     setApprovalsStep,
     setTokenApprovalError,

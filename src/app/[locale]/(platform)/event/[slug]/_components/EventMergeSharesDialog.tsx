@@ -31,7 +31,7 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
 import { defaultNetwork } from '@/lib/appkit'
 import { DEFAULT_CONDITION_PARTITION, DEFAULT_ERROR_MESSAGE, MICRO_UNIT } from '@/lib/constants'
-import { UMA_NEG_RISK_ADAPTER_ADDRESS, ZERO_COLLECTION_ID } from '@/lib/contracts'
+import { NEG_RISK_ADAPTER_ADDRESS, ZERO_COLLECTION_ID } from '@/lib/contracts'
 import { formatAmountInputValue, toMicro } from '@/lib/formatters'
 import { applyPositionDeltasToUserPositions, applyShareDeltas, updateQueryDataWhere } from '@/lib/optimistic-trading'
 import {
@@ -211,7 +211,7 @@ export default function EventMergeSharesDialog({
           partition: [...DEFAULT_CONDITION_PARTITION],
           amount: toMicro(numericAmount),
           parentCollectionId: ZERO_COLLECTION_ID,
-          contract: isNegRiskMarket ? UMA_NEG_RISK_ADAPTER_ADDRESS : undefined,
+          contract: isNegRiskMarket ? NEG_RISK_ADAPTER_ADDRESS : undefined,
         }),
       ]
 

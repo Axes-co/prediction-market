@@ -68,12 +68,24 @@ function parseVolume(body: unknown): string | null {
     return null
   }
 
+  if (Array.isArray(body)) {
+    return parseVolume(body[0])
+  }
+
   if (typeof body === 'object') {
     const candidate = body as {
       volume?: unknown
       total_volume?: unknown
       totalVolume?: unknown
       tradedVolume?: unknown
+      data?: unknown
+      leaderboard?: unknown
+    }
+    if (Array.isArray(candidate.data)) {
+      return parseVolume(candidate.data[0])
+    }
+    if (Array.isArray(candidate.leaderboard)) {
+      return parseVolume(candidate.leaderboard[0])
     }
     const resolved = candidate.volume
       ?? candidate.total_volume
@@ -177,28 +189,33 @@ export async function fetchProfileLinkStats(
     }
   }
 
+  function buildLeaderboardUrl(orderBy: 'PNL' | 'VOLUME') {
+    const params = new URLSearchParams({
+      user: normalizedAddress,
+      timePeriod: 'all',
+      orderBy,
+      category: 'overall',
+      limit: '1',
+      offset: '0',
+    })
+    return `${leaderboardApiUrl}/leaderboard?${params.toString()}`
+  }
+
   const request = (async () => {
     try {
       const valueUrl = buildDataApiUrl('/value', new URLSearchParams({ user: normalizedAddress }))
-      const volumeUrl = buildDataApiUrl('/volume', new URLSearchParams({ user: normalizedAddress }))
-      const leaderboardParams = new URLSearchParams({
-        user: normalizedAddress,
-        timePeriod: 'all',
-        orderBy: 'PNL',
-        category: 'overall',
-        limit: '1',
-        offset: '0',
-      })
-      const leaderboardUrl = `${leaderboardApiUrl}/leaderboard?${leaderboardParams.toString()}`
 
+      // Polymarket Data API exposes lifetime volume via `/v1/leaderboard` with
+      // `orderBy=VOLUME`, not via a root `/volume` endpoint (that path is not
+      // documented in `data-api-openapi.yaml`).
       const [
         valueResult,
         volumeResult,
         leaderboardResult,
       ] = await Promise.allSettled([
         fetchJson(valueUrl, signal),
-        fetchJson(volumeUrl, signal),
-        fetchJson(leaderboardUrl, signal),
+        fetchJson(buildLeaderboardUrl('VOLUME'), signal),
+        fetchJson(buildLeaderboardUrl('PNL'), signal),
       ])
 
       const volume = volumeResult.status === 'fulfilled'

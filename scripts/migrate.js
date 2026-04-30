@@ -3,66 +3,12 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const postgres = require('postgres')
-const { resolveSiteUrl } = require('../src/lib/site-url')
 
 const MIGRATION_LOCK_NAMESPACE = 20817
 const MIGRATION_LOCK_KEY = 1
 
 function escapeSqlLiteral(value) {
   return String(value).replace(/'/g, '\'\'')
-}
-
-function joinSiteUrlPath(siteUrl, endpointPath) {
-  const normalizedSiteUrl = String(siteUrl).trim().replace(/\/+$/, '')
-  const normalizedEndpointPath = String(endpointPath).trim().replace(/^\/+/, '')
-
-  if (!normalizedEndpointPath) {
-    return normalizedSiteUrl
-  }
-
-  return `${normalizedSiteUrl}/${normalizedEndpointPath}`
-}
-
-function buildSyncCronSql({
-  jobName,
-  schedule,
-  endpointPath,
-  siteUrl,
-  cronSecret,
-  timeoutMilliseconds = 20000,
-}) {
-  const endpointUrl = joinSiteUrlPath(siteUrl, endpointPath)
-  const escapedJobName = escapeSqlLiteral(jobName)
-  const escapedSchedule = escapeSqlLiteral(schedule)
-  const escapedEndpointUrl = escapeSqlLiteral(endpointUrl)
-  const normalizedTimeout = Number.isFinite(Number(timeoutMilliseconds))
-    ? Math.max(1000, Math.trunc(Number(timeoutMilliseconds)))
-    : 20000
-  const escapedHeaders = escapeSqlLiteral(JSON.stringify({
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${cronSecret}`,
-  }))
-
-  return `
-  DO $$
-  DECLARE
-    job_id int;
-    cmd text := $c$
-      SELECT net.http_get(
-        url := '${escapedEndpointUrl}',
-        headers := '${escapedHeaders}',
-        timeout_milliseconds := ${normalizedTimeout}
-      );
-    $c$;
-  BEGIN
-    SELECT jobid INTO job_id FROM cron.job WHERE jobname = '${escapedJobName}';
-
-    IF job_id IS NOT NULL THEN
-      PERFORM cron.unschedule(job_id);
-    END IF;
-
-    PERFORM cron.schedule('${escapedJobName}', '${escapedSchedule}', cmd);
-  END $$;`
 }
 
 function resolveSupabaseMode(env = process.env) {
@@ -244,62 +190,58 @@ async function createCleanJobsCron(sql) {
   console.log('✅ Cron clean-jobs created successfully')
 }
 
-async function createSyncCron(sql, options) {
-  const sqlQuery = buildSyncCronSql(options)
-  console.log(`Creating ${options.jobName} cron job...`)
+// Legacy pg_cron job names that earlier deploys registered. They are now
+// either deprecated (`sync-events` was the Goldsky V1 reader, `sync-volume`
+// was the V1 volume crawler, `sync-event-creations` was the kuest market
+// authoring worker) or duplicated by `vercel.json` crons. We unschedule them
+// at every `db:push` so the post-Polymarket-V2 deploy converges to a single
+// scheduler (Vercel cron) regardless of how many old jobs the database has
+// accumulated.
+const LEGACY_PG_CRON_JOB_NAMES = [
+  'sync-events',
+  'sync-volume',
+  'sync-event-creations',
+  'sync-translations',
+  'sync-resolution',
+]
+
+async function unscheduleLegacyPgCronJobs(sql) {
+  console.log('Unscheduling legacy pg_cron sync jobs...')
+  const sqlQuery = `
+  DO $$
+  DECLARE
+    target_job text;
+    job_id int;
+  BEGIN
+    FOREACH target_job IN ARRAY ARRAY[${LEGACY_PG_CRON_JOB_NAMES.map(name => `'${escapeSqlLiteral(name)}'`).join(', ')}]
+    LOOP
+      SELECT jobid INTO job_id FROM cron.job WHERE jobname = target_job;
+      IF job_id IS NOT NULL THEN
+        PERFORM cron.unschedule(job_id);
+        RAISE NOTICE 'Unscheduled %', target_job;
+      END IF;
+    END LOOP;
+  END $$;`
+
   await sql.unsafe(sqlQuery, [], { simple: true })
-  console.log(`✅ Cron ${options.jobName} created successfully`)
+  console.log('✅ Legacy pg_cron sync jobs unscheduled')
 }
 
-async function createSyncEventsCron(sql, siteUrl, cronSecret) {
-  await createSyncCron(sql, {
-    jobName: 'sync-events',
-    schedule: '2,11,20,29,38,47,56 * * * *',
-    endpointPath: '/api/sync/events',
-    siteUrl,
-    cronSecret,
-  })
-}
-
-async function createSyncVolumeCron(sql, siteUrl, cronSecret) {
-  await createSyncCron(sql, {
-    jobName: 'sync-volume',
-    schedule: '*/10 * * * *',
-    endpointPath: '/api/sync/volume?limit=150',
-    siteUrl,
-    cronSecret,
-    timeoutMilliseconds: 20000,
-  })
-}
-
-async function createSyncTranslationsCron(sql, siteUrl, cronSecret) {
-  await createSyncCron(sql, {
-    jobName: 'sync-translations',
-    schedule: '13,37 * * * *',
-    endpointPath: '/api/sync/translations',
-    siteUrl,
-    cronSecret,
-  })
-}
-
-async function createSyncResolutionCron(sql, siteUrl, cronSecret) {
-  await createSyncCron(sql, {
-    jobName: 'sync-resolution',
-    schedule: '5-55/10 * * * *',
-    endpointPath: '/api/sync/resolution',
-    siteUrl,
-    cronSecret,
-  })
-}
-
-async function createSyncEventCreationsCron(sql, siteUrl, cronSecret) {
-  await createSyncCron(sql, {
-    jobName: 'sync-event-creations',
-    schedule: '0,30 * * * *',
-    endpointPath: '/api/sync/event-creations',
-    siteUrl,
-    cronSecret,
-  })
+async function ensureSyncSeedRows(sql) {
+  // The seed migration `2026_04_01_001_subgraph_syncs_integer_id.sql` inserts
+  // the rows below, but if they get deleted manually (or the migration tracker
+  // says applied without the rows persisting), the legacy lock-acquisition
+  // code throws. Re-seed unconditionally on every db:push so the rows are
+  // always present.
+  console.log('Ensuring subgraph_syncs seed rows...')
+  await sql.unsafe(`
+    INSERT INTO subgraph_syncs (service_name, subgraph_name, status, total_processed, error_message)
+    VALUES
+      ('market_sync', 'pnl', 'idle', 0, NULL),
+      ('resolution_sync', 'resolution', 'idle', 0, NULL)
+    ON CONFLICT (service_name, subgraph_name) DO NOTHING;
+  `, [], { simple: true })
+  console.log('✅ subgraph_syncs seed rows ensured')
 }
 
 async function resolveCronExtensionCapabilities(sql) {
@@ -315,32 +257,24 @@ async function resolveCronExtensionCapabilities(sql) {
   }
 }
 
-async function configureSupabaseScheduler(sql, siteUrl, cronSecret) {
-  const { hasPgCron, hasPgNet } = await resolveCronExtensionCapabilities(sql)
+async function configureSupabaseScheduler(sql) {
+  const { hasPgCron } = await resolveCronExtensionCapabilities(sql)
 
   if (!hasPgCron) {
     console.log('Skipping scheduler setup because pg_cron is not installed in this database.')
     return
   }
 
+  // DB maintenance jobs stay in pg_cron — they don't make HTTP calls and have
+  // nothing to do with the Vercel scheduler.
   await createCleanCronDetailsCron(sql)
   await createCleanJobsCron(sql)
 
-  if (!hasPgNet) {
-    console.log('Skipping sync endpoint cron setup because pg_net is not installed. Configure scheduler externally.')
-    return
-  }
-
-  if (!cronSecret) {
-    console.log('Skipping sync endpoint cron setup because CRON_SECRET is missing. Configure scheduler externally or rerun db:push with CRON_SECRET.')
-    return
-  }
-
-  await createSyncEventsCron(sql, siteUrl, cronSecret)
-  await createSyncEventCreationsCron(sql, siteUrl, cronSecret)
-  await createSyncTranslationsCron(sql, siteUrl, cronSecret)
-  await createSyncResolutionCron(sql, siteUrl, cronSecret)
-  await createSyncVolumeCron(sql, siteUrl, cronSecret)
+  // All sync endpoints (`/api/sync/gamma`, `/api/sync/tags`, etc.) are
+  // scheduled via `vercel.json` cron now. Unschedule any pg_cron jobs left
+  // over from earlier deploys so we don't double-fire the routes from inside
+  // Postgres in addition to Vercel's scheduler.
+  await unscheduleLegacyPgCronJobs(sql)
 }
 
 function resolveMigrationConnectionString() {
@@ -381,8 +315,6 @@ async function run() {
 
   try {
     const isSupabaseMode = resolveSupabaseMode(process.env)
-    const siteUrl = resolveSiteUrl(process.env)
-    const cronSecret = process.env.CRON_SECRET?.trim() || ''
 
     console.log('Connecting to database...')
     reserved = await sql.reserve()
@@ -396,12 +328,13 @@ async function run() {
 
     console.log(`Migration mode: ${isSupabaseMode ? 'Supabase' : 'Postgres+S3'}`)
     await applyMigrations(reserved, isSupabaseMode)
+    await ensureSyncSeedRows(reserved)
 
     if (isSupabaseMode) {
-      await configureSupabaseScheduler(reserved, siteUrl, cronSecret)
+      await configureSupabaseScheduler(reserved)
     }
     else {
-      console.log('Skipping database scheduler setup because Supabase mode is not configured. Use the external scheduler contract from https://docs.kuest.com/manual-installation/scheduler-jobs.')
+      console.log('Skipping database scheduler setup because Supabase mode is not configured. Sync routes are scheduled via vercel.json cron.')
     }
   }
   catch (error) {

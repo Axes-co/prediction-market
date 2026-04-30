@@ -32,6 +32,7 @@ interface ClobOpenOrder {
   size_matched: string
   asset_id: string
   expiration?: string
+  order_type?: ClobOrderType
   type?: ClobOrderType
   created_at: string
   updated_at: string
@@ -63,7 +64,6 @@ export async function GET(request: Request) {
     const { data: clobOrders, next_cursor } = await fetchClobOpenOrders({
       auth: tradingAuth.clob,
       userAddress: user.address,
-      makerAddress: user.proxy_wallet_address as string,
       id: idFilter,
       market: marketFilter,
       assetId: assetIdFilter,
@@ -99,7 +99,6 @@ export async function GET(request: Request) {
 async function fetchClobOpenOrders({
   auth,
   userAddress,
-  makerAddress,
   id,
   market,
   assetId,
@@ -107,16 +106,12 @@ async function fetchClobOpenOrders({
 }: {
   auth: { key: string, secret: string, passphrase: string }
   userAddress: string
-  makerAddress?: string
   id?: string
   market?: string
   assetId?: string
   nextCursor?: string
 }): Promise<{ data: ClobOpenOrder[], next_cursor: string }> {
   const params = new URLSearchParams()
-  if (makerAddress) {
-    params.set('maker', makerAddress)
-  }
   if (id) {
     params.set('id', id)
   }

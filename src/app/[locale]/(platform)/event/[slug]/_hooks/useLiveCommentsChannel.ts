@@ -94,15 +94,24 @@ function updateCommentMetrics(
 
 interface LiveCommentsChannelParams {
   eventSlug: string
+  gammaEventId?: number | null
   user: User | null
   enabled?: boolean
 }
 
-export function useLiveCommentsChannel({ eventSlug, user, enabled }: LiveCommentsChannelParams) {
+const RTDS_COMMENT_TYPES = [
+  'comment_created',
+  'comment_removed',
+  'reaction_created',
+  'reaction_removed',
+] as const
+
+export function useLiveCommentsChannel({ eventSlug, gammaEventId, user, enabled }: LiveCommentsChannelParams) {
   const queryClient = useQueryClient()
   const wsUrl = process.env.WS_LIVE_DATA_URL!
   const isEnabled = enabled ?? true
-  const shouldConnect = Boolean(eventSlug && wsUrl && isEnabled)
+  const hasParentId = typeof gammaEventId === 'number' && Number.isFinite(gammaEventId)
+  const shouldConnect = Boolean(eventSlug && wsUrl && isEnabled && hasParentId)
   const userRef = useRef<User | null>(user)
   const [status, setStatus] = useReducer(
     (_current: 'connecting' | 'live' | 'offline', next: 'connecting' | 'live' | 'offline') => next,
@@ -120,18 +129,42 @@ export function useLiveCommentsChannel({ eventSlug, user, enabled }: LiveComment
 
     let isActive = true
     let ws: WebSocket | null = null
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 
     function buildSubscriptionPayload(action: 'subscribe' | 'unsubscribe') {
+      // Polymarket RTDS filter shape per `wss://ws-live-data.polymarket.com`
+      // docs: filter on `parentEntityID` (gamma event id) + `parentEntityType`,
+      // not local `event_slug`. Wildcard type is undocumented for `comments`,
+      // so subscribe to all four documented types explicitly.
+      const filters = JSON.stringify({
+        parentEntityID: gammaEventId,
+        parentEntityType: 'Event',
+      })
       return JSON.stringify({
         action,
-        subscriptions: [
-          {
-            topic: 'comments',
-            type: '*',
-            filters: JSON.stringify({ event_slug: eventSlug }),
-          },
-        ],
+        subscriptions: RTDS_COMMENT_TYPES.map(type => ({
+          topic: 'comments',
+          type,
+          filters,
+        })),
       })
+    }
+
+    function startHeartbeat() {
+      stopHeartbeat()
+      // RTDS docs require `PING` every 5 seconds.
+      heartbeatTimer = setInterval(() => {
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send('PING')
+        }
+      }, 5_000)
+    }
+
+    function stopHeartbeat() {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer)
+        heartbeatTimer = null
+      }
     }
 
     function handleOpen() {
@@ -140,6 +173,7 @@ export function useLiveCommentsChannel({ eventSlug, user, enabled }: LiveComment
       }
       setStatus('connecting')
       ws.send(buildSubscriptionPayload('subscribe'))
+      startHeartbeat()
     }
 
     function handleCommentCreated(payload: LiveCommentPayload) {
@@ -312,6 +346,7 @@ export function useLiveCommentsChannel({ eventSlug, user, enabled }: LiveComment
     }
 
     function handleClose() {
+      stopHeartbeat()
       if (!isActive) {
         return
       }
@@ -345,6 +380,7 @@ export function useLiveCommentsChannel({ eventSlug, user, enabled }: LiveComment
 
     return () => {
       isActive = false
+      stopHeartbeat()
       setStatus('offline')
       clearReconnect()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
@@ -359,7 +395,7 @@ export function useLiveCommentsChannel({ eventSlug, user, enabled }: LiveComment
         ws.close()
       }
     }
-  }, [queryClient, shouldConnect, eventSlug, wsUrl])
+  }, [queryClient, shouldConnect, eventSlug, gammaEventId, wsUrl])
 
   return { status: shouldConnect ? status : 'offline' }
 }

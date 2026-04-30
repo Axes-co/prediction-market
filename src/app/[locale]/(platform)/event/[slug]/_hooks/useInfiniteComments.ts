@@ -30,20 +30,6 @@ async function parseApiError(response: Response, fallback: string): Promise<stri
   return fallback
 }
 
-function hasPositivePositions(positions?: Comment['positions']) {
-  if (!Array.isArray(positions)) {
-    return false
-  }
-
-  return positions.some((position) => {
-    if (!position) {
-      return false
-    }
-    const amount = typeof position.amount === 'number' ? position.amount : Number(position.amount)
-    return Number.isFinite(amount) && amount > 0
-  })
-}
-
 export function useInfiniteComments(
   eventSlug: string,
   sortBy: CommentSort,
@@ -108,12 +94,12 @@ export function useInfiniteComments(
     if (!data || !data.pages) {
       return []
     }
-    const flattened = data.pages.flat()
-    if (!holdersOnly) {
-      return flattened
-    }
-    return flattened.filter(comment => hasPositivePositions(comment.positions))
-  }, [data, holdersOnly])
+    // Server already applies `holders_only=true` filtering when the query
+    // param is present. The native comment row schema does not store
+    // per-comment positions, so filtering client-side on `comment.positions`
+    // wiped the entire list. Trust the server result.
+    return data.pages.flat()
+  }, [data])
 
   const fetchNextPageWithErrorHandling = useCallback(async () => {
     try {

@@ -98,18 +98,24 @@ const config: NextConfig = {
     SITE_URL: siteUrl,
     SENTRY_DSN: process.env.SENTRY_DSN,
     REOWN_APPKIT_PROJECT_ID: process.env.REOWN_APPKIT_PROJECT_ID,
-    CREATE_MARKET_URL: process.env.CREATE_MARKET_URL ?? 'https://create-market.axes.co',
-    GAMMA_URL: process.env.GAMMA_URL ?? 'https://gamma-api.axes.co',
-    GEOBLOCK_URL: process.env.GEOBLOCK_URL ?? 'https://geoblock.axes.co',
-    CLOB_URL: process.env.CLOB_URL ?? 'https://clob.axes.co',
-    RELAYER_URL: process.env.RELAYER_URL ?? 'https://relayer.axes.co',
-    DATA_URL: process.env.DATA_URL ?? 'https://data-api.axes.co',
-    USER_PNL_URL: process.env.USER_PNL_URL ?? 'https://user-pnl-api.axes.co',
-    COMMUNITY_URL: process.env.COMMUNITY_URL ?? 'https://community.axes.co',
-    SDK_DOWNLOAD_URL: process.env.SDK_DOWNLOAD_URL ?? 'https://sdk-download.axes.co',
-    PRICE_REFERENCE_URL: process.env.PRICE_REFERENCE_URL ?? 'https://price-reference.axes.co',
-    WS_CLOB_URL: process.env.WS_CLOB_URL ?? 'wss://ws-subscriptions-clob.axes.co',
-    WS_LIVE_DATA_URL: process.env.WS_LIVE_DATA_URL ?? 'wss://ws-live-data.axes.co',
+    GAMMA_URL: process.env.GAMMA_URL ?? 'https://gamma-api.polymarket.com',
+    CLOB_URL: process.env.CLOB_URL ?? 'https://clob.polymarket.com',
+    DATA_URL: process.env.DATA_URL ?? 'https://data-api.polymarket.com',
+    WS_CLOB_URL: process.env.WS_CLOB_URL ?? 'wss://ws-subscriptions-clob.polymarket.com',
+    WS_LIVE_DATA_URL: process.env.WS_LIVE_DATA_URL ?? 'wss://ws-live-data.polymarket.com',
+    // Builder code is a public bytes32 attribution identifier signed into
+    // every order's `builder` field (`src/lib/orders/index.ts:resolveBuilderCode`).
+    // It is read from `process.env` on the client side at order-build time, so
+    // it must be exposed through `next.config.ts:env` to make it available in
+    // the browser bundle. Builder *secrets* (`POLYMARKET_BUILDER_API_KEY`,
+    // `POLYMARKET_BUILDER_SECRET`, `POLYMARKET_BUILDER_PASSPHRASE`) stay
+    // server-only and intentionally do NOT appear here.
+    POLYMARKET_BUILDER_CODE: process.env.POLYMARKET_BUILDER_CODE ?? '',
+    CREATE_MARKET_URL: process.env.CREATE_MARKET_URL ?? '',
+    USER_PNL_URL: process.env.USER_PNL_URL ?? '',
+    COMMUNITY_URL: process.env.COMMUNITY_URL ?? '',
+    SDK_DOWNLOAD_URL: process.env.SDK_DOWNLOAD_URL ?? '',
+    PRICE_REFERENCE_URL: process.env.PRICE_REFERENCE_URL ?? '',
   },
 }
 

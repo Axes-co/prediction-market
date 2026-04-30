@@ -97,7 +97,10 @@ export default function SettingsProfileContent({ user }: { user: User }) {
     const selectedImageFile = isSelectedImageFile(imageFile) ? imageFile : null
     const hasUsernameChange = username.length > 0 && username !== user.username
 
-    const shouldUpdateCommunity = hasUsernameChange || Boolean(selectedImageFile)
+    // The kuest community service exposed `/profile` for username + avatar
+    // sync. Polymarket has no public profile-write API, so when COMMUNITY_URL
+    // is unset we skip the remote sync and update only the local user record.
+    const shouldUpdateCommunity = Boolean(communityApiUrl) && (hasUsernameChange || Boolean(selectedImageFile))
 
     let communityUsername = username
     let updatedAvatarUrl: string | undefined

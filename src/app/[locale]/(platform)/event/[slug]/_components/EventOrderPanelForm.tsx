@@ -839,7 +839,6 @@ export default function EventOrderPanelForm({
     () => buildUserOpenOrdersQueryKey(user?.id, event.slug),
     [event.slug, user?.id],
   )
-  const isNegRiskEnabled = Boolean(event.enable_neg_risk)
   const isNegRiskMarket = typeof activeMarket?.neg_risk === 'boolean'
     ? activeMarket.neg_risk
     : Boolean(event.enable_neg_risk || event.neg_risk)
@@ -873,7 +872,7 @@ export default function EventOrderPanelForm({
     currentTimestamp,
     resolveDisplayOutcomeLabel,
   })
-  const orderDomain = useMemo(() => getExchangeEip712Domain(isNegRiskEnabled), [isNegRiskEnabled])
+  const orderDomain = useMemo(() => getExchangeEip712Domain(isNegRiskMarket), [isNegRiskMarket])
   const { positionsQuery, aggregatedPositionShares } = useEventOrderPanelPositions({
     makerAddress,
     conditionId: activeMarket?.condition_id,

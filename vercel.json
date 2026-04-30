@@ -3,8 +3,20 @@
   "buildCommand": "npm run db:push && next build",
   "crons": [
     {
-      "path": "/api/sync/events",
+      "path": "/api/sync/gamma",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/sync/tags",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/sync/gamma-comments",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/sync/users",
+      "schedule": "*/30 * * * *"
     },
     {
       "path": "/api/sync/resolution",
