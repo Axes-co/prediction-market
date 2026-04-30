@@ -1758,6 +1758,21 @@ export const EventRepository = {
           switch (sortBy) {
             case 'volume':
               return [desc(totalVolumeOrder), desc(events.created_at)]
+            case 'liquidity':
+              // Use liquidity_clob (CLOB-side liquidity Polymarket exposes) and
+              // fall back to event.liquidity if the CLOB value is null. Both
+              // columns are populated by the gamma sync (migration 2026_04_30_002).
+              return [
+                sql`COALESCE(${events.liquidity_clob}, ${events.liquidity}, 0) DESC NULLS LAST`,
+                desc(events.created_at),
+              ]
+            case 'competitive':
+              // Polymarket's "competitive" coefficient is a 0..1 tightness score
+              // (closer to 1 = closer to 50/50). Higher first.
+              return [
+                sql`${events.competitive} DESC NULLS LAST`,
+                desc(events.created_at),
+              ]
             case 'created_at':
               return [desc(events.created_at)]
             case 'end_date':

@@ -34,6 +34,7 @@ import {
   getOutcomeLabelForMarket,
   getTopMarketIds,
   resolveEventHistoryEndAt,
+  shouldHideEventChart,
 } from '@/app/[locale]/(platform)/event/[slug]/_utils/EventChartUtils'
 import { isTweetMarketsEvent } from '@/app/[locale]/(platform)/event/[slug]/_utils/eventTweetMarkets'
 import SiteLogoIcon from '@/components/SiteLogoIcon'
@@ -133,8 +134,11 @@ function EventChartComponent({
   const user = useUser()
   const userAddress = getUserPublicAddress(user)
   const isSingleMarket = useIsSingleMarket()
-  const isNegRiskEnabled = Boolean(event.enable_neg_risk || event.neg_risk)
-  const shouldHideChart = !isSingleMarket && !isNegRiskEnabled
+  // Use the shared `shouldHideEventChart` predicate so this gate stays
+  // aligned with `EventContent`. When the two diverged
+  // (`show_all_outcomes` was missing here), category multi-outcome events
+  // rendered an empty `min-h-96` block above the meta-info row.
+  const shouldHideChart = shouldHideEventChart(event)
   const shouldFetchChartData = !shouldHideChart
   const chartSettings = useSyncExternalStore(
     subscribeToChartSettings,

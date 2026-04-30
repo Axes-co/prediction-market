@@ -87,12 +87,14 @@ export function resolvePredictionResultsApiSort(sort: PredictionResultsSortOptio
   switch (sort) {
     case 'volume':
       return 'volume'
+    case 'liquidity':
+      return 'liquidity'
+    case 'competitive':
+      return 'competitive'
     case 'newest':
       return 'created_at'
     case 'ending-soon':
       return 'end_date'
-    case 'liquidity':
-    case 'competitive':
     case 'trending':
     default:
       return 'trending'

@@ -9,6 +9,26 @@ export function getMaxSeriesCount() {
   return MAX_SERIES
 }
 
+/**
+ * Single source of truth for whether the event chart frame should be hidden.
+ * Both `EventContent` (which decides the outer container height reservation)
+ * and `EventChart` (which returns either the chart canvas or meta-info row)
+ * must use the same answer — otherwise an event renders an empty
+ * `min-h-96` block on top of the meta-info row when the gates disagree.
+ *
+ * The chart is shown for any event where one of:
+ *   - it has a single market (binary YES/NO), OR
+ *   - it is a neg-risk event (each market is one chart series), OR
+ *   - it is a `show_all_outcomes` event (Polymarket's flag for category
+ *     events that present multiple discrete options on a single chart).
+ */
+export function shouldHideEventChart(event: Pick<Event, 'total_markets_count' | 'enable_neg_risk' | 'neg_risk' | 'show_all_outcomes'>): boolean {
+  const isMultiMarket = (event.total_markets_count ?? 0) > 1
+  const isNegRiskEnabled = Boolean(event.enable_neg_risk || event.neg_risk)
+  const showAllOutcomes = Boolean(event.show_all_outcomes)
+  return isMultiMarket && !isNegRiskEnabled && !showAllOutcomes
+}
+
 export function areNumberMapsEqual(a: Record<string, number>, b: Record<string, number>) {
   const aKeys = Object.keys(a)
   const bKeys = Object.keys(b)

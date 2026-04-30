@@ -121,7 +121,9 @@ describe('prediction search helpers', () => {
 
   it('maps prediction sorts to API sorts', () => {
     expect(resolvePredictionResultsApiSort('trending')).toBe('trending')
-    expect(resolvePredictionResultsApiSort('competitive')).toBe('trending')
+    expect(resolvePredictionResultsApiSort('volume')).toBe('volume')
+    expect(resolvePredictionResultsApiSort('liquidity')).toBe('liquidity')
+    expect(resolvePredictionResultsApiSort('competitive')).toBe('competitive')
     expect(resolvePredictionResultsApiSort('newest')).toBe('created_at')
     expect(resolvePredictionResultsApiSort('ending-soon')).toBe('end_date')
   })

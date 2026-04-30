@@ -20,6 +20,7 @@ import EventSingleMarketOrderBook from '@/app/[locale]/(platform)/event/[slug]/_
 import EventTabs from '@/app/[locale]/(platform)/event/[slug]/_components/EventTabs'
 import ResolutionTimelinePanel from '@/app/[locale]/(platform)/event/[slug]/_components/ResolutionTimelinePanel'
 import { resolveEventOrderBootstrapSelection } from '@/app/[locale]/(platform)/event/[slug]/_utils/event-order-bootstrap-selection'
+import { shouldHideEventChart } from '@/app/[locale]/(platform)/event/[slug]/_utils/EventChartUtils'
 import {
   resolveEventResolvedOutcomeIndex,
   toResolutionTimelineOutcome,
@@ -508,9 +509,12 @@ export default function EventContent({
   const viewportWidth = windowViewport.viewportWidth
   const currentUser = clientUser ?? user
   const isNegRiskEnabled = Boolean(event.enable_neg_risk || event.neg_risk)
-  const shouldHideChart = event.total_markets_count > 1
-    && !isNegRiskEnabled
-    && !event.show_all_outcomes
+  // Single source of truth in `EventChartUtils.shouldHideEventChart`. The
+  // outer container height reservation (`min-h-96`) and the inner chart
+  // canvas gate must agree — when they disagreed (`show_all_outcomes` was
+  // missing from the inner gate), multi-outcome events rendered an empty
+  // `min-h-96` block on top of the meta-info row.
+  const shouldHideChart = shouldHideEventChart(event)
   const orderBootstrapTargetMarket = useMemo(
     () => resolveBootstrapTargetMarket(event, marketSlug),
     [event, marketSlug],

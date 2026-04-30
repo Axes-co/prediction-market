@@ -1,6 +1,8 @@
 export const EVENT_LIST_SORT_OPTIONS = [
   'trending',
   'volume',
+  'liquidity',
+  'competitive',
   'created_at',
   'end_date',
 ] as const
