@@ -75,3 +75,51 @@ export function decimalString(value: unknown): string {
   }
   return '0'
 }
+
+/**
+ * Same as `decimalString` but returns null instead of '0' when the input is
+ * missing or unparseable. Use for nullable numeric columns where we need to
+ * distinguish "Gamma didn't tell us" from "value is zero".
+ */
+export function decimalStringOrNull(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value.toString()
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      return null
+    }
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed)) {
+      return parsed.toString()
+    }
+  }
+  return null
+}
+
+/**
+ * Boolean parser that returns null when the value is absent. Use for nullable
+ * boolean columns where we need to preserve "Gamma didn't tell us" semantics.
+ */
+export function booleanFlagOrNull(value: unknown): boolean | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (typeof value === 'boolean') {
+    return value
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim().toLowerCase()
+    if (trimmed === 'true') {
+      return true
+    }
+    if (trimmed === 'false') {
+      return false
+    }
+  }
+  return null
+}

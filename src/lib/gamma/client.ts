@@ -2,12 +2,21 @@ import type { GammaKeysetPage } from './types'
 
 export type GammaEventOrder = 'volume' | 'createdAt' | 'endDate'
 
+/**
+ * Lifecycle state filter passed to Gamma's `/events/keyset`. The Polymarket
+ * UI uses these to scope event lists; we pull every state by default so
+ * profile pages, history widgets, and search all have full coverage.
+ */
+export type GammaEventState = 'all' | 'active' | 'closed' | 'archived'
+
 export interface GammaClientOptions {
   baseUrl?: string
   pageSize?: number
   requestTimeoutMs?: number
   fetcher?: typeof fetch
   order?: GammaEventOrder
+  /** Default `'all'` so the sync covers every Polymarket event. */
+  state?: GammaEventState
 }
 
 const DEFAULT_BASE_URL = 'https://gamma-api.polymarket.com'
@@ -15,6 +24,30 @@ const DEFAULT_PAGE_SIZE = 100
 const DEFAULT_TIMEOUT_MS = 20_000
 const MAX_PAGE_SIZE = 500
 const DEFAULT_ORDER: GammaEventOrder = 'volume'
+const DEFAULT_STATE: GammaEventState = 'all'
+
+function applyStateFilter(params: URLSearchParams, state: GammaEventState): void {
+  switch (state) {
+    case 'active':
+      params.set('closed', 'false')
+      params.set('active', 'true')
+      params.set('archived', 'false')
+      break
+    case 'closed':
+      params.set('closed', 'true')
+      params.set('active', 'false')
+      params.set('archived', 'false')
+      break
+    case 'archived':
+      params.set('archived', 'true')
+      break
+    case 'all':
+      // Omit closed/active/archived flags entirely so Gamma returns every
+      // event regardless of lifecycle state. Verified against
+      // `https://gamma-api.polymarket.com/events/keyset` (no filters).
+      break
+  }
+}
 
 export class GammaClient {
   private readonly baseUrl: string
@@ -22,6 +55,7 @@ export class GammaClient {
   private readonly requestTimeoutMs: number
   private readonly fetcher: typeof fetch
   private readonly order: GammaEventOrder
+  private readonly state: GammaEventState
 
   constructor(options: GammaClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? process.env.GAMMA_URL ?? DEFAULT_BASE_URL).replace(/\/$/, '')
@@ -30,18 +64,22 @@ export class GammaClient {
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS
     this.fetcher = options.fetcher ?? fetch
     this.order = options.order ?? DEFAULT_ORDER
+    this.state = options.state ?? DEFAULT_STATE
   }
 
-  async fetchActiveEventsPage(cursor: string | null): Promise<GammaKeysetPage> {
+  /**
+   * Fetch one page of events from `/events/keyset`. Renamed from the original
+   * `fetchActiveEventsPage` because the default state is now `all` (every
+   * lifecycle), not `active`-only.
+   */
+  async fetchEventsPage(cursor: string | null): Promise<GammaKeysetPage> {
     const params = new URLSearchParams({
       limit: String(this.pageSize),
-      closed: 'false',
-      active: 'true',
-      archived: 'false',
       include_tags: 'true',
       order: this.order,
       ascending: 'false',
     })
+    applyStateFilter(params, this.state)
     if (cursor) {
       params.set('after_cursor', cursor)
     }
@@ -64,6 +102,14 @@ export class GammaClient {
         ? payload.next_cursor
         : null,
     }
+  }
+
+  /**
+   * Back-compat alias for callers/tests still using the old name. Both methods
+   * issue the same query — the state is determined by the constructor option.
+   */
+  async fetchActiveEventsPage(cursor: string | null): Promise<GammaKeysetPage> {
+    return this.fetchEventsPage(cursor)
   }
 
   private async requestWithTimeout(url: string): Promise<Response> {

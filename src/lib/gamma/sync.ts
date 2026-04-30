@@ -53,6 +53,7 @@ export interface GammaSyncResult {
 }
 
 const DEFAULT_TIME_LIMIT_MS = 250_000
+const POLYMARKET_GAMMA_URL = 'https://gamma-api.polymarket.com'
 
 export async function runGammaSync(options: GammaSyncOptions = {}): Promise<GammaSyncResult> {
   const startedAt = Date.now()
@@ -114,8 +115,9 @@ async function resolveGammaSources(options: GammaSyncOptions): Promise<ResolvedG
     return registered
   }
 
-  const fallback = normalizeSourceUrl(process.env.GAMMA_URL ?? '')
-  return fallback.length > 0 ? [buildSourceFromUrl(fallback)] : []
+  const explicit = normalizeSourceUrl(process.env.GAMMA_URL ?? '')
+  const fallback = explicit.length > 0 ? explicit : POLYMARKET_GAMMA_URL
+  return [buildSourceFromUrl(fallback)]
 }
 
 function buildSourceFromUrl(url: string): ResolvedGammaSource {

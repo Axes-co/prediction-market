@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isCronAuthorized } from '@/lib/auth-cron'
 import { runGammaSync } from '@/lib/gamma/sync'
+import { resetGammaSyncCursors, wipeGammaSourcedData } from '@/lib/gamma/wipe'
 
 export const maxDuration = 300
 
@@ -15,15 +16,35 @@ export async function GET(request: Request) {
   const maxPagesPerSource = parsePositiveInt(url.searchParams.get('maxPages'))
   const sourceOverride = url.searchParams.get('source')?.trim()
   const sourceUrls = sourceOverride ? [sourceOverride] : undefined
+  // Destructive: clears every events/markets/conditions/outcomes row plus the
+  // cascading children (comments, event_tags, event_translations, etc.) so
+  // the next sync pass re-populates from scratch with the current mapper
+  // output. Useful after a schema migration that adds columns the old data
+  // couldn't carry. Cron-authed; not exposed on a non-cron path.
+  const wipe = url.searchParams.get('wipe') === 'true'
+  const clearTags = url.searchParams.get('clearTags') === 'true'
+  // Non-destructive: keep rows in place, just rewind cursors so the next pass
+  // re-paginates from offset 0 of the volume-sorted feed.
+  const resetCursors = url.searchParams.get('resetCursors') === 'true'
 
   try {
+    let wipeResult: { events_deleted: number, conditions_deleted: number, tags_deleted: number } | null = null
+    if (wipe) {
+      wipeResult = await wipeGammaSourcedData({ clearTags })
+    }
+    else if (resetCursors) {
+      await resetGammaSyncCursors()
+    }
+
     const result = await runGammaSync({
-      startCursor,
+      // After a wipe/reset the persisted cursor was cleared, so an explicit
+      // `?cursor=` override is the only way to resume mid-feed.
+      startCursor: wipe || resetCursors ? null : startCursor,
       pageSize,
       maxPagesPerSource,
       sourceUrls,
     })
-    return NextResponse.json({ success: true, ...result })
+    return NextResponse.json({ success: true, wipe: wipeResult, ...result })
   }
   catch (error) {
     const message = error instanceof Error ? error.message : 'unknown gamma-sync error'

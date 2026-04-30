@@ -51,6 +51,21 @@ export interface Event {
   resolved_at?: string | null
   created_at: string
   updated_at: string
+  // Gamma response field parity (migration 2026_04_30_002).
+  volume_24h?: number | string | null
+  volume_week?: number | string | null
+  volume_month?: number | string | null
+  volume_year?: number | string | null
+  open_interest?: number | string | null
+  liquidity?: number | string | null
+  competitive?: number | string | null
+  ticker?: string | null
+  enable_order_book?: boolean | null
+  gamma_active?: boolean | null
+  gamma_closed?: boolean | null
+  gamma_archived?: boolean | null
+  creation_date?: string | null
+  gamma_updated_at?: string | null
   markets: Market[]
   tags: {
     id: number
@@ -134,6 +149,40 @@ export interface Market {
   updated_at: string
   price: number
   probability: number
+  // Gamma response field parity (migration 2026_04_30_002). All optional —
+  // older rows or sync passes that miss the data leave these null.
+  gamma_market_id?: number | null
+  outcome_prices?: (string | null)[] | null
+  last_trade_price?: number | string | null
+  best_bid?: number | string | null
+  best_ask?: number | string | null
+  spread?: number | string | null
+  one_week_price_change?: number | string | null
+  one_month_price_change?: number | string | null
+  competitive?: number | string | null
+  accepting_orders?: boolean | null
+  accepting_orders_at?: string | null
+  enable_order_book?: boolean | null
+  order_price_min_tick_size?: number | string | null
+  order_min_size?: number | string | null
+  group_item_threshold?: number | string | null
+  liquidity?: number | string | null
+  liquidity_clob?: number | string | null
+  volume_week?: number | string | null
+  volume_month?: number | string | null
+  volume_year?: number | string | null
+  volume_clob?: number | string | null
+  volume_24h_clob?: number | string | null
+  volume_week_clob?: number | string | null
+  volume_month_clob?: number | string | null
+  volume_year_clob?: number | string | null
+  uma_bond?: number | string | null
+  uma_reward?: number | string | null
+  fee_type?: string | null
+  fee_schedule?: Record<string, unknown> | null
+  fees_enabled?: boolean | null
+  restricted?: boolean | null
+  featured?: boolean | null
   outcomes: Outcome[]
   condition: Condition
 }
@@ -156,6 +205,10 @@ export interface Outcome {
   payout_value?: number
   buy_price?: number
   sell_price?: number
+  /** Live-fill snapshot from CLOB `/last-trades-prices`. Runtime only. */
+  last_trade_price?: number
+  /** Latest snapshot of this outcome's `outcomePrices[index]` from Gamma. */
+  price?: number | string | null
   created_at: string
   updated_at: string
 }

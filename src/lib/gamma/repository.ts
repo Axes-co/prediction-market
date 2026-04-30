@@ -32,174 +32,186 @@ export interface MarketBatchUpsertResult {
   urlSetChanged: boolean
 }
 
+/**
+ * Single ON CONFLICT DO UPDATE upsert for events. The "listAffectingChange"
+ * semantic (used to invalidate the events list cache tag) is preserved by
+ * snapshotting the cache-relevant columns before the upsert and diffing them
+ * against the mapped values afterwards. Adding new Gamma fields here means
+ * extending `EVENT_UPDATE_SET` only — no parallel diff branch to keep in
+ * sync.
+ */
+const EVENT_LIST_AFFECTING_FIELDS = [
+  'title',
+  'restricted',
+  'featured',
+  'start_date',
+  'end_date',
+  'gamma_active',
+  'gamma_closed',
+  'gamma_archived',
+] as const
+
 export async function upsertEvent(mapped: MappedEvent): Promise<EventUpsertResult> {
   const existing = await db
     .select({
       id: eventsTable.id,
       title: eventsTable.title,
-      icon_url: eventsTable.icon_url,
-      enable_neg_risk: eventsTable.enable_neg_risk,
-      neg_risk_augmented: eventsTable.neg_risk_augmented,
-      neg_risk: eventsTable.neg_risk,
-      show_all_outcomes: eventsTable.show_all_outcomes,
-      neg_risk_market_id: eventsTable.neg_risk_market_id,
-      gamma_event_id: eventsTable.gamma_event_id,
-      comment_count: eventsTable.comment_count,
       restricted: eventsTable.restricted,
-      liquidity_clob: eventsTable.liquidity_clob,
       featured: eventsTable.featured,
-      featured_order: eventsTable.featured_order,
       start_date: eventsTable.start_date,
       end_date: eventsTable.end_date,
-      rules: eventsTable.rules,
-      show_market_icons: eventsTable.show_market_icons,
+      gamma_active: eventsTable.gamma_active,
+      gamma_closed: eventsTable.gamma_closed,
+      gamma_archived: eventsTable.gamma_archived,
     })
     .from(eventsTable)
     .where(eq(eventsTable.slug, mapped.slug))
     .limit(1)
 
+  const insertValues = buildEventInsertValues(mapped)
+  const upserted = await db
+    .insert(eventsTable)
+    .values(insertValues)
+    .onConflictDoUpdate({
+      target: eventsTable.slug,
+      set: buildEventUpdateSet(),
+    })
+    .returning({ id: eventsTable.id })
+
+  const eventId = upserted[0]?.id
+  if (!eventId) {
+    throw new Error(`event upsert produced no id for slug ${mapped.slug}`)
+  }
+
   if (!existing[0]) {
-    const inserted = await db
-      .insert(eventsTable)
-      .values({
-        slug: mapped.slug,
-        title: mapped.title,
-        icon_url: mapped.iconUrl,
-        rules: mapped.rules,
-        enable_neg_risk: mapped.enableNegRisk,
-        neg_risk_augmented: mapped.negRiskAugmented,
-        neg_risk: mapped.negRisk,
-        show_all_outcomes: mapped.showAllOutcomes,
-        neg_risk_market_id: mapped.negRiskMarketId,
-        gamma_event_id: mapped.gammaEventId,
-        comment_count: mapped.commentCount,
-        restricted: mapped.restricted,
-        liquidity_clob: mapped.liquidityClob,
-        featured: mapped.featured,
-        featured_order: mapped.featuredOrder,
-        show_market_icons: mapped.showMarketIcons,
-        start_date: mapped.startDate,
-        end_date: mapped.endDate,
-        status: 'active',
-        created_at: mapped.createdAt,
-      })
-      .onConflictDoNothing({ target: eventsTable.slug })
-      .returning({ id: eventsTable.id })
-
-    if (inserted[0]?.id) {
-      return {
-        eventId: inserted[0].id,
-        inserted: true,
-        changed: true,
-        listAffectingChange: true,
-      }
-    }
-
-    const racedRow = await db
-      .select({ id: eventsTable.id })
-      .from(eventsTable)
-      .where(eq(eventsTable.slug, mapped.slug))
-      .limit(1)
-    if (!racedRow[0]?.id) {
-      throw new Error(`event upsert lost the race and could not relocate slug ${mapped.slug}`)
-    }
-    return {
-      eventId: racedRow[0].id,
-      inserted: false,
-      changed: false,
-      listAffectingChange: false,
-    }
+    return { eventId, inserted: true, changed: true, listAffectingChange: true }
   }
 
   const row = existing[0]
-  const updates: Record<string, unknown> = {}
-  let changed = false
   let listAffectingChange = false
-
-  if (row.title !== mapped.title) {
-    updates.title = mapped.title
-    changed = true
-    listAffectingChange = true
+  const incomingByField: Record<(typeof EVENT_LIST_AFFECTING_FIELDS)[number], unknown> = {
+    title: mapped.title,
+    restricted: mapped.restricted,
+    featured: mapped.featured,
+    start_date: toIso(mapped.startDate),
+    end_date: toIso(mapped.endDate),
+    gamma_active: mapped.gammaActive,
+    gamma_closed: mapped.gammaClosed,
+    gamma_archived: mapped.gammaArchived,
   }
-  if ((row.icon_url ?? null) !== mapped.iconUrl) {
-    updates.icon_url = mapped.iconUrl
-    changed = true
+  const existingByField: Record<(typeof EVENT_LIST_AFFECTING_FIELDS)[number], unknown> = {
+    title: row.title,
+    restricted: row.restricted ?? false,
+    featured: row.featured ?? false,
+    start_date: toIso(row.start_date),
+    end_date: toIso(row.end_date),
+    gamma_active: row.gamma_active,
+    gamma_closed: row.gamma_closed,
+    gamma_archived: row.gamma_archived,
   }
-  if (row.enable_neg_risk !== mapped.enableNegRisk) {
-    updates.enable_neg_risk = mapped.enableNegRisk
-    changed = true
-  }
-  if (row.neg_risk_augmented !== mapped.negRiskAugmented) {
-    updates.neg_risk_augmented = mapped.negRiskAugmented
-    changed = true
-  }
-  if (row.neg_risk !== mapped.negRisk) {
-    updates.neg_risk = mapped.negRisk
-    changed = true
-  }
-  if (row.show_all_outcomes !== mapped.showAllOutcomes) {
-    updates.show_all_outcomes = mapped.showAllOutcomes
-    changed = true
-  }
-  if ((row.neg_risk_market_id ?? null) !== mapped.negRiskMarketId) {
-    updates.neg_risk_market_id = mapped.negRiskMarketId
-    changed = true
-  }
-  if ((row.gamma_event_id ?? null) !== mapped.gammaEventId) {
-    updates.gamma_event_id = mapped.gammaEventId
-    changed = true
-  }
-  if ((row.comment_count ?? 0) !== mapped.commentCount) {
-    updates.comment_count = mapped.commentCount
-    changed = true
-  }
-  if ((row.restricted ?? false) !== mapped.restricted) {
-    updates.restricted = mapped.restricted
-    changed = true
-    listAffectingChange = true
-  }
-  if ((row.liquidity_clob ?? null) !== mapped.liquidityClob) {
-    updates.liquidity_clob = mapped.liquidityClob
-    changed = true
-  }
-  if ((row.featured ?? false) !== mapped.featured) {
-    updates.featured = mapped.featured
-    changed = true
-    listAffectingChange = true
-  }
-  if ((row.featured_order ?? null) !== mapped.featuredOrder) {
-    updates.featured_order = mapped.featuredOrder
-    changed = true
-  }
-  if (toIso(row.start_date) !== toIso(mapped.startDate)) {
-    updates.start_date = mapped.startDate
-    changed = true
-    listAffectingChange = true
-  }
-  if (toIso(row.end_date) !== toIso(mapped.endDate)) {
-    updates.end_date = mapped.endDate
-    changed = true
-    listAffectingChange = true
-  }
-  if ((row.rules ?? null) !== mapped.rules) {
-    updates.rules = mapped.rules
-    changed = true
-  }
-  if (row.show_market_icons !== mapped.showMarketIcons) {
-    updates.show_market_icons = mapped.showMarketIcons
-    changed = true
+  for (const field of EVENT_LIST_AFFECTING_FIELDS) {
+    if (incomingByField[field] !== existingByField[field]) {
+      listAffectingChange = true
+      break
+    }
   }
 
-  if (changed) {
-    updates.updated_at = new Date()
-    await db.update(eventsTable).set(updates).where(eq(eventsTable.id, row.id))
-  }
+  // We always upsert (new fields like `last_trade_price` change every sync
+  // pass), so `changed` is effectively always true. The downstream cache
+  // invalidation logic only cares about `listAffectingChange`.
+  return { eventId, inserted: false, changed: true, listAffectingChange }
+}
 
+function deriveEventStatus(mapped: MappedEvent): 'active' | 'resolved' | 'archived' {
+  // Gamma exposes `closed` (resolved/settled) and `archived` (deprecated) on
+  // each event. Mirror those to our internal `status` enum so list filters
+  // on `events.status = 'active'` keep closed events out of the home page
+  // even when the sync also pulls historical events.
+  if (mapped.gammaArchived) {
+    return 'archived'
+  }
+  if (mapped.gammaClosed) {
+    return 'resolved'
+  }
+  return 'active'
+}
+
+function buildEventInsertValues(mapped: MappedEvent): typeof eventsTable.$inferInsert {
   return {
-    eventId: row.id,
-    inserted: false,
-    changed,
-    listAffectingChange,
+    slug: mapped.slug,
+    title: mapped.title,
+    icon_url: mapped.iconUrl,
+    rules: mapped.rules,
+    enable_neg_risk: mapped.enableNegRisk,
+    neg_risk_augmented: mapped.negRiskAugmented,
+    neg_risk: mapped.negRisk,
+    show_all_outcomes: mapped.showAllOutcomes,
+    neg_risk_market_id: mapped.negRiskMarketId,
+    gamma_event_id: mapped.gammaEventId,
+    comment_count: mapped.commentCount,
+    restricted: mapped.restricted,
+    liquidity_clob: mapped.liquidityClob,
+    featured: mapped.featured,
+    featured_order: mapped.featuredOrder,
+    show_market_icons: mapped.showMarketIcons,
+    start_date: mapped.startDate,
+    end_date: mapped.endDate,
+    status: deriveEventStatus(mapped),
+    volume: mapped.volume,
+    volume_24h: mapped.volume24h,
+    volume_week: mapped.volumeWeek,
+    volume_month: mapped.volumeMonth,
+    volume_year: mapped.volumeYear,
+    open_interest: mapped.openInterest,
+    liquidity: mapped.liquidity,
+    competitive: mapped.competitive,
+    ticker: mapped.ticker,
+    enable_order_book: mapped.enableOrderBook,
+    gamma_active: mapped.gammaActive,
+    gamma_closed: mapped.gammaClosed,
+    gamma_archived: mapped.gammaArchived,
+    creation_date: mapped.creationDate,
+    gamma_updated_at: mapped.gammaUpdatedAt,
+    created_at: mapped.createdAt,
+  }
+}
+
+function buildEventUpdateSet() {
+  return {
+    title: sql`excluded.title`,
+    icon_url: sql`excluded.icon_url`,
+    rules: sql`excluded.rules`,
+    enable_neg_risk: sql`excluded.enable_neg_risk`,
+    neg_risk_augmented: sql`excluded.neg_risk_augmented`,
+    neg_risk: sql`excluded.neg_risk`,
+    show_all_outcomes: sql`excluded.show_all_outcomes`,
+    neg_risk_market_id: sql`excluded.neg_risk_market_id`,
+    gamma_event_id: sql`excluded.gamma_event_id`,
+    comment_count: sql`excluded.comment_count`,
+    restricted: sql`excluded.restricted`,
+    liquidity_clob: sql`excluded.liquidity_clob`,
+    featured: sql`excluded.featured`,
+    featured_order: sql`excluded.featured_order`,
+    show_market_icons: sql`excluded.show_market_icons`,
+    start_date: sql`excluded.start_date`,
+    end_date: sql`excluded.end_date`,
+    status: sql`excluded.status`,
+    volume: sql`excluded.volume`,
+    volume_24h: sql`excluded.volume_24h`,
+    volume_week: sql`excluded.volume_week`,
+    volume_month: sql`excluded.volume_month`,
+    volume_year: sql`excluded.volume_year`,
+    open_interest: sql`excluded.open_interest`,
+    liquidity: sql`excluded.liquidity`,
+    competitive: sql`excluded.competitive`,
+    ticker: sql`excluded.ticker`,
+    enable_order_book: sql`excluded.enable_order_book`,
+    gamma_active: sql`excluded.gamma_active`,
+    gamma_closed: sql`excluded.gamma_closed`,
+    gamma_archived: sql`excluded.gamma_archived`,
+    creation_date: sql`excluded.creation_date`,
+    gamma_updated_at: sql`excluded.gamma_updated_at`,
+    updated_at: sql`NOW()`,
   }
 }
 
@@ -277,6 +289,39 @@ export async function upsertMarketsForEvent(
         volume_24h: sql`excluded.volume_24h`,
         volume: sql`excluded.volume`,
         end_time: sql`excluded.end_time`,
+        // Gamma response field parity (migration 2026_04_30_002).
+        gamma_market_id: sql`excluded.gamma_market_id`,
+        outcome_prices: sql`excluded.outcome_prices`,
+        last_trade_price: sql`excluded.last_trade_price`,
+        best_bid: sql`excluded.best_bid`,
+        best_ask: sql`excluded.best_ask`,
+        spread: sql`excluded.spread`,
+        one_week_price_change: sql`excluded.one_week_price_change`,
+        one_month_price_change: sql`excluded.one_month_price_change`,
+        competitive: sql`excluded.competitive`,
+        accepting_orders: sql`excluded.accepting_orders`,
+        accepting_orders_at: sql`excluded.accepting_orders_at`,
+        enable_order_book: sql`excluded.enable_order_book`,
+        order_price_min_tick_size: sql`excluded.order_price_min_tick_size`,
+        order_min_size: sql`excluded.order_min_size`,
+        group_item_threshold: sql`excluded.group_item_threshold`,
+        liquidity: sql`excluded.liquidity`,
+        liquidity_clob: sql`excluded.liquidity_clob`,
+        volume_week: sql`excluded.volume_week`,
+        volume_month: sql`excluded.volume_month`,
+        volume_year: sql`excluded.volume_year`,
+        volume_clob: sql`excluded.volume_clob`,
+        volume_24h_clob: sql`excluded.volume_24h_clob`,
+        volume_week_clob: sql`excluded.volume_week_clob`,
+        volume_month_clob: sql`excluded.volume_month_clob`,
+        volume_year_clob: sql`excluded.volume_year_clob`,
+        uma_bond: sql`excluded.uma_bond`,
+        uma_reward: sql`excluded.uma_reward`,
+        fee_type: sql`excluded.fee_type`,
+        fee_schedule: sql`excluded.fee_schedule`,
+        fees_enabled: sql`excluded.fees_enabled`,
+        restricted: sql`excluded.restricted`,
+        featured: sql`excluded.featured`,
         updated_at: sql`excluded.updated_at`,
       },
     })
@@ -291,12 +336,23 @@ export async function upsertMarketsForEvent(
     outcome_text: outcome.outcomeText,
     outcome_index: outcome.outcomeIndex,
     token_id: outcome.tokenId,
+    price: outcome.price,
   })))
   if (allOutcomes.length > 0) {
     await db
       .insert(outcomesTable)
       .values(allOutcomes)
-      .onConflictDoNothing({ target: outcomesTable.token_id })
+      .onConflictDoUpdate({
+        target: outcomesTable.token_id,
+        set: {
+          outcome_text: sql`excluded.outcome_text`,
+          outcome_index: sql`excluded.outcome_index`,
+          // Use COALESCE so a transient null Gamma response (e.g., during a
+          // market pause) doesn't wipe the last known price snapshot.
+          price: sql`COALESCE(excluded.price, ${outcomesTable.price})`,
+          updated_at: sql`NOW()`,
+        },
+      })
   }
 
   let inserted = 0
@@ -346,6 +402,39 @@ function buildMarketInsertValues(mapped: MappedMarket, eventId: string): typeof 
     volume_24h: mapped.volume24h,
     volume: mapped.volume,
     end_time: mapped.endTime,
+    // Gamma response field parity (migration 2026_04_30_002).
+    gamma_market_id: mapped.gammaMarketId,
+    outcome_prices: mapped.outcomes.map(outcome => outcome.price),
+    last_trade_price: mapped.lastTradePrice,
+    best_bid: mapped.bestBid,
+    best_ask: mapped.bestAsk,
+    spread: mapped.spread,
+    one_week_price_change: mapped.oneWeekPriceChange,
+    one_month_price_change: mapped.oneMonthPriceChange,
+    competitive: mapped.competitive,
+    accepting_orders: mapped.acceptingOrders,
+    accepting_orders_at: mapped.acceptingOrdersAt,
+    enable_order_book: mapped.enableOrderBook,
+    order_price_min_tick_size: mapped.orderPriceMinTickSize,
+    order_min_size: mapped.orderMinSize,
+    group_item_threshold: mapped.groupItemThreshold,
+    liquidity: mapped.liquidity,
+    liquidity_clob: mapped.liquidityClob,
+    volume_week: mapped.volumeWeek,
+    volume_month: mapped.volumeMonth,
+    volume_year: mapped.volumeYear,
+    volume_clob: mapped.volumeClob,
+    volume_24h_clob: mapped.volume24hClob,
+    volume_week_clob: mapped.volumeWeekClob,
+    volume_month_clob: mapped.volumeMonthClob,
+    volume_year_clob: mapped.volumeYearClob,
+    uma_bond: mapped.umaBond,
+    uma_reward: mapped.umaReward,
+    fee_type: mapped.feeType,
+    fee_schedule: mapped.feeSchedule,
+    fees_enabled: mapped.feesEnabled,
+    restricted: mapped.restricted,
+    featured: mapped.featured,
     created_at: mapped.createdAt,
     updated_at: mapped.updatedAt,
   }
@@ -373,6 +462,7 @@ export async function upsertStandaloneTags(mappedTags: MappedTag[]): Promise<Sta
     .select({
       id: tagsTable.id,
       slug: tagsTable.slug,
+      gamma_tag_id: tagsTable.gamma_tag_id,
       is_main_category: tagsTable.is_main_category,
       force_show: tagsTable.force_show,
       force_hide: tagsTable.force_hide,
@@ -392,6 +482,7 @@ export async function upsertStandaloneTags(mappedTags: MappedTag[]): Promise<Sta
       .values(toInsert.map(tag => ({
         slug: tag.slug,
         name: tag.name,
+        gamma_tag_id: tag.gammaTagId,
         is_main_category: tag.isMainCategory,
         force_show: tag.forceShow,
         force_hide: tag.forceHide,
@@ -410,6 +501,9 @@ export async function upsertStandaloneTags(mappedTags: MappedTag[]): Promise<Sta
       continue
     }
     const updates: Record<string, unknown> = {}
+    if (incoming.gammaTagId && !existing.gamma_tag_id) {
+      updates.gamma_tag_id = incoming.gammaTagId
+    }
     if (incoming.isMainCategory && existing.is_main_category !== true) {
       updates.is_main_category = true
     }
@@ -448,6 +542,7 @@ export async function linkEventTags(eventId: string, mappedTags: MappedTag[]): P
     .select({
       id: tagsTable.id,
       slug: tagsTable.slug,
+      gamma_tag_id: tagsTable.gamma_tag_id,
       is_main_category: tagsTable.is_main_category,
       force_show: tagsTable.force_show,
       force_hide: tagsTable.force_hide,
@@ -470,6 +565,7 @@ export async function linkEventTags(eventId: string, mappedTags: MappedTag[]): P
       .values(toInsert.map(tag => ({
         slug: tag.slug,
         name: tag.name,
+        gamma_tag_id: tag.gammaTagId,
         is_main_category: tag.isMainCategory,
         force_show: tag.forceShow,
         force_hide: tag.forceHide,
@@ -506,6 +602,9 @@ export async function linkEventTags(eventId: string, mappedTags: MappedTag[]): P
       continue
     }
     const updates: Record<string, unknown> = {}
+    if (incoming.gammaTagId && !existing.gamma_tag_id) {
+      updates.gamma_tag_id = incoming.gammaTagId
+    }
     if (incoming.isMainCategory && existing.is_main_category !== true) {
       updates.is_main_category = true
     }

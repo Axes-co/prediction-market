@@ -107,6 +107,22 @@ export const events = pgTable(
       .default(0),
     total_markets_count: integer()
       .default(0),
+    // Gamma response field parity (migration 2026_04_30_002).
+    volume: numeric({ precision: 30, scale: 6 }),
+    volume_24h: numeric({ precision: 30, scale: 6 }),
+    volume_week: numeric({ precision: 30, scale: 6 }),
+    volume_month: numeric({ precision: 30, scale: 6 }),
+    volume_year: numeric({ precision: 30, scale: 6 }),
+    open_interest: numeric({ precision: 30, scale: 6 }),
+    liquidity: numeric({ precision: 30, scale: 6 }),
+    competitive: numeric({ precision: 10, scale: 6 }),
+    ticker: text(),
+    enable_order_book: boolean(),
+    gamma_active: boolean(),
+    gamma_closed: boolean(),
+    gamma_archived: boolean(),
+    creation_date: timestamp({ withTimezone: true }),
+    gamma_updated_at: timestamp({ withTimezone: true }),
     created_at: timestamp({ withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -282,6 +298,39 @@ export const markets = pgTable(
     volume_24h: numeric({ precision: 20, scale: 6 }).default('0').notNull(),
     volume: numeric({ precision: 20, scale: 6 }).default('0').notNull(),
     end_time: timestamp({ withTimezone: true }),
+    // Gamma response field parity (migration 2026_04_30_002).
+    gamma_market_id: integer(),
+    outcome_prices: jsonb().$type<(string | null)[] | null>(),
+    last_trade_price: numeric({ precision: 20, scale: 6 }),
+    best_bid: numeric({ precision: 20, scale: 6 }),
+    best_ask: numeric({ precision: 20, scale: 6 }),
+    spread: numeric({ precision: 20, scale: 6 }),
+    one_week_price_change: numeric({ precision: 20, scale: 6 }),
+    one_month_price_change: numeric({ precision: 20, scale: 6 }),
+    competitive: numeric({ precision: 10, scale: 6 }),
+    accepting_orders: boolean(),
+    accepting_orders_at: timestamp({ withTimezone: true }),
+    enable_order_book: boolean(),
+    order_price_min_tick_size: numeric({ precision: 10, scale: 6 }),
+    order_min_size: numeric({ precision: 20, scale: 6 }),
+    group_item_threshold: numeric({ precision: 20, scale: 6 }),
+    liquidity: numeric({ precision: 30, scale: 6 }),
+    liquidity_clob: numeric({ precision: 30, scale: 6 }),
+    volume_week: numeric({ precision: 30, scale: 6 }),
+    volume_month: numeric({ precision: 30, scale: 6 }),
+    volume_year: numeric({ precision: 30, scale: 6 }),
+    volume_clob: numeric({ precision: 30, scale: 6 }),
+    volume_24h_clob: numeric({ precision: 30, scale: 6 }),
+    volume_week_clob: numeric({ precision: 30, scale: 6 }),
+    volume_month_clob: numeric({ precision: 30, scale: 6 }),
+    volume_year_clob: numeric({ precision: 30, scale: 6 }),
+    uma_bond: numeric({ precision: 30, scale: 6 }),
+    uma_reward: numeric({ precision: 30, scale: 6 }),
+    fee_type: text(),
+    fee_schedule: jsonb().$type<Record<string, unknown> | null>(),
+    fees_enabled: boolean(),
+    restricted: boolean(),
+    featured: boolean(),
     created_at: timestamp({ withTimezone: true }).defaultNow().notNull(),
     updated_at: timestamp({ withTimezone: true }).defaultNow().notNull(),
   },
@@ -396,6 +445,9 @@ export const outcomes = pgTable(
     token_id: text().notNull().primaryKey(),
     is_winning_outcome: boolean().default(false),
     payout_value: numeric({ precision: 20, scale: 6 }),
+    // Gamma response field parity (migration 2026_04_30_002). Latest snapshot
+    // of the outcome's `outcomePrices[index]` value from the events feed.
+    price: numeric({ precision: 10, scale: 6 }),
     created_at: timestamp({ withTimezone: true }).defaultNow().notNull(),
     updated_at: timestamp({ withTimezone: true }).defaultNow().notNull(),
   },
@@ -417,6 +469,8 @@ export const tags = pgTable(
     force_hide: boolean().notNull().default(false),
     is_carousel: boolean().notNull().default(false),
     published_at: timestamp({ withTimezone: true }),
+    /** Polymarket Gamma's tag id (string). See migration 2026_04_30_003. */
+    gamma_tag_id: text(),
     created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updated_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
@@ -442,6 +496,37 @@ export const polymarket_users = pgTable(
     first_seen_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
     last_seen_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
     source: text().notNull(),
+  },
+)
+
+/**
+ * Proxy-wallet-keyed trader directory. Populated by the leaderboard sync.
+ * Polymarket V2 identifies traders by their proxy wallet on every public
+ * read endpoint (`/v1/leaderboard`, `/positions`, `/holders`, etc.), so this
+ * table is the canonical user index for those flows. `polymarket_users`
+ * (above) keeps its EOA-based indexing for comment authorship.
+ */
+export const polymarket_traders = pgTable(
+  'polymarket_traders',
+  {
+    proxy_wallet: text().primaryKey(),
+    user_name: text(),
+    profile_image: text(),
+    x_username: text(),
+    verified_badge: boolean(),
+    pnl_all: numeric(),
+    vol_all: numeric(),
+    pnl_month: numeric(),
+    vol_month: numeric(),
+    pnl_week: numeric(),
+    vol_week: numeric(),
+    pnl_day: numeric(),
+    vol_day: numeric(),
+    rank_pnl_all: integer(),
+    rank_vol_all: integer(),
+    first_seen_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    last_seen_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    source: text().notNull().default('leaderboard'),
   },
 )
 
