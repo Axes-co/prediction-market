@@ -20,7 +20,7 @@ describe('gammaClient.fetchActiveEventsPage', () => {
     const url = String(fetcher.mock.calls[0]?.[0])
     expect(url).not.toContain('after_cursor')
     expect(url).not.toContain('next_cursor')
-    expect(url).toContain('limit=100')
+    expect(url).toContain('limit=500')
   })
 
   it('passes cursor as after_cursor on subsequent pages', async () => {

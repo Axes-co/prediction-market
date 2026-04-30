@@ -100,8 +100,14 @@ interface ResolvedGammaSource {
 
 async function resolveGammaSources(options: GammaSyncOptions): Promise<ResolvedGammaSource[]> {
   if (options.sourceUrls && options.sourceUrls.length > 0) {
-    return options.sourceUrls.map(buildSourceFromUrl)
+    return dedupeGammaSources(options.sourceUrls.map(buildSourceFromUrl))
   }
+
+  const explicit = normalizeSourceUrl(process.env.GAMMA_URL ?? '')
+  const defaultSources = [
+    ...(explicit.length > 0 ? [buildSourceFromUrl(explicit)] : []),
+    buildSourceFromUrl(POLYMARKET_GAMMA_URL),
+  ]
 
   const { data, error } = await AllowedMarketCreatorRepository.listGammaApiSources()
   if (error) {
@@ -111,18 +117,25 @@ async function resolveGammaSources(options: GammaSyncOptions): Promise<ResolvedG
     sourceUrl: normalizeSourceUrl(record.sourceUrl),
     displayName: record.displayName,
   }))
-  if (registered.length > 0) {
-    return registered
-  }
-
-  const explicit = normalizeSourceUrl(process.env.GAMMA_URL ?? '')
-  const fallback = explicit.length > 0 ? explicit : POLYMARKET_GAMMA_URL
-  return [buildSourceFromUrl(fallback)]
+  return dedupeGammaSources([...defaultSources, ...registered])
 }
 
 function buildSourceFromUrl(url: string): ResolvedGammaSource {
   const sourceUrl = normalizeSourceUrl(url)
   return { sourceUrl, displayName: deriveSourceDisplayName(sourceUrl) }
+}
+
+function dedupeGammaSources(sources: ResolvedGammaSource[]): ResolvedGammaSource[] {
+  const seen = new Set<string>()
+  const result: ResolvedGammaSource[] = []
+  for (const source of sources) {
+    if (!source.sourceUrl || seen.has(source.sourceUrl)) {
+      continue
+    }
+    seen.add(source.sourceUrl)
+    result.push(source)
+  }
+  return result
 }
 
 function normalizeSourceUrl(value: string): string {

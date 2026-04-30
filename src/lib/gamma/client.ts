@@ -20,9 +20,9 @@ export interface GammaClientOptions {
 }
 
 const DEFAULT_BASE_URL = 'https://gamma-api.polymarket.com'
-const DEFAULT_PAGE_SIZE = 100
 const DEFAULT_TIMEOUT_MS = 20_000
 const MAX_PAGE_SIZE = 500
+const DEFAULT_PAGE_SIZE = MAX_PAGE_SIZE
 const DEFAULT_ORDER: GammaEventOrder = 'volume'
 const DEFAULT_STATE: GammaEventState = 'all'
 
