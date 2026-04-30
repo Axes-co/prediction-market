@@ -1,186 +1,244 @@
 ---
-title: Phased audit — 2026-04-30 Polymarket repair pass
+title: Fresh phased launch audit — Polymarket V2
 status: current
 date: 2026-04-30
 auditor: Codex main thread
 ---
 
-# Phased Audit — 2026-04-30
+# Fresh Phased Launch Audit — 2026-04-30
 
-## Phase 0 — Source Of Truth
+This file replaces the earlier phase notes. It only records findings backed by
+official Polymarket docs, local Polymarket reference repositories, or this app's
+code/tests.
+
+## Phase 0 — Scope And Source Of Truth
 
 Evidence:
 
-- Official docs list Gamma, Data, CLOB, Bridge, and Relayer as separate API surfaces.
-- Builder API keys are builder-level credentials; CLOB L2 keys remain user/order API credentials.
-- Relayer nonce is a read endpoint, while `/submit` is builder-authenticated.
+- Official contracts page says Polymarket contracts are on Polygon mainnet
+  chain `137` and lists V2 CTF Exchange, Neg Risk Exchange, CTF, pUSD,
+  CollateralOnramp, CollateralOfframp, and Safe factory:
+  `https://docs.polymarket.com/resources/contracts`.
+- Official pUSD page says pUSD is the trading collateral, has 6 decimals, is
+  enforced by CollateralOnramp/CollateralOfframp, and documents `wrap`/`unwrap`:
+  `https://docs.polymarket.com/concepts/pusd`.
+- Builder overview says orders must attach `builderCode` and gasless onchain
+  actions use the relayer:
+  `https://docs.polymarket.com/builders/overview`.
+- Local app production network is Polygon mainnet:
+  `src/lib/appkit.ts`.
+- Local contract constants match the official V2 addresses:
+  `src/lib/contracts.ts`.
 
 Decision:
 
-- Keep Reown + Wagmi for launch. Magic/Turnkey are provider alternatives, not launch blockers.
-- Use Polymarket production defaults unless env overrides are explicitly set.
-- Keep Builder code attribution on every CLOB V2 order.
+- Keep Reown/Wagmi + Safe for this launch. Magic/Turnkey/proxy examples are
+  alternative wallet-provider integrations, not required to fix the current
+  MetaMask/Safe path.
+- Launch readiness requires live production probes. Unit tests are not enough
+  for relayer acceptance, Safe deployment, wrap/unwrap, or CLOB order fill.
 
-## Phase 1 — Events, Markets, Gamma Sync
+## Phase 1 — Wallet Identity, Safe, And Deposit Discovery
 
 Findings:
 
-- `src/lib/gamma/client.ts` used a default page size of 100 even though Gamma keyset supports 500. This slowed full event coverage.
-- `src/lib/gamma/sync.ts` replaced the official Polymarket Gamma source whenever DB `gamma_api` sources existed, and a custom `GAMMA_URL` could also replace it. That could make cron miss Polymarket events entirely.
-- Event/market mapper and repository now persist Gamma parity fields including event id, comments count, lifecycle flags, liquidity CLOB, market ids, best bid/ask, spread, last price, order constraints, fee schedule, and pUSD-era liquidity fields.
+- The deposit token query used `user.address`; if the active MetaMask/Reown
+  wallet differed from the persisted session address, the deposit modal could
+  show `No LI.FI-supported tokens with balance found.` even when MetaMask held
+  Polygon USDC.
+- LI.FI token discovery is not sufficient for the launch path because the
+  Polymarket wagmi Safe example reads Polygon USDC.e directly, not through
+  LI.FI:
+  `/Users/khaleelmusleh/Desktop/Projects/Axes/polymarket/wagmi-safe-builder-example/hooks/usePolygonBalances.ts`.
+- The app already has a Safe proxy deposit target, so Polygon USDC/USDC.e can
+  be transferred directly from the active EOA to the Safe without requesting a
+  LI.FI quote.
 
 Fixes applied:
 
-- `src/lib/gamma/client.ts` default page size is now 500.
-- `src/lib/gamma/sync.ts` always includes official Polymarket Gamma, includes a custom `GAMMA_URL` when present, then appends registered sources with URL de-dupe. Explicit `sourceUrls` still override for manual/debug runs.
+- `src/app/[locale]/(platform)/_components/WalletFlow.tsx` now passes the
+  active wagmi account address to the deposit modal, falling back to the user
+  session address only if wagmi has no account.
+- `src/hooks/useLiFiWalletTokens.ts` now always probes Polygon native USDC and
+  USDC.e balances directly with `balanceOf`, merges them into the token list,
+  and returns them even if LI.FI endpoints fail.
+- `src/hooks/useLiFiQuote.ts` returns a synthetic 1:1 quote for direct Polygon
+  USDC/USDC.e deposits so the UI does not block on LI.FI.
+- `src/hooks/useLiFiExecution.ts` sends direct Polygon ERC-20 `transfer` calls
+  to the Safe and waits for the receipt on a Polygon-pinned public client.
 
 Launch gates:
 
-- Run `/api/sync/gamma` without `source=` and verify the response includes `https://gamma-api.polymarket.com`.
-- Run until `timeLimitReached=false` at least once or verify cursor resume covers the entire feed across multiple cron ticks.
+- Browser-test MetaMask on Polygon with native USDC only: token must appear in
+  the deposit modal.
+- Browser-test MetaMask on Polygon with USDC.e only: token must appear in the
+  deposit modal.
+- Submit a tiny direct deposit and verify the Safe receives the ERC-20 transfer.
 
-## Phase 2 — Tags, Header Navigation, More Menu
+## Phase 2 — Pending Deposit Activation And pUSD Balance
 
 Findings:
 
-- Live Polymarket header on 2026-04-30 includes `Breaking` and `Iran`, does not include `World`, and orders `Mentions` before `Elections`.
-- Existing seed order still included `World`, did not include `Iran`, and rendered only `Trending`, `New`, then DB main categories.
-- `NavigationMoreMenu` already links `/activity` and `/leaderboard`; routes exist under `src/app/[locale]/(platform)/activity/page.tsx` and `src/app/[locale]/(platform)/leaderboard/[[...filters]]/page.tsx`.
+- Official docs expose pUSD as trading collateral and document wrapping through
+  CollateralOnramp.
+- Public pUSD docs specifically document USDC.e as the wrap asset. The local
+  Polymarket `ctf-exchange-v2` source shows `CollateralToken.onlyValidAsset`
+  accepts both native USDC and USDC.e, while `CollateralOnramp.wrap` forwards
+  the selected `_asset` to that token:
+  `/Users/khaleelmusleh/Desktop/Projects/Axes/polymarket/ctf-exchange-v2/src/collateral/CollateralToken.sol`,
+  `/Users/khaleelmusleh/Desktop/Projects/Axes/polymarket/ctf-exchange-v2/src/collateral/CollateralOnramp.sol`.
+- The deposit modal's Axes balance previously read only USDC.e + pUSD, so a
+  native-USDC transfer into the Safe could show `$0.00` even though funds
+  arrived.
+- `usePendingUsdcDeposit` already detects both native USDC and USDC.e at the
+  Safe and builds activation using the token address that actually has funds.
 
 Fixes applied:
 
-- Added `src/lib/db/migrations/2026_04_30_004_polymarket_header_categories.sql` to enforce the current Polymarket header category set/order.
-- Updated `src/lib/platform-navigation.ts` so a persisted `breaking` main tag renders between `Trending` and `New`, not duplicated in the category list.
+- `src/hooks/useProxyDepositBalance.ts` now includes native USDC + USDC.e +
+  pUSD in the deposit modal's Axes balance.
+- `src/app/[locale]/(platform)/_components/wallet-modal/WalletConfirmStep.tsx`
+  invalidates pending-deposit and proxy-balance queries immediately after a
+  deposit transfer.
+- `src/app/[locale]/(platform)/_components/wallet-modal/WalletSuccessStep.tsx`
+  tells users that direct Polygon USDC deposits still need activation before
+  they become tradable.
 
 Launch gates:
 
-- Apply migrations, run tag sync, and verify header order in the browser.
-- E2E check hover and click on `More`; it must show `Activity` and `Leaderboard` on desktop and remain reachable on mobile.
+- Send native USDC to Safe, sign activation, confirm pUSD increases.
+- Send USDC.e to Safe, sign activation, confirm pUSD increases.
+- Confirm no success state is shown for activation until the relayer returns a
+  terminal success or the UI clearly reports pending/failure.
 
-## Phase 3 — Predictions, Filters, Pricing
+## Phase 3 — Relayer Submit And Polling
 
 Findings:
 
-- `/predictions/[slug]?_sort=...&_status=...` rewrote to the internal filter route, but `/predictions?_sort=...&_status=...` did not. Direct root filter URLs therefore appeared broken.
-- `listHomeEventsPage` already uses raw offset pagination correctly in the current code.
-- Sort mappings include `trending`, `volume`, `liquidity`, `newest`, `ending-soon`, and `competitive`.
+- Official relayer API says `POST /submit` returns `transactionID` plus
+  `STATE_NEW`; the onchain hash is retrieved by polling `GET /transaction?id=`.
+  Source: `https://docs.polymarket.com/api-reference/relayer/submit-a-transaction`
+  and `https://docs.polymarket.com/api-reference/relayer/get-a-transaction-by-id`.
+- The recent-transactions endpoint documents auth headers for `GET /transactions`;
+  the single-transaction `GET /transaction` page documents the required `id`
+  query parameter and response shape, but does not list builder auth headers.
+- Signing the polling request with builder headers can make a submitted wrap
+  look stuck even if `/submit` accepted it.
 
 Fixes applied:
 
-- `src/proxy.ts` now rewrites `/predictions` root filter URLs through `/predictions/trending/route-filters/{status}/{sort}`.
+- `src/lib/polymarket/relayer-poll.ts` now polls `GET /transaction?id=...`
+  with `Accept: application/json` only.
+- `tests/unit/relayerPoll.test.ts` asserts the unauthenticated polling headers
+  and v2/legacy submit parsing behavior.
 
 Launch gates:
 
-- Browser-test `/predictions?_status=resolved&_sort=competitive`.
-- Browser-test `/predictions/{query}?_status=all&_sort=liquidity`.
-- Confirm no public URL exposes the internal `route-filters` segment after client navigation.
+- Submit an activation tx and capture the returned `transactionID`.
+- Poll until `STATE_CONFIRMED`; confirm `transactionHash` is available.
+- Verify failures surface `STATE_FAILED` or `STATE_INVALID` instead of showing
+  success.
 
-## Phase 4 — Wallet, Proxy, Relayer, Deposits
+## Phase 4 — Withdrawals And Transfers
 
 Findings:
 
-- Safe nonce reads were signed with builder headers. The current Polymarket relayer client reads nonce as plain GET and builder-authenticates `/submit`; signed nonce queries can cause wallet approval/deposit failures before submission.
-- Deposit flow can wrap native USDC or USDC.e, but onboarding approved only USDC.e for the onramp. Native USDC deposits could fail at execution because allowance was missing.
-- Trade, redeem, merge/split/convert, withdraw, pending deposit, and approval flows all rely on wallet signatures. A connected wallet on the wrong account or chain can produce signatures that Polymarket/Safe cannot execute, which matches the observed "sign then error" behavior.
-- pUSD is the trading collateral; the app reads proxy pUSD balance for trading and wraps supported USDC assets through the Collateral Onramp.
-
-Fixes applied:
-
-- `src/app/[locale]/(platform)/_actions/approve-tokens.ts` nonce GET is now plain.
-- `src/app/[locale]/(platform)/portfolio/_actions/pending-deposit.ts` nonce GET is now plain.
-- `src/lib/safe/transactions.ts` approves both `COLLATERAL_TOKEN_ADDRESS` and `NATIVE_USDC_TOKEN_ADDRESS` for the Collateral Onramp, de-duped for test networks.
-- Added `src/hooks/useWalletSignatureGate.ts` and wired it into all Polymarket trade/Safe signing paths under event, portfolio, profile, sports, onboarding, deposit, and wallet withdraw flows. It requires a connected wallet, matching signed-in address, and Polygon chain before prompting for a signature.
+- Official pUSD docs document unwrapping through CollateralOfframp.
+- Local app withdrawal flow builds an atomic Safe batch: unwrap pUSD to USDC.e,
+  then transfer USDC.e to the destination EOA:
+  `src/app/[locale]/(platform)/_components/WalletFlow.tsx`.
+- Local helper builds `Offramp.unwrap(asset, recipient, amount)`:
+  `src/lib/polymarket/onramp.ts`.
+- Current UI intentionally enables Polygon USDC.e withdrawal only:
+  `src/app/[locale]/(platform)/_components/wallet-modal/utils.ts`.
 
 Launch gates:
 
-- Deploy a new Safe proxy wallet from the UI.
-- Sign token approvals from a fresh wallet.
-- Attempt a trade while connected to the wrong wallet account and confirm the UI blocks before signature.
-- Attempt a trade while connected to the wrong chain and confirm the UI switches to Polygon or blocks with an explicit Polygon message.
-- Send native USDC to the Safe, wrap to pUSD, and confirm trading balance updates.
-- Send USDC.e to the Safe, wrap to pUSD, and confirm trading balance updates.
-- Unwrap pUSD through the withdraw path before launch.
+- With pUSD balance, withdraw tiny amount to the active MetaMask address.
+- Verify Safe pUSD decreases and destination receives USDC.e.
+- Verify wrong-chain and wrong-wallet signing is blocked before signature.
 
-## Phase 5 — CLOB Orders, Builder Attribution, Fees
+## Phase 5 — Trading, CLOB, Builder Attribution
 
-Findings:
+Evidence:
 
-- Current order body uses CLOB V2 signed fields and sends top-level `order`, `owner`, and `orderType`.
-- Builder attribution previously only read `POLYMARKET_BUILDER_CODE`; Polymarket docs/examples commonly use `POLY_BUILDER_CODE`.
-
-Fixes applied:
-
-- `src/lib/orders/index.ts` accepts both `POLYMARKET_BUILDER_CODE` and `POLY_BUILDER_CODE`, preferring the existing app env name.
-- `.env.example` documents the alias.
+- Builder docs require builder code on orders:
+  `https://docs.polymarket.com/builders/overview`.
+- Trading-side balance is pUSD through `src/hooks/useBalance.ts`.
+- CLOB/order code paths were not live-exercised in this pass.
 
 Launch gates:
 
-- Place and cancel a tiny limit order.
-- Place a tiny marketable order.
-- Confirm the order has builder attribution in Polymarket-side reporting.
+- Place and cancel one tiny limit order.
+- Place one tiny marketable order.
+- Confirm pUSD balance and positions update after fill.
+- Confirm builder attribution appears in Polymarket builder reporting.
 
-## Phase 6 — Data API, Activity, Leaderboard, Profiles
+## Phase 6 — Events, Tags, Predictions, Charts
 
-Findings:
+Evidence from existing code/tests:
 
-- Activity and leaderboard routes exist and are linked from More.
-- User/profile mirror code exists via `src/app/api/sync/users/route.ts` and Data API mapper code, but this pass did not live-probe every Data API endpoint.
-
-Launch gates:
-
-- Run user sync and verify leaderboard rows render with current Polymarket traders.
-- Verify `/activity` loads from Data API REST polling without relying on undocumented RTDS activity topics.
-- Verify profile pages resolve both address and username routes.
-
-## Phase 7 — Comments
-
-Findings:
-
-- Polymarket comment reads are public through Gamma-style endpoints, but write auth is not fully documented in the public API reference.
-- Launch-safe path remains read display plus local/admin moderation unless a documented write path is confirmed.
+- Gamma client, mapper, predictions filters, and platform navigation have
+  targeted tests in `tests/unit/gammaClient.test.ts`,
+  `tests/unit/gammaMapper.test.ts`, `tests/unit/predictionSearch.test.ts`,
+  `tests/unit/PredictionResultsClient.test.tsx`, and
+  `tests/unit/platformNavigation.test.ts`.
+- This pass did not rewrite event sync, tag sync, pricing, or chart rendering.
 
 Launch gates:
 
-- Verify event comments load by Gamma event id.
-- Verify admin comment moderation cannot mutate Polymarket data unexpectedly.
-- If comment writes are enabled, require an explicit backend-owned API contract and auth proof before launch.
+- Run Gamma sync without a custom `source=` override and verify official
+  Polymarket Gamma is included.
+- Run tag sync, apply migrations, and browser-check header categories and
+  desktop/mobile More menu.
+- Browser-check `/predictions` root filters and slug filters.
+- Browser-check event charts against live price history and websocket updates.
 
-## Phase 8 — Websockets
+## Phase 7 — Comments, Activity, Leaderboard, Geoblock, Admin
 
-Findings:
+Evidence:
 
-- CLOB market/user websockets require heartbeat behavior.
-- User websocket must not expose L2 API keys to the browser.
-
-Launch gates:
-
-- Market websocket connects, subscribes, pings, reconnects, and updates order books.
-- User websocket either stays server-side or remains disabled for launch.
-- No `POLY_API_SECRET`, builder secret, or passphrase appears in client bundles.
-
-## Phase 9 — Geoblock, Legal, Admin
-
-Findings:
-
-- Middleware geoblock exists and blocks non-read API mutations in restricted regions.
-- Admin remains session/admin-gated through middleware.
-- Geoblock country list is policy-sensitive and must be verified near launch.
+- API reference navigation lists public Comments, Activity/Profile,
+  Leaderboard, Tags, Bridge, Relayer, and WebSocket endpoints:
+  `https://docs.polymarket.com/api-reference/introduction`.
+- This pass did not live-probe those endpoints.
 
 Launch gates:
 
-- Confirm blocked country settings match current legal guidance.
-- Verify Vercel geo headers are present in production preview.
-- Verify admin create-market/CYOM paths are disabled or clearly marked out-of-scope for Polymarket launch.
+- Verify comment reads by event/market ID and confirm write behavior remains
+  local/admin-only unless a documented Polymarket write auth path is proven.
+- Verify `/activity`, `/leaderboard`, and profile routes render live data.
+- Verify Vercel geo middleware blocks restricted mutation paths in production
+  preview.
+- Verify admin market creation/CYOM is disabled or explicitly out of scope for
+  Polymarket launch.
 
-## Phase 10 — Final Launch Sequence For Claude
+## Phase 8 — Build And Test Status
 
-Do these in order:
+Passed in this pass:
 
-1. Apply DB migrations, including `2026_04_30_004_polymarket_header_categories.sql`.
-2. Run Gamma sync until Polymarket source is fully exhausted or cursor-resumed across cron ticks.
-3. Run tags sync and verify header order visually.
-4. Start the app and test `/predictions` root filters and slug filters.
-5. Create a fresh wallet, deploy Safe proxy, approve tokens, and wrap both USDC variants.
-6. Place/cancel one tiny limit order and place one tiny marketable order.
-7. Validate More menu, leaderboard, activity, comments read path, and geoblock behavior in browser.
-8. If any wallet, relayer, CLOB, or geoblock gate fails, do not launch.
+- `npx tsc --noEmit`.
+- `npm run test -- tests/unit/relayerPoll.test.ts tests/unit/safeTransactions.test.ts tests/unit/platformNavigation.test.ts tests/unit/gammaClient.test.ts tests/unit/gammaMapper.test.ts tests/unit/predictionSearch.test.ts tests/unit/PredictionResultsClient.test.tsx`.
+- `git diff --check`.
+
+Not passed:
+
+- `npm run build` reached `Creating an optimized production build ...` with
+  `[MDX] generated files ...` and then emitted no output for more than three
+  minutes. It was stopped with `pkill -f "next build"`. Treat production build
+  as unvalidated until the Turbopack stall is diagnosed or a successful build
+  completes.
+
+## Final Launch Sequence
+
+1. Resolve the `next build` stall or produce a successful production build.
+2. Browser-test the direct Polygon deposit list with native USDC and USDC.e.
+3. Transfer a tiny native USDC amount from MetaMask to Safe, then activate to
+   pUSD through the pending-deposit banner.
+4. Transfer a tiny USDC.e amount from MetaMask to Safe, then activate to pUSD.
+5. Withdraw a tiny pUSD amount to MetaMask and verify USDC.e is received.
+6. Place/cancel a tiny limit order and place one tiny marketable order.
+7. Verify events, tags, `/predictions` filters, charts, comments read,
+   activity, leaderboard, and geoblock in browser.
+8. If any wallet, relayer, CLOB, sync, chart, or geoblock gate fails, do not
+   launch.

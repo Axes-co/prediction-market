@@ -16,9 +16,12 @@ This folder intentionally replaced the previous phase notes on 2026-04-30. The o
 - Polymarket API reference: `https://docs.polymarket.com/api-reference/introduction.md`.
 - Polymarket Builder docs: `https://docs.polymarket.com/builders/overview.md`, `https://docs.polymarket.com/builders/api-keys.md`, `https://docs.polymarket.com/builders/fees.md`, `https://docs.polymarket.com/builders/tiers.md`.
 - Polymarket trading docs: `https://docs.polymarket.com/trading/gasless.md`, `https://docs.polymarket.com/trading/orders/attribution.md`.
+- Polymarket pUSD/contracts docs: `https://docs.polymarket.com/concepts/pusd`, `https://docs.polymarket.com/resources/contracts`.
+- Local Polymarket contract source: `/Users/khaleelmusleh/Desktop/Projects/Axes/polymarket/ctf-exchange-v2/src/collateral`.
+- Local Polymarket wagmi Safe example: `/Users/khaleelmusleh/Desktop/Projects/Axes/polymarket/wagmi-safe-builder-example`.
 - Polymarket live homepage header checked on 2026-04-30: `Trending`, `Breaking`, `New`, `Politics`, `Sports`, `Crypto`, `Esports`, `Iran`, `Finance`, `Geopolitics`, `Tech`, `Culture`, `Economy`, `Weather`, `Mentions`, `Elections`, `More`.
 - Current app code and tests in this repository on branch `polymarket-v2`.
 
 ## Current Status
 
-The migration is closer after today’s repairs, but launch is still gated on live wallet and trade probes against production Polymarket. Unit tests prove deterministic code paths only; they do not prove relayer acceptance, Safe deployment, on-chain wrap/unwrap, or CLOB order fill.
+The migration is closer after today’s repairs, but launch is still gated on a successful production build plus live wallet and trade probes against production Polymarket. Unit tests prove deterministic code paths only; they do not prove relayer acceptance, Safe deployment, on-chain wrap/unwrap, or CLOB order fill.
