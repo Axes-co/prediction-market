@@ -188,9 +188,16 @@ export function filterHomeEvents<T extends HomeVisibleEventCandidate>(
     return eventsMatchingTagFilters.filter(event => isEventResolvedLike(event))
   }
 
-  const activeSeriesCandidates = status === 'all'
-    ? eventsMatchingTagFilters.filter(event => !isEventResolvedLike(event))
+  const visibleStatusEvents = status === 'active'
+    ? eventsMatchingTagFilters.filter(event => (
+        !isEventResolvedLike(event)
+        && (currentTimestamp == null || !isOverdueUnresolved(event, currentTimestamp))
+      ))
     : eventsMatchingTagFilters
+
+  const activeSeriesCandidates = status === 'all'
+    ? visibleStatusEvents.filter(event => !isEventResolvedLike(event))
+    : visibleStatusEvents
 
   const newestBySeriesSlug = new Map<string, T>()
 
@@ -211,10 +218,10 @@ export function filterHomeEvents<T extends HomeVisibleEventCandidate>(
   }
 
   if (newestBySeriesSlug.size === 0) {
-    return eventsMatchingTagFilters
+    return visibleStatusEvents
   }
 
-  return eventsMatchingTagFilters.filter((event) => {
+  return visibleStatusEvents.filter((event) => {
     if (status === 'all' && isEventResolvedLike(event)) {
       return true
     }

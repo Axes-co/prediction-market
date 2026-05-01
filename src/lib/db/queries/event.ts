@@ -1100,19 +1100,11 @@ function buildTagContainsCondition(slugFragment: string) {
 }
 
 function buildTrendingVolumeOrder() {
-  return sql<number>`COALESCE(
-    NULLIF((
+  return sql<number>`COALESCE((
       SELECT SUM(${markets.volume_24h})
       FROM ${markets}
       WHERE ${markets.event_id} = ${events.id}
-    ), 0),
-    (
-      SELECT SUM(${markets.volume})
-      FROM ${markets}
-      WHERE ${markets.event_id} = ${events.id}
-    ),
-    0
-  )`
+    ), 0)`
 }
 
 function buildTotalVolumeOrder() {
@@ -1134,10 +1126,24 @@ function buildResolvedLikeCondition(input: {
   return sql<boolean>`${events.status} = 'resolved' OR (${input.hasAnyMarkets} AND NOT ${input.hasUnresolvedMarkets})`
 }
 
+function buildOpenMarketExistsCondition() {
+  return exists(
+    db.select({ condition_id: markets.condition_id })
+      .from(markets)
+      .where(and(
+        eq(markets.event_id, events.id),
+        eq(markets.is_resolved, false),
+        sql<boolean>`(${markets.end_time} IS NULL OR ${markets.end_time} > NOW())`,
+        sql<boolean>`(${markets.accepting_orders} IS DISTINCT FROM FALSE)`,
+      )),
+  )
+}
+
 function buildEventStatusFilterCondition(
   status: EventListStatusFilter,
   input: {
     hasAnyMarkets: SQL<unknown>
+    hasOpenMarkets: SQL<unknown>
     hasUnresolvedMarkets: SQL<unknown>
   },
 ) {
@@ -1150,8 +1156,19 @@ function buildEventStatusFilterCondition(
 
   if (status === 'all') {
     return or(
-      eq(events.status, 'active'),
+      and(
+        eq(events.status, 'active'),
+        input.hasOpenMarkets,
+      ),
       resolvedFilterCondition,
+    )
+  }
+
+  if (status === 'active') {
+    return and(
+      eq(events.status, 'active'),
+      sql<boolean>`NOT (${resolvedFilterCondition})`,
+      input.hasOpenMarkets,
     )
   }
 
@@ -1243,8 +1260,10 @@ async function buildEventListQueryContext({
         eq(markets.is_resolved, false),
       )),
   )
+  const hasOpenMarkets = buildOpenMarketExistsCondition()
   const statusFilterCondition = buildEventStatusFilterCondition(status, {
     hasAnyMarkets,
+    hasOpenMarkets,
     hasUnresolvedMarkets,
   })
 
@@ -1505,8 +1524,10 @@ export const EventRepository = {
             eq(markets.is_resolved, false),
           )),
       )
+      const hasOpenMarkets = buildOpenMarketExistsCondition()
       const statusFilterCondition = buildEventStatusFilterCondition(status, {
         hasAnyMarkets,
+        hasOpenMarkets,
         hasUnresolvedMarkets,
       })
 

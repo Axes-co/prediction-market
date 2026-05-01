@@ -7,7 +7,7 @@ import { cacheTag } from 'next/cache'
 import { DEFAULT_LOCALE, NON_DEFAULT_LOCALES } from '@/i18n/locales'
 import { cacheTags } from '@/lib/cache-tags'
 import { resolveCategorySidebarData } from '@/lib/category-sidebar-config'
-import { event_tags, events, tag_translations, tags, v_main_tag_subcategories } from '@/lib/db/schema/events/tables'
+import { event_tags, events, markets, tag_translations, tags, v_main_tag_subcategories } from '@/lib/db/schema/events/tables'
 import { runQuery } from '@/lib/db/utils/run-query'
 import { db } from '@/lib/drizzle'
 import { buildPublicEventListVisibilityCondition, HIDE_FROM_NEW_TAG_SLUG } from '@/lib/event-visibility'
@@ -108,6 +108,24 @@ function createSidebarCountEventCandidate(row: {
     tags: [],
     markets: [],
   }
+}
+
+function buildActiveUnresolvedEventCondition() {
+  const hasOpenMarkets = exists(
+    db.select({ condition_id: markets.condition_id })
+      .from(markets)
+      .where(and(
+        eq(markets.event_id, events.id),
+        eq(markets.is_resolved, false),
+        sql<boolean>`(${markets.end_time} IS NULL OR ${markets.end_time} > NOW())`,
+        sql<boolean>`(${markets.accepting_orders} IS DISTINCT FROM FALSE)`,
+      )),
+  )
+
+  return and(
+    eq(events.status, 'active'),
+    hasOpenMarkets,
+  )
 }
 
 interface TagTranslationRecord {
@@ -273,7 +291,7 @@ async function getVisibleActiveEventCountsByTagSlugs(tagSlugs: string[]): Promis
       .innerJoin(event_tags, eq(event_tags.event_id, events.id))
       .innerJoin(tags, eq(event_tags.tag_id, tags.id))
       .where(and(
-        eq(events.status, 'active'),
+        buildActiveUnresolvedEventCondition(),
         eq(events.is_hidden, false),
         inArray(tags.slug, normalizedTagSlugs),
         buildPublicEventListVisibilityCondition(events.id),
@@ -408,7 +426,7 @@ export const TagRepository = {
         .innerJoin(event_tags, eq(event_tags.event_id, events.id))
         .innerJoin(tags, eq(event_tags.tag_id, tags.id))
         .where(and(
-          eq(events.status, 'active'),
+          buildActiveUnresolvedEventCondition(),
           eq(events.is_hidden, false),
           eq(tags.is_hidden, false),
           buildPublicEventListVisibilityCondition(events.id),
