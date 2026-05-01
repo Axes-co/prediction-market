@@ -3,7 +3,13 @@ import { isCronAuthorized } from '@/lib/auth-cron'
 import { runGammaSync } from '@/lib/gamma/sync'
 import { resetGammaSyncCursors, wipeGammaSourcedData } from '@/lib/gamma/wipe'
 
-export const maxDuration = 300
+// Pro plan max. Three lanes × per-event market upserts (sports events ship
+// 40+ markets each) ran past 300s and got the lambda killed mid-write,
+// leaking the gamma_sync lock for STALE_AFTER_MS (15 min). Internal budget
+// in src/lib/gamma/sync.ts (DEFAULT_TIME_LIMIT_MS) is 500s so the route
+// always exits cleanly with `releaseGammaSyncLock('completed')` and ~100s
+// of buffer for response flush.
+export const maxDuration = 600
 
 export async function GET(request: Request) {
   if (!isCronAuthorized(request.headers.get('authorization'), process.env.CRON_SECRET)) {

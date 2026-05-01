@@ -54,7 +54,11 @@ export interface GammaSyncResult {
   lockBusy: boolean
 }
 
-const DEFAULT_TIME_LIMIT_MS = 250_000
+// Per-invocation work budget. Must stay below the route's maxDuration so the
+// `releaseGammaSyncLock('completed')` call in `runWhileLocked` always runs;
+// otherwise the lambda gets killed mid-write and the lock leaks for 15 min.
+// route.ts sets maxDuration=600 (Pro plan), buffer is ~100s for finally + flush.
+const DEFAULT_TIME_LIMIT_MS = 500_000
 const POLYMARKET_GAMMA_URL = 'https://gamma-api.polymarket.com'
 
 interface GammaSyncLane {
@@ -90,6 +94,11 @@ const DEFAULT_GAMMA_SYNC_LANES: GammaSyncLane[] = [
     id: 'all-volume',
     displayName: 'all volume',
     order: 'volume',
+    // 500-event pages combined with sports events that carry 40+ markets
+    // each blew past the 300s function timeout, leaking the lock for the
+    // next 15 minutes (until STALE_AFTER_MS in lock.ts). 100 keeps each
+    // page bounded and matches the per-tick work the active lanes do.
+    pageSize: 100,
     state: 'all',
     persistCursor: true,
   },
@@ -348,9 +357,18 @@ async function syncSingleSource(
     firstPage = false
     const page = await client.fetchEventsPage(cursor)
     sourceResult.pagesFetched += 1
-    sourceResult.cursor = lane.persistCursor ? page.nextCursor : null
 
+    let pageFullyProcessed = true
     for (const gammaEvent of page.events) {
+      // Per-event time check. Without this, a single page of 100 events whose
+      // events each have 40+ markets (NBA, NHL, LoL...) can run hundreds of
+      // sequential market upserts and overshoot timeLimitMs by minutes,
+      // exceeding the lambda's hard maxDuration limit and leaking the lock.
+      if (Date.now() - startedAt > timeLimitMs) {
+        sourceResult.timeLimitReached = true
+        pageFullyProcessed = false
+        break
+      }
       sourceResult.eventsSeen += 1
       try {
         const eventOutcome = await processEvent(gammaEvent)
@@ -390,7 +408,17 @@ async function syncSingleSource(
       }
     }
 
-    cursor = page.nextCursor
+    // Only advance the cursor if we fully consumed this page. If we broke out
+    // mid-page on the time check, the next tick must re-fetch this page and
+    // resume — advancing cursor would silently skip the unprocessed tail.
+    if (pageFullyProcessed) {
+      cursor = page.nextCursor
+      sourceResult.cursor = lane.persistCursor ? page.nextCursor : null
+    }
+    else {
+      sourceResult.cursor = lane.persistCursor ? cursor : null
+      break
+    }
   }
 
   return sourceResult
