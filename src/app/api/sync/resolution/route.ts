@@ -421,17 +421,25 @@ async function syncResolutions(): Promise<SyncStats> {
 }
 
 async function loadTrackedResolutionAuthors(): Promise<string[]> {
+  // Only wallet rows are valid `Bytes!` inputs for the resolution subgraph.
+  // The table also stores `source_type='gamma_api'` rows whose wallet_address
+  // is a routing string like `gamma:https://gamma-api.polymarket.com`; passing
+  // those to The Graph fails at decode (`Failed to decode Bytes value:
+  // Invalid character 'g' at position 0`) and aborts the cron with a 500.
+  // Filter at the SQL boundary, then defensively reject any non-0x value
+  // that slipped through.
   const rows = await db.execute(
     sql`
       SELECT DISTINCT LOWER(${allowed_market_creators.wallet_address}) AS creator
       FROM ${allowed_market_creators}
+      WHERE ${allowed_market_creators.source_type} = 'wallet'
       ORDER BY LOWER(${allowed_market_creators.wallet_address})
     `,
   ) as Array<{ creator?: string | null }>
 
   return rows
     .map(row => normalizeResolutionId(row.creator))
-    .filter((creator): creator is string => Boolean(creator))
+    .filter((creator): creator is string => typeof creator === 'string' && /^0x[0-9a-f]{40}$/.test(creator))
 }
 
 async function loadResolutionTargets(resolutionIds: string[]): Promise<ResolutionLookupRow[]> {
