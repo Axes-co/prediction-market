@@ -284,7 +284,16 @@ function resolveMigrationConnectionString() {
     return null
   }
 
-  return migrationUrl.replace('require', 'disable')
+  // Supabase's transaction-mode pooler (port 6543) does NOT support
+  // session-scoped features like `pg_advisory_lock`, which acquireMigrationLock
+  // depends on. The lock call hangs and the build dies on the 2-min
+  // statement_timeout. If POSTGRES_URL_NON_POOLING isn't configured and we're
+  // pointed at the transaction pooler, swap to the session-mode pooler on
+  // port 5432 (same hostname) so advisory locks work.
+  const sessionModeUrl = migrationUrl
+    .replace(/:6543\b/, ':5432')
+
+  return sessionModeUrl.replace('require', 'disable')
 }
 
 async function acquireMigrationLock(sql) {
