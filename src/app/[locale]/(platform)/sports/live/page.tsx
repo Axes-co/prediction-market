@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import type { SupportedLocale } from '@/i18n/locales'
 import { getExtracted, setRequestLocale } from 'next-intl/server'
+import { Suspense } from 'react'
 import SportsGamesCenter from '@/app/[locale]/(platform)/sports/_components/SportsGamesCenter'
 import { buildSportsGamesCards } from '@/app/[locale]/(platform)/sports/_utils/sports-games-data'
 import { EventRepository } from '@/lib/db/queries/event'
@@ -22,9 +23,11 @@ export async function generateMetadata({ params }: PageProps<'/[locale]/sports/l
   }
 }
 
-export default async function SportsLivePage({ params }: PageProps<'/[locale]/sports/live'>) {
-  const { locale } = await params
-  setRequestLocale(locale)
+// Same Suspense pattern as `(home)/page.tsx` and `(home)/new/page.tsx`.
+// Without it, prerender awaits `EventRepository.listEvents` synchronously
+// (cached but heavy: DB joins + CLOB price fetches per outcome) inside the
+// 50s build budget and times out under current data scale.
+async function SportsLiveContent({ locale }: { locale: SupportedLocale }) {
   const [{ data: events }, { data: layoutData }] = await Promise.all([
     EventRepository.listEvents({
       tag: 'sports',
@@ -33,7 +36,7 @@ export default async function SportsLivePage({ params }: PageProps<'/[locale]/sp
       userId: '',
       bookmarked: false,
       status: 'active',
-      locale: locale as SupportedLocale,
+      locale,
       sportsSection: 'games',
     }),
     SportsMenuRepository.getLayoutData('sports'),
@@ -51,5 +54,15 @@ export default async function SportsLivePage({ params }: PageProps<'/[locale]/sp
         vertical="sports"
       />
     </div>
+  )
+}
+
+export default async function SportsLivePage({ params }: PageProps<'/[locale]/sports/live'>) {
+  const { locale } = await params
+  setRequestLocale(locale)
+  return (
+    <Suspense fallback={null}>
+      <SportsLiveContent locale={locale as SupportedLocale} />
+    </Suspense>
   )
 }
