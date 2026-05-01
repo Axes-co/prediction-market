@@ -104,6 +104,7 @@ export function WalletDepositModal(props: WalletDepositModalProps) {
               isLoadingTokens={isLoadingTokens}
               selectedId={selectedTokenId}
               onSelect={setPreferredSelectedTokenId}
+              hasWalletAddress={Boolean(walletEoaAddress)}
             />
           )
         : view === 'amount'

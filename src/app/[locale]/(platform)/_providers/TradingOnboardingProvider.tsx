@@ -133,6 +133,7 @@ function useOnboardingStepsState({
     hasTokenApprovals ? 'completed' : 'idle',
   )
   const [requiresTradingAuthRefresh, setRequiresTradingAuthRefresh] = useState(false)
+  const [requiresTokenApprovalRefresh, setRequiresTokenApprovalRefresh] = useState(false)
 
   return {
     proxyStep,
@@ -143,6 +144,8 @@ function useOnboardingStepsState({
     setApprovalsStep,
     requiresTradingAuthRefresh,
     setRequiresTradingAuthRefresh,
+    requiresTokenApprovalRefresh,
+    setRequiresTokenApprovalRefresh,
   }
 }
 
@@ -178,6 +181,7 @@ function useEnableFlowReset({
   hasTradingAuth,
   proxyStep,
   requiresTradingAuthRefresh,
+  requiresTokenApprovalRefresh,
   setProxyWalletError,
   setTradingAuthError,
   setTokenApprovalError,
@@ -192,6 +196,7 @@ function useEnableFlowReset({
   hasTradingAuth: boolean
   proxyStep: ProxyStep
   requiresTradingAuthRefresh: boolean
+  requiresTokenApprovalRefresh: boolean
   setProxyWalletError: (value: string | null) => void
   setTradingAuthError: (value: string | null) => void
   setTokenApprovalError: (value: string | null) => void
@@ -215,7 +220,7 @@ function useEnableFlowReset({
     if (!hasTradingAuth || requiresTradingAuthRefresh) {
       setTradingAuthStep('idle')
     }
-    if (!hasTokenApprovals) {
+    if (!hasTokenApprovals || requiresTokenApprovalRefresh) {
       setApprovalsStep('idle')
     }
   }, [
@@ -223,6 +228,7 @@ function useEnableFlowReset({
     hasTradingAuth,
     proxyStep,
     requiresTradingAuthRefresh,
+    requiresTokenApprovalRefresh,
     setApprovalsStep,
     setDepositModalOpen,
     setProxyStep,
@@ -476,6 +482,7 @@ function useTokenApprovalsFlow({
   setApprovalsStep,
   setTokenApprovalError,
   setRequiresTradingAuthRefresh,
+  setRequiresTokenApprovalRefresh,
   setTradingAuthStep,
   setTradingAuthError,
 }: {
@@ -485,6 +492,7 @@ function useTokenApprovalsFlow({
   setApprovalsStep: (value: ApprovalsStep) => void
   setTokenApprovalError: (value: string | null) => void
   setRequiresTradingAuthRefresh: (value: boolean) => void
+  setRequiresTokenApprovalRefresh: (value: boolean) => void
   setTradingAuthStep: (value: TradingAuthStep) => void
   setTradingAuthError: (value: string | null) => void
 }) {
@@ -608,6 +616,7 @@ function useTokenApprovalsFlow({
         void refreshSessionUserState()
       }
 
+      setRequiresTokenApprovalRefresh(false)
       setApprovalsStep('completed')
     }
     catch (error) {
@@ -626,6 +635,7 @@ function useTokenApprovalsFlow({
     runWithSignaturePrompt,
     setApprovalsStep,
     setRequiresTradingAuthRefresh,
+    setRequiresTokenApprovalRefresh,
     setTokenApprovalError,
     setTradingAuthError,
     setTradingAuthStep,
@@ -642,8 +652,10 @@ function useTradingReadyGate({
   resetEnableFlowState,
   setTradeModalOpen,
   setRequiresTradingAuthRefresh,
+  setRequiresTokenApprovalRefresh,
   setTradingAuthStep,
   setTradingAuthError,
+  setApprovalsStep,
 }: {
   user: User | null
   tradingReady: boolean
@@ -651,8 +663,10 @@ function useTradingReadyGate({
   resetEnableFlowState: () => void
   setTradeModalOpen: (value: boolean) => void
   setRequiresTradingAuthRefresh: (value: boolean) => void
+  setRequiresTokenApprovalRefresh: (value: boolean) => void
   setTradingAuthStep: (value: TradingAuthStep) => void
   setTradingAuthError: (value: string | null) => void
+  setApprovalsStep: (value: ApprovalsStep) => void
 }) {
   const { open } = useAppKit()
 
@@ -674,7 +688,7 @@ function useTradingReadyGate({
     return false
   }, [open, refreshSessionUserState, resetEnableFlowState, setTradeModalOpen, tradingReady, user])
 
-  const openTradeRequirements = useCallback((options?: { forceTradingAuth?: boolean }) => {
+  const openTradeRequirements = useCallback((options?: { forceTradingAuth?: boolean, forceApprovals?: boolean }) => {
     if (!user) {
       queueMicrotask(() => {
         void open()
@@ -688,13 +702,19 @@ function useTradingReadyGate({
       setTradingAuthStep('idle')
       setTradingAuthError(null)
     }
+    if (options?.forceApprovals) {
+      setRequiresTokenApprovalRefresh(true)
+      setApprovalsStep('idle')
+    }
     void refreshSessionUserState()
     setTradeModalOpen(true)
   }, [
     open,
     refreshSessionUserState,
     resetEnableFlowState,
+    setApprovalsStep,
     setRequiresTradingAuthRefresh,
+    setRequiresTokenApprovalRefresh,
     setTradeModalOpen,
     setTradingAuthError,
     setTradingAuthStep,
@@ -721,7 +741,7 @@ function useWalletFlowControls({
   user: User | null
   hasDeployedProxyWallet: boolean
   openAppKit: () => Promise<void>
-  openTradeRequirements: (options?: { forceTradingAuth?: boolean }) => void
+  openTradeRequirements: (options?: { forceTradingAuth?: boolean, forceApprovals?: boolean }) => void
   refreshSessionUserState: () => Promise<void>
   resetEnableFlowState: () => void
   resetPendingFundState: () => void
@@ -827,7 +847,7 @@ function useTradingOnboardingContextValue({
   startDepositFlow: () => void
   startWithdrawFlow: () => void
   ensureTradingReady: () => boolean
-  openTradeRequirements: (options?: { forceTradingAuth?: boolean }) => void
+  openTradeRequirements: (options?: { forceTradingAuth?: boolean, forceApprovals?: boolean }) => void
   hasDeployedProxyWallet: boolean
   openWalletModal: () => void
 }): TradingOnboardingContextValue {
@@ -893,6 +913,8 @@ function TradingOnboardingProviderContent({
     setApprovalsStep,
     requiresTradingAuthRefresh,
     setRequiresTradingAuthRefresh,
+    requiresTokenApprovalRefresh,
+    setRequiresTokenApprovalRefresh,
   } = useOnboardingStepsState({
     hasDeployedProxyWallet,
     isProxyWalletDeploying,
@@ -908,7 +930,7 @@ function TradingOnboardingProviderContent({
         ? 'deploying'
         : proxyStep
   const effectiveTradingAuthStep = hasEffectiveTradingAuth ? 'completed' : tradingAuthStep
-  const effectiveApprovalsStep = hasTokenApprovals ? 'completed' : approvalsStep
+  const effectiveApprovalsStep = hasTokenApprovals && !requiresTokenApprovalRefresh ? 'completed' : approvalsStep
   const tradingAuthSatisfied = effectiveTradingAuthStep === 'completed'
   const tradingReady
     = effectiveProxyStep === 'completed'
@@ -932,6 +954,7 @@ function TradingOnboardingProviderContent({
     hasTradingAuth,
     proxyStep,
     requiresTradingAuthRefresh,
+    requiresTokenApprovalRefresh,
     setProxyWalletError,
     setTradingAuthError,
     setTokenApprovalError,
@@ -974,6 +997,7 @@ function TradingOnboardingProviderContent({
     setApprovalsStep,
     setTokenApprovalError,
     setRequiresTradingAuthRefresh,
+    setRequiresTokenApprovalRefresh,
     setTradingAuthStep,
     setTradingAuthError,
   })
@@ -985,8 +1009,10 @@ function TradingOnboardingProviderContent({
     resetEnableFlowState,
     setTradeModalOpen,
     setRequiresTradingAuthRefresh,
+    setRequiresTokenApprovalRefresh,
     setTradingAuthStep,
     setTradingAuthError,
+    setApprovalsStep,
   })
 
   const { openWalletModal, startDepositFlow, startWithdrawFlow, closeFundModal } = useWalletFlowControls({

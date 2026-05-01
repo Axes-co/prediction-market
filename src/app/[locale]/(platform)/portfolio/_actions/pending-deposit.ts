@@ -2,7 +2,7 @@
 
 import type { SafeTransactionRequestPayload } from '@/lib/safe/transactions'
 import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
-import { COLLATERAL_TOKEN_ADDRESS, NATIVE_USDC_TOKEN_ADDRESS } from '@/lib/contracts'
+import { COLLATERAL_ONRAMP_ADDRESS, COLLATERAL_TOKEN_ADDRESS, NATIVE_USDC_TOKEN_ADDRESS } from '@/lib/contracts'
 import { UserRepository } from '@/lib/db/queries/user'
 import { buildOnrampWrapTransaction } from '@/lib/polymarket/onramp'
 import { buildRelayerHeaders } from '@/lib/polymarket/relayer-auth'
@@ -11,6 +11,8 @@ import {
   parseRelayerSubmitResponse,
   pollRelayerTransaction,
 } from '@/lib/polymarket/relayer-poll'
+import { readErc20Allowance, readErc20Balance } from '@/lib/polymarket/wallet-balances'
+import { TOKEN_APPROVAL_REQUIRED_ERROR } from '@/lib/trading-auth/errors'
 
 /**
  * Pending-deposit flow for Polymarket V2.
@@ -138,6 +140,32 @@ export async function buildPendingUsdcSwapAction(params: {
   ])
   if (!supportedAssets.has(params.asset.toLowerCase())) {
     return { error: 'Unsupported deposit asset. Send USDC or USDC.e on Polygon.' }
+  }
+
+  try {
+    const [safeAssetBalance, onrampAllowance] = await Promise.all([
+      readErc20Balance({
+        token: params.asset,
+        owner: user.proxy_wallet_address as `0x${string}`,
+      }),
+      readErc20Allowance({
+        token: params.asset,
+        owner: user.proxy_wallet_address as `0x${string}`,
+        spender: COLLATERAL_ONRAMP_ADDRESS,
+      }),
+    ])
+
+    if (safeAssetBalance < amountBaseUnits) {
+      return { error: 'Pending deposit balance changed. Refresh and try again.' }
+    }
+
+    if (onrampAllowance < amountBaseUnits) {
+      return { error: TOKEN_APPROVAL_REQUIRED_ERROR }
+    }
+  }
+  catch (error) {
+    console.error('Failed to preflight pending deposit.', error)
+    return { error: DEFAULT_ERROR_MESSAGE }
   }
 
   const nonce = await fetchSafeNonce({ userAddress: user.address })

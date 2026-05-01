@@ -2,6 +2,7 @@
 
 import type { SafeTransactionRequestPayload } from '@/lib/safe/transactions'
 import type { ProxyWalletStatus } from '@/types'
+import { useAppKitAccount } from '@reown/appkit/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { hashTypedData, isAddress, parseUnits } from 'viem'
@@ -348,6 +349,7 @@ export function WalletFlow({
 }: WalletFlowProps) {
   const isMobile = useIsMobile()
   const account = useAccount()
+  const appKitAccount = useAppKitAccount()
   const { signMessageAsync } = useSignMessage()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
   const requireSignatureWallet = useWalletSignatureGate(user?.address)
@@ -372,7 +374,7 @@ export function WalletFlow({
     isLoadingBalance: isLoadingDepositBalance,
   } = useProxyDepositBalance({ enabled: depositOpen })
   const site = useSiteIdentity()
-  const connectedWalletAddress = account.address ?? user?.address ?? null
+  const connectedWalletAddress = appKitAccount.address ?? account.address ?? user?.address ?? null
   const { openTradeRequirements } = useTradingOnboarding()
 
   const hasDeployedProxyWallet = useHasDeployedProxyWallet(user)

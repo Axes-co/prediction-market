@@ -12,6 +12,7 @@ function WalletTokenList({
   isLoadingTokens,
   selectedId,
   onSelect,
+  hasWalletAddress,
 }: {
   onContinue: () => void
   items: Array<{
@@ -27,6 +28,7 @@ function WalletTokenList({
   isLoadingTokens: boolean
   selectedId: string
   onSelect: (id: string) => void
+  hasWalletAddress: boolean
 }) {
   const showEmptyState = !isLoadingTokens && items.length === 0
   const selectedItem = items.find(item => item.id === selectedId)
@@ -63,7 +65,9 @@ function WalletTokenList({
           )}
           {showEmptyState && (
             <div className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
-              No LI.FI-supported tokens with balance found.
+              {hasWalletAddress
+                ? 'No supported wallet tokens found. For direct Polymarket funding, use Polygon USDC or USDC.e.'
+                : 'Connect MetaMask to choose a wallet token.'}
             </div>
           )}
           {items.map((item) => {

@@ -21,7 +21,7 @@ import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { formatCurrency } from '@/lib/formatters'
 import { IS_TEST_MODE } from '@/lib/network'
 import { getSafeTxTypedData, packSafeSignature } from '@/lib/safe/transactions'
-import { isTradingAuthRequiredError } from '@/lib/trading-auth/errors'
+import { isTokenApprovalRequiredError, isTradingAuthRequiredError } from '@/lib/trading-auth/errors'
 import { triggerConfettiColorful } from '@/lib/utils'
 import { isUserRejectedRequestError } from '@/lib/wallet'
 import { useUser } from '@/stores/useUser'
@@ -144,6 +144,10 @@ function usePendingDepositSwap({
         if (isTradingAuthRequiredError(buildResult.error)) {
           closeDialog()
           openTradeRequirements({ forceTradingAuth: true })
+        }
+        else if (isTokenApprovalRequiredError(buildResult.error)) {
+          closeDialog()
+          openTradeRequirements({ forceApprovals: true })
         }
         else {
           toast.error(buildResult.error ?? DEFAULT_ERROR_MESSAGE)

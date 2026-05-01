@@ -16,23 +16,20 @@ function normalizeSettingValue(value: string | undefined) {
 }
 
 export async function ensureLiFiServerConfig() {
+  let settingsIntegrator: string | null = null
+  let settingsApiKey: string | null = null
+
   const { data: allSettings, error } = await SettingsRepository.getSettings()
-  if (error) {
-    return
+  if (!error) {
+    const generalSettings = allSettings?.[GENERAL_SETTINGS_GROUP]
+    settingsIntegrator = normalizeSettingValue(generalSettings?.[LIFI_INTEGRATOR_KEY]?.value)
+    settingsApiKey = normalizeSettingValue(decryptSecret(generalSettings?.[LIFI_API_KEY]?.value))
   }
 
-  const generalSettings = allSettings?.[GENERAL_SETTINGS_GROUP]
-  const integrator = normalizeSettingValue(generalSettings?.[LIFI_INTEGRATOR_KEY]?.value)
-  const encryptedApiKey = generalSettings?.[LIFI_API_KEY]?.value
-  const apiKey = normalizeSettingValue(decryptSecret(encryptedApiKey))
-
-  if (!integrator) {
-    if (configuredSignature !== null) {
-      createConfig({ integrator: DEFAULT_LIFI_INTEGRATOR })
-      configuredSignature = null
-    }
-    return
-  }
+  const integrator = settingsIntegrator
+    ?? normalizeSettingValue(process.env.LIFI_INTEGRATOR)
+    ?? DEFAULT_LIFI_INTEGRATOR
+  const apiKey = settingsApiKey ?? normalizeSettingValue(process.env.LIFI_API_KEY)
 
   const nextSignature = `${integrator}::${apiKey ?? ''}`
   if (configuredSignature === nextSignature) {

@@ -6,7 +6,7 @@ export interface TradingOnboardingContextValue {
   startDepositFlow: () => void
   startWithdrawFlow: () => void
   ensureTradingReady: () => boolean
-  openTradeRequirements: (options?: { forceTradingAuth?: boolean }) => void
+  openTradeRequirements: (options?: { forceTradingAuth?: boolean, forceApprovals?: boolean }) => void
   hasProxyWallet: boolean
   openWalletModal: () => void
 }
