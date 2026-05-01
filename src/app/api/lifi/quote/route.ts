@@ -6,6 +6,16 @@ import { sanitizeNumericInput } from '@/lib/amount-input'
 import { COLLATERAL_TOKEN_ADDRESS } from '@/lib/contracts'
 import { ensureLiFiServerConfig } from '@/lib/lifi'
 
+// Polymarket runs on Polygon — every deposit ends up as USDC on chain 137
+// (the CLOB collateral, COLLATERAL_TOKEN_ADDRESS). The earlier version of
+// this route quoted same-chain (toChain == fromChainId), which made LI.FI
+// reject it as "the same token cannot be used as both source and
+// destination" whenever the user already held USDC on the source chain.
+// Hardcoding the destination to Polygon USDC fixes that and matches the
+// product's actual deposit flow: any source token, any source chain, lands
+// as USDC on Polygon ready for the Onramp wrap into pUSD.
+const POLYGON_CHAIN_ID = 137
+
 interface QuoteRequestBody {
   fromChainId: number
   fromTokenAddress: string
@@ -55,21 +65,29 @@ export async function POST(request: Request) {
   try {
     const tokensResponse = await getTokens({
       extended: true,
-      chains: [body.fromChainId],
+      chains: [POLYGON_CHAIN_ID],
     })
 
-    const chainTokens = tokensResponse.tokens[body.fromChainId] ?? []
-    const usdcToken = findUsdcToken(chainTokens)
+    const polygonTokens = tokensResponse.tokens[POLYGON_CHAIN_ID] ?? []
+    const polygonUsdc = findUsdcToken(polygonTokens)
 
-    if (!usdcToken) {
-      return NextResponse.json({ error: 'USDC token not available on this chain.' }, { status: 400 })
+    if (!polygonUsdc) {
+      return NextResponse.json({ error: 'USDC token not available on Polygon.' }, { status: 400 })
+    }
+
+    const isSameChainSameToken = body.fromChainId === POLYGON_CHAIN_ID
+      && body.fromTokenAddress.toLowerCase() === polygonUsdc.address.toLowerCase()
+    if (isSameChainSameToken) {
+      return NextResponse.json({
+        error: 'Already holding Polygon USDC. Use the direct deposit path instead of bridging.',
+      }, { status: 400 })
     }
 
     const quote = await getQuote({
       fromChain: body.fromChainId,
-      toChain: body.fromChainId,
+      toChain: POLYGON_CHAIN_ID,
       fromToken: body.fromTokenAddress,
-      toToken: usdcToken.address,
+      toToken: polygonUsdc.address,
       fromAddress: body.fromAddress,
       toAddress: body.toAddress,
       fromAmount,

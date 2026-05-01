@@ -1,28 +1,52 @@
 /**
- * Polymarket's CLOB / Data / Gamma / Relayer endpoints sit behind Cloudflare,
- * and Cloudflare's WAF rejects server-side requests that arrive without a
- * browser-like User-Agent. The block is documented in
- * https://github.com/Polymarket/py-clob-client/issues/91 and #143; symptoms
- * are an HTML "Attention Required!" challenge page returned with a 403/520,
- * not a JSON error. Browsers pass through fine because they ship a real UA;
- * Vercel/Supabase/Fly server functions fail intermittently (~30-50%) without
- * it.
+ * Polymarket's CLOB / Data / Gamma / Relayer endpoints sit behind Cloudflare.
+ * The WAF on `clob.polymarket.com/auth/api-key` (and to a lesser extent
+ * `/order` and `/cancel`) is strict: it rejects any request that does not
+ * present the full set of fetch-metadata headers a real Chrome tab would
+ * send. Just spoofing User-Agent is not enough.
  *
- * `polymarketUpstreamFetch` adds a realistic browser User-Agent and a few
- * supporting Accept headers to every server-to-Polymarket request. Use it
- * for any call to clob.polymarket.com, gamma-api.polymarket.com,
- * data-api.polymarket.com, or relayer-v2.polymarket.com.
+ * Empirically (verified 2026-05-01) the WAF passes a request through to
+ * Polymarket's API only when the request carries:
+ *   - A current Chrome User-Agent
+ *   - Origin: https://polymarket.com
+ *   - Referer: https://polymarket.com/
+ *   - Sec-Fetch-Dest, Sec-Fetch-Mode, Sec-Fetch-Site
+ *   - Sec-Ch-Ua, Sec-Ch-Ua-Mobile, Sec-Ch-Ua-Platform
+ *   - Accept, Accept-Language
  *
- * The User-Agent string is anchored to a recent stable Chrome on macOS so
- * Cloudflare's bot-score model treats us as a normal browser. Update only
- * when the major Chrome version moves so we don't drift into the
- * "ancient browser" detection bucket.
+ * Without these the WAF returns the Cloudflare "Attention Required!" HTML
+ * challenge page (`Polymarket/py-clob-client#91`, #143). Even routing through
+ * a Cloudflare Worker still requires the headers — the Worker carries the
+ * request to Polymarket's edge but the WAF's bot-score still inspects the
+ * headers themselves.
+ *
+ * The User-Agent and Sec-Ch-Ua versions are anchored to a recent stable
+ * Chrome on macOS. Update them when Chrome's major version moves so the
+ * fingerprint stays in the "normal browser" bucket and out of the
+ * "ancient browser" bucket.
  */
 
 const POLYMARKET_UPSTREAM_USER_AGENT
   = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
     + 'AppleWebKit/537.36 (KHTML, like Gecko) '
     + 'Chrome/126.0.0.0 Safari/537.36'
+
+const POLYMARKET_UPSTREAM_SEC_CH_UA
+  = '"Chromium";v="126", "Google Chrome";v="126", "Not.A/Brand";v="24"'
+
+const POLYMARKET_BROWSER_HEADERS: Record<string, string> = {
+  'user-agent': POLYMARKET_UPSTREAM_USER_AGENT,
+  'accept': 'application/json,text/plain,*/*',
+  'accept-language': 'en-US,en;q=0.9',
+  'origin': 'https://polymarket.com',
+  'referer': 'https://polymarket.com/',
+  'sec-fetch-dest': 'empty',
+  'sec-fetch-mode': 'cors',
+  'sec-fetch-site': 'same-site',
+  'sec-ch-ua': POLYMARKET_UPSTREAM_SEC_CH_UA,
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"macOS"',
+}
 
 interface PolymarketFetchInit extends RequestInit {
   /** Override the default User-Agent. Reserved for the rare callers that need it. */
@@ -35,11 +59,10 @@ export async function polymarketUpstreamFetch(
 ): Promise<Response> {
   const { userAgent, headers, ...rest } = init
   const merged = new Headers(headers)
-  if (!merged.has('user-agent')) {
-    merged.set('user-agent', userAgent ?? POLYMARKET_UPSTREAM_USER_AGENT)
-  }
-  if (!merged.has('accept-language')) {
-    merged.set('accept-language', 'en-US,en;q=0.9')
+  for (const [name, value] of Object.entries(POLYMARKET_BROWSER_HEADERS)) {
+    if (!merged.has(name)) {
+      merged.set(name, name === 'user-agent' ? (userAgent ?? value) : value)
+    }
   }
   return fetch(input, { ...rest, headers: merged })
 }

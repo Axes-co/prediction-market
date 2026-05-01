@@ -1,0 +1,24 @@
+# Cloudflare Worker: clob.polymarket.com pass-through proxy.
+#
+# Why this exists. Polymarket's WAF on `clob.polymarket.com/auth/api-key`
+# blocks server-side requests at the TLS / bot-score level; even with full
+# browser-style headers, requests originating from Vercel / Supabase / any
+# datacenter IP get the Cloudflare "Attention Required" 403 HTML challenge
+# (Polymarket/py-clob-client#91, #143; verified empirically 2026-05-01).
+# Cloudflare Workers ride Cloudflare's internal backbone and pass the WAF
+# when paired with the browser-style headers our `polymarketUpstreamFetch`
+# already sends. The Worker is a stateless 1:1 pass-through; nothing about
+# request signing, body, or auth is changed.
+#
+# Deploy: `cd workers/clob-proxy && wrangler deploy`
+# Update `CLOB_URL` in Vercel env to https://<this-worker>.<account>.workers.dev
+# (or to a custom hostname if you put it behind a route).
+
+name = "axes-clob-proxy"
+main = "src/index.js"
+compatibility_date = "2026-05-01"
+account_id = "fdc05931f8e674c35e9a0b4b80c21fe8"
+workers_dev = true
+
+[observability]
+enabled = true
