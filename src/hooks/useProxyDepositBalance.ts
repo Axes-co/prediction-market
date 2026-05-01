@@ -1,23 +1,11 @@
-import type { Address, PublicClient } from 'viem'
+import type { Address } from 'viem'
 import { useQuery } from '@tanstack/react-query'
-import { useMemo } from 'react'
-import { createPublicClient, formatUnits, http } from 'viem'
-import { defaultNetwork } from '@/lib/appkit'
+import { formatUnits } from 'viem'
 import { COLLATERAL_TOKEN_ADDRESS, NATIVE_USDC_TOKEN_ADDRESS, PUSD_ADDRESS } from '@/lib/contracts'
 import { normalizeAddress } from '@/lib/wallet'
 import { useUser } from '@/stores/useUser'
 
 const USDC_DECIMALS = 6
-const ERC20_BALANCE_ABI = [
-  {
-    type: 'function',
-    name: 'balanceOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ type: 'uint256' }],
-  },
-] as const
-
 const USD_FORMATTER = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -50,7 +38,10 @@ interface UseProxyDepositBalanceOptions {
   enabled?: boolean
 }
 
-const RPC_URL = defaultNetwork.rpcUrls.default.http[0]
+interface PolymarketWalletBalanceResponseItem {
+  address: string
+  rawBase: string
+}
 
 /**
  * Reads the Safe proxy's native USDC, USDC.e, and pUSD balances and exposes
@@ -63,11 +54,6 @@ const RPC_URL = defaultNetwork.rpcUrls.default.http[0]
  */
 export function useProxyDepositBalance(options: UseProxyDepositBalanceOptions = {}) {
   const user = useUser()
-
-  const client = useMemo<PublicClient>(() => createPublicClient({
-    chain: defaultNetwork,
-    transport: http(RPC_URL),
-  }), [])
 
   const proxyWalletAddress: Address | null = user?.proxy_wallet_address
     ? normalizeAddress(user.proxy_wallet_address) as Address | null
@@ -94,26 +80,22 @@ export function useProxyDepositBalance(options: UseProxyDepositBalanceOptions = 
       }
 
       try {
-        const [nativeUsdcRaw, usdceRaw, pusdRaw] = await Promise.all([
-          client.readContract({
-            address: NATIVE_USDC_TOKEN_ADDRESS,
-            abi: ERC20_BALANCE_ABI,
-            functionName: 'balanceOf',
-            args: [proxyWalletAddress],
-          }) as Promise<bigint>,
-          client.readContract({
-            address: COLLATERAL_TOKEN_ADDRESS,
-            abi: ERC20_BALANCE_ABI,
-            functionName: 'balanceOf',
-            args: [proxyWalletAddress],
-          }) as Promise<bigint>,
-          client.readContract({
-            address: PUSD_ADDRESS,
-            abi: ERC20_BALANCE_ABI,
-            functionName: 'balanceOf',
-            args: [proxyWalletAddress],
-          }) as Promise<bigint>,
-        ])
+        const response = await fetch('/api/wallet/polygon-usdc-balances', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ walletAddress: proxyWalletAddress }),
+        })
+        if (!response.ok) {
+          return INITIAL_STATE
+        }
+
+        const payload = await response.json() as { balances?: PolymarketWalletBalanceResponseItem[] }
+        const balancesByAddress = new Map(
+          (payload.balances ?? []).map(balance => [balance.address.toLowerCase(), balance]),
+        )
+        const nativeUsdcRaw = BigInt(balancesByAddress.get(NATIVE_USDC_TOKEN_ADDRESS.toLowerCase())?.rawBase ?? '0')
+        const usdceRaw = BigInt(balancesByAddress.get(COLLATERAL_TOKEN_ADDRESS.toLowerCase())?.rawBase ?? '0')
+        const pusdRaw = BigInt(balancesByAddress.get(PUSD_ADDRESS.toLowerCase())?.rawBase ?? '0')
 
         const nativeUsdc = Number(formatUnits(nativeUsdcRaw, USDC_DECIMALS))
         const usdce = Number(formatUnits(usdceRaw, USDC_DECIMALS))

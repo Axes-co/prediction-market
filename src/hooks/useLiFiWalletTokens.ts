@@ -1,6 +1,6 @@
 import type { ChainId, ExtendedChain, TokensExtendedResponse, WalletTokenExtended } from '@lifi/types'
 import { useQuery } from '@tanstack/react-query'
-import { createPublicClient, formatUnits, http } from 'viem'
+import { formatUnits } from 'viem'
 import { defaultNetwork } from '@/lib/appkit'
 import { COLLATERAL_TOKEN_ADDRESS, NATIVE_USDC_TOKEN_ADDRESS } from '@/lib/contracts'
 
@@ -97,49 +97,56 @@ interface UseLiFiWalletTokensOptions {
 const USDC_DECIMALS = 6
 const POLYGON_USDC_ICON = '/images/deposit/transfer/usdc_dark.png'
 const POLYGON_CHAIN_ICON = '/images/deposit/transfer/polygon_dark.png'
-const ERC20_BALANCE_ABI = [
-  {
-    type: 'function',
-    name: 'balanceOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ type: 'uint256' }],
-  },
-] as const
 
-const polygonClient = createPublicClient({
-  chain: defaultNetwork,
-  transport: http(defaultNetwork.rpcUrls.default.http[0]),
-})
+interface DirectPolygonUsdcBalance {
+  address: string
+  symbol: string
+  decimals: number
+  rawBase: string
+  kind?: string
+}
 
 function buildWalletTokenId(chainId: number, address: string) {
   return `${chainId}:${address.toLowerCase()}`
 }
 
 async function readDirectPolygonUsdcItems(walletAddress: string): Promise<LiFiWalletTokenItem[]> {
-  const assets = Array.from(new Map([
-    [NATIVE_USDC_TOKEN_ADDRESS.toLowerCase(), { address: NATIVE_USDC_TOKEN_ADDRESS, symbol: 'USDC' }],
-    [COLLATERAL_TOKEN_ADDRESS.toLowerCase(), { address: COLLATERAL_TOKEN_ADDRESS, symbol: 'USDC.e' }],
-  ]).values())
+  const response = await fetch('/api/wallet/polygon-usdc-balances', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ walletAddress }),
+  })
+  if (!response.ok) {
+    return []
+  }
 
-  const balances = await Promise.all(
-    assets.map(async (asset) => {
-      const rawBase = await polygonClient.readContract({
-        address: asset.address,
-        abi: ERC20_BALANCE_ABI,
-        functionName: 'balanceOf',
-        args: [walletAddress as `0x${string}`],
-      }) as bigint
-      return { ...asset, rawBase }
-    }),
-  )
+  const payload = await response.json() as { balances?: DirectPolygonUsdcBalance[] }
+  const balances = payload.balances ?? []
+
+  const directUsdcAssetAddresses = new Set([
+    NATIVE_USDC_TOKEN_ADDRESS.toLowerCase(),
+    COLLATERAL_TOKEN_ADDRESS.toLowerCase(),
+  ])
 
   return balances.flatMap((asset) => {
-    if (asset.rawBase <= 0n) {
+    if (!directUsdcAssetAddresses.has(asset.address.toLowerCase())) {
       return []
     }
 
-    const balanceRaw = Number(formatUnits(asset.rawBase, USDC_DECIMALS))
+    let rawBase: bigint
+    try {
+      rawBase = BigInt(asset.rawBase)
+    }
+    catch {
+      return []
+    }
+
+    if (rawBase <= 0n) {
+      return []
+    }
+
+    const decimals = Number.isFinite(asset.decimals) ? asset.decimals : USDC_DECIMALS
+    const balanceRaw = Number(formatUnits(rawBase, decimals))
     if (!Number.isFinite(balanceRaw) || balanceRaw <= 0) {
       return []
     }
@@ -148,7 +155,7 @@ async function readDirectPolygonUsdcItems(walletAddress: string): Promise<LiFiWa
       id: buildWalletTokenId(defaultNetwork.id, asset.address),
       chainId: defaultNetwork.id,
       address: asset.address,
-      decimals: USDC_DECIMALS,
+      decimals,
       symbol: asset.symbol,
       network: 'Polygon',
       icon: POLYGON_USDC_ICON,

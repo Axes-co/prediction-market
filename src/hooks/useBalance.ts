@@ -1,8 +1,5 @@
-import type { Address, PublicClient } from 'viem'
+import type { Address } from 'viem'
 import { useQuery } from '@tanstack/react-query'
-import { useMemo } from 'react'
-import { createPublicClient, getContract, http } from 'viem'
-import { defaultNetwork } from '@/lib/appkit'
 import { PUSD_ADDRESS } from '@/lib/contracts'
 import { normalizeAddress } from '@/lib/wallet'
 import { useUser } from '@/stores/useUser'
@@ -32,12 +29,6 @@ interface Balance {
 export const SAFE_BALANCE_QUERY_KEY = 'safe-usdc-balance'
 
 const PUSD_DECIMALS = 6
-const ERC20_ABI = [
-  { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'uint256' }] },
-  { type: 'function', name: 'decimals', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint8' }] },
-  { type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
-  { type: 'function', name: 'name', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
-]
 // Display label stays "USDC" because that's the user-facing concept (pUSD is
 // 1:1 backed by USDC and the user thinks in USDC). Internal trading code
 // reads `raw`/`rawBase` for amounts.
@@ -51,36 +42,20 @@ interface UseBalanceOptions {
   enabled?: boolean
 }
 
-const RPC_URL = defaultNetwork.rpcUrls.default.http[0]
+interface PolymarketWalletBalanceResponseItem {
+  address: string
+  rawBase: string
+}
 
 export function useBalance(options: UseBalanceOptions = {}) {
   const user = useUser()
-
-  const client = useMemo<PublicClient>(() => {
-    return createPublicClient({
-      chain: defaultNetwork,
-      transport: http(RPC_URL),
-    })
-  }, [])
 
   const proxyWalletAddress: Address | null = user?.proxy_wallet_address
     ? normalizeAddress(user.proxy_wallet_address) as Address | null
     : null
 
-  const contract = useMemo(() => {
-    if (!proxyWalletAddress) {
-      return null
-    }
-
-    return getContract({
-      address: PUSD_ADDRESS,
-      abi: ERC20_ABI,
-      client,
-    })
-  }, [client, proxyWalletAddress])
-
   const isOptionsEnabled = options.enabled ?? true
-  const isQueryEnabled = Boolean(client && proxyWalletAddress && isOptionsEnabled)
+  const isQueryEnabled = Boolean(proxyWalletAddress && isOptionsEnabled)
 
   const {
     data,
@@ -95,12 +70,24 @@ export function useBalance(options: UseBalanceOptions = {}) {
     refetchInterval: 10_000,
     refetchIntervalInBackground: true,
     queryFn: async (): Promise<Balance> => {
-      if (!proxyWalletAddress || !contract) {
+      if (!proxyWalletAddress) {
         return INITIAL_STATE
       }
 
       try {
-        const balanceRaw = await contract.read.balanceOf([proxyWalletAddress])
+        const response = await fetch('/api/wallet/polygon-usdc-balances', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ walletAddress: proxyWalletAddress }),
+        })
+        if (!response.ok) {
+          return INITIAL_STATE
+        }
+
+        const payload = await response.json() as { balances?: PolymarketWalletBalanceResponseItem[] }
+        const pusdBalance = (payload.balances ?? [])
+          .find(balance => balance.address.toLowerCase() === PUSD_ADDRESS.toLowerCase())
+        const balanceRaw = BigInt(pusdBalance?.rawBase ?? '0')
         const balanceNumber = Number(balanceRaw) / 10 ** PUSD_DECIMALS
 
         return {
