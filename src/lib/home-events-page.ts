@@ -1,8 +1,6 @@
 import type { SupportedLocale } from '@/i18n/locales'
 import type { EventListSortBy, EventListStatusFilter } from '@/lib/event-list-filters'
 import type { Event } from '@/types'
-import { cacheTag } from 'next/cache'
-import { cacheTags } from '@/lib/cache-tags'
 import { EventRepository } from '@/lib/db/queries/event'
 import { filterHomeEvents, HOME_EVENTS_PAGE_SIZE } from '@/lib/home-events'
 
@@ -49,10 +47,15 @@ async function loadHomeEventCandidates({
   tag,
   userId,
 }: LoadHomeEventCandidatesOptions) {
-  'use cache'
-  cacheTag(cacheTags.events(userId || 'guest'))
-  cacheTag(cacheTags.eventsList)
-
+  // No `'use cache'` here. With the events table at ~1.7k rows the loop below
+  // runs up to 3 sequential `EventRepository.listEvents` calls (each its own
+  // `'use cache'` boundary already tagged with `cacheTags.eventsList` and
+  // `cacheTags.events(userId)`). Wrapping the loop in an outer cache scope
+  // forced the sum of the inner fills into a single 50s prerender budget,
+  // which produced USE_CACHE_TIMEOUT once the events table grew past the
+  // single-batch threshold (`d33149d5` documented the failure mode but the
+  // outer/inner page split alone wasn't enough — the inner data layer is the
+  // right place to cache, per next.js use-cache + i18n guidance).
   const targetOffset = Math.max(0, offset)
   const targetVisibleCount = targetOffset + HOME_EVENTS_PAGE_SIZE
   const isDev = process.env.NODE_ENV === 'development'

@@ -1,5 +1,3 @@
-'use cache'
-
 import type { SupportedLocale } from '@/i18n/locales'
 import { getExtracted, setRequestLocale } from 'next-intl/server'
 import AffiliateQueryHandler from '@/app/[locale]/(platform)/_components/AffiliateQueryHandler'
@@ -36,11 +34,22 @@ export default async function PlatformLayout({ params, children }: LayoutProps<'
           <Header />
           <NavigationTabs />
           {children}
-          <Footer year={new Date().getFullYear()} />
+          <CachedFooter />
           <MobileBottomNav />
           <AffiliateQueryHandler />
         </PlatformNavigationProvider>
       </FilterProvider>
     </AppKitProvider>
   )
+}
+
+// Wraps `<Footer year={...}/>` so `new Date()` resolves at build time inside
+// a `'use cache'` scope, per Next.js 16 cache-components rules: outside a
+// cache scope the prerender refuses non-deterministic calls (`new Date()`,
+// `Math.random()`) unless preceded by uncached/request data access; inside
+// a cache scope they are allowed and execute once. The CLAUDE.md customization
+// keeping `year={new Date().getFullYear()}` is preserved.
+async function CachedFooter() {
+  'use cache'
+  return <Footer year={new Date().getFullYear()} />
 }
