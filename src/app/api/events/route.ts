@@ -6,6 +6,7 @@ import { DEFAULT_ERROR_MESSAGE } from '@/lib/constants'
 import { EventRepository } from '@/lib/db/queries/event'
 import { UserRepository } from '@/lib/db/queries/user'
 import { isEventListSortBy, isEventListStatusFilter } from '@/lib/event-list-filters'
+import { searchAndPersistFromPolymarket } from '@/lib/gamma/search'
 import { listHomeEventsPage } from '@/lib/home-events-page'
 
 export async function GET(request: Request) {
@@ -55,6 +56,15 @@ export async function GET(request: Request) {
 
   const user = await UserRepository.getCurrentUser({ minimal: true })
   const userId = user?.id
+
+  // Search-driven sync: when the caller is doing free-text search, pull
+  // matching events from gamma's /public-search and persist them through
+  // the existing sync upserter before running the local DB query. This is
+  // what makes the header search match Polymarket's catalog -- the cron
+  // crawls broadly, this fills the long-tail on demand.
+  if (search.trim().length >= 2) {
+    await searchAndPersistFromPolymarket(search)
+  }
 
   try {
     if (bookmarked && !userId) {
