@@ -10,6 +10,7 @@ import {
   CHART_PADDING,
 } from '@/lib/embed-dimensions'
 import { clampPrice } from '@/lib/embed-utils'
+import { polymarketUpstreamFetch } from '@/lib/polymarket/upstream-fetch'
 import { cacheKeys, cacheTTL, withCache } from '@/lib/redis'
 
 // ---------------------------------------------------------------------------
@@ -84,7 +85,7 @@ async function fetchPriceHistoryFromClob(
   url.searchParams.set('startTs', startTs.toString())
   url.searchParams.set('endTs', endTs.toString())
 
-  const response = await fetch(url.toString(), { next: { revalidate: 60 } })
+  const response = await polymarketUpstreamFetch(url.toString(), { next: { revalidate: 60 } })
   if (!response.ok) {
     return []
   }

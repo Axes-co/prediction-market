@@ -14,6 +14,7 @@ import { markets } from '@/lib/db/schema/events/tables'
 import { runQuery } from '@/lib/db/utils/run-query'
 import { db } from '@/lib/drizzle'
 import { buildClobHmacSignature } from '@/lib/hmac'
+import { polymarketUpstreamFetch } from '@/lib/polymarket/upstream-fetch'
 import { getPublicAssetUrl } from '@/lib/storage'
 import { getUserTradingAuthSecrets } from '@/lib/trading-auth/server'
 
@@ -128,7 +129,7 @@ async function fetchClobOpenOrders({
   const timestamp = Math.floor(Date.now() / 1000)
   const signature = buildClobHmacSignature(auth.secret, timestamp, 'GET', path)
 
-  const response = await fetch(`${CLOB_URL}${path}`, {
+  const response = await polymarketUpstreamFetch(`${CLOB_URL}${path}`, {
     method: 'GET',
     headers: {
       Accept: 'application/json',

@@ -9,6 +9,7 @@ import {
   L2_AUTH_CONTEXT_COOKIE_NAME_SECURE,
   L2_AUTH_CONTEXT_TTL_SECONDS,
 } from '@/lib/l2-auth-context'
+import { polymarketUpstreamFetch } from '@/lib/polymarket/upstream-fetch'
 import { saveUserTradingAuthCredentials } from '@/lib/trading-auth/server'
 import {
   getTradingFlowErrorPreview,
@@ -33,7 +34,7 @@ const GenerateTradingAuthSchema = z.object({
 async function requestApiKey(baseUrl: string, headers: Record<string, string>) {
   let response: Response
   try {
-    response = await fetch(`${baseUrl}/auth/api-key`, {
+    response = await polymarketUpstreamFetch(`${baseUrl}/auth/api-key`, {
       method: 'POST',
       headers,
       body: '',

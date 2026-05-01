@@ -10,6 +10,8 @@
  * the fee preview to render the protocol-set fee rate before submission.
  */
 
+import { polymarketUpstreamFetch } from '@/lib/polymarket/upstream-fetch'
+
 const DEFAULT_BASE_URL = 'https://clob.polymarket.com'
 const REQUEST_TIMEOUT_MS = 5_000
 
@@ -93,7 +95,7 @@ export async function getClobMarketInfo(
     ? AbortSignal.any([externalSignal, timeoutSignal])
     : timeoutSignal
 
-  const response = await fetch(`${baseUrl}/clob-markets/${trimmed}`, { signal })
+  const response = await polymarketUpstreamFetch(`${baseUrl}/clob-markets/${trimmed}`, { signal })
   if (!response.ok) {
     const text = await response.text().catch(() => '')
     throw new ClobMarketInfoError(response.status, text || `HTTP ${response.status}`)

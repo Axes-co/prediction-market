@@ -2,6 +2,7 @@
 
 import { UserRepository } from '@/lib/db/queries/user'
 import { buildClobHmacSignature } from '@/lib/hmac'
+import { polymarketUpstreamFetch } from '@/lib/polymarket/upstream-fetch'
 import { TRADING_AUTH_REQUIRED_ERROR } from '@/lib/trading-auth/errors'
 import { getUserTradingAuthSecrets } from '@/lib/trading-auth/server'
 
@@ -53,7 +54,7 @@ export async function cancelAllOrdersAction(): Promise<CancelAllOrdersResult> {
   )
 
   try {
-    const response = await fetch(`${process.env.CLOB_URL}${path}`, {
+    const response = await polymarketUpstreamFetch(`${process.env.CLOB_URL}${path}`, {
       method,
       headers: {
         Accept: 'application/json',
