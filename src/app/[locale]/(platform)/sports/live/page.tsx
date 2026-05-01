@@ -1,5 +1,3 @@
-'use cache'
-
 import type { Metadata } from 'next'
 import type { SupportedLocale } from '@/i18n/locales'
 import { getExtracted, setRequestLocale } from 'next-intl/server'
@@ -24,9 +22,12 @@ export async function generateMetadata({ params }: PageProps<'/[locale]/sports/l
   }
 }
 
-export default async function SportsLivePage({ params }: PageProps<'/[locale]/sports/live'>) {
-  const { locale } = await params
-  setRequestLocale(locale)
+// Same outer/inner split as `(home)/new/page.tsx` and `(home)/page.tsx`.
+// File-level `'use cache'` plus `await params` inside the exported function
+// triggered USE_CACHE_TIMEOUT during prerender; isolating the cached path
+// to a function that never reads request-bound data fixes it.
+async function CachedSportsLiveContent({ locale }: { locale: SupportedLocale }) {
+  'use cache'
   const [{ data: events }, { data: layoutData }] = await Promise.all([
     EventRepository.listEvents({
       tag: 'sports',
@@ -35,7 +36,7 @@ export default async function SportsLivePage({ params }: PageProps<'/[locale]/sp
       userId: '',
       bookmarked: false,
       status: 'active',
-      locale: locale as SupportedLocale,
+      locale,
       sportsSection: 'games',
     }),
     SportsMenuRepository.getLayoutData('sports'),
@@ -54,4 +55,10 @@ export default async function SportsLivePage({ params }: PageProps<'/[locale]/sp
       />
     </div>
   )
+}
+
+export default async function SportsLivePage({ params }: PageProps<'/[locale]/sports/live'>) {
+  const { locale } = await params
+  setRequestLocale(locale)
+  return <CachedSportsLiveContent locale={locale as SupportedLocale} />
 }
