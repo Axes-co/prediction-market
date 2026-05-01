@@ -1,3 +1,4 @@
+import type { GammaEventOrder, GammaEventState } from './client'
 import type { GammaCursorMap } from './lock'
 import type { MappedMarket } from './mapper'
 import type { GammaEvent, GammaMarket } from './types'
@@ -27,6 +28,7 @@ export interface GammaSyncError {
 export interface GammaSourceResult {
   sourceUrl: string
   displayName: string
+  lane: string
   pagesFetched: number
   eventsSeen: number
   eventsSkippedNoMarkets: number
@@ -54,6 +56,44 @@ export interface GammaSyncResult {
 
 const DEFAULT_TIME_LIMIT_MS = 250_000
 const POLYMARKET_GAMMA_URL = 'https://gamma-api.polymarket.com'
+
+interface GammaSyncLane {
+  id: string
+  displayName: string
+  order: GammaEventOrder
+  pageSize?: number
+  state: GammaEventState
+  maxPagesPerSource?: number
+  persistCursor: boolean
+}
+
+const DEFAULT_GAMMA_SYNC_LANES: GammaSyncLane[] = [
+  {
+    id: 'active-volume24hr',
+    displayName: 'active volume24hr',
+    order: 'volume24hr',
+    pageSize: 100,
+    state: 'active',
+    maxPagesPerSource: 1,
+    persistCursor: false,
+  },
+  {
+    id: 'active-createdAt',
+    displayName: 'active createdAt',
+    order: 'createdAt',
+    pageSize: 100,
+    state: 'active',
+    maxPagesPerSource: 1,
+    persistCursor: false,
+  },
+  {
+    id: 'all-volume',
+    displayName: 'all volume',
+    order: 'volume',
+    state: 'all',
+    persistCursor: true,
+  },
+]
 
 export async function runGammaSync(options: GammaSyncOptions = {}): Promise<GammaSyncResult> {
   const startedAt = Date.now()
@@ -163,45 +203,56 @@ async function runWhileLocked(
   let listAffectingChange = false
   let urlSetChanged = false
   const nextCursors: GammaCursorMap = {}
+  const lanes = DEFAULT_GAMMA_SYNC_LANES
 
   for (const source of sources) {
-    if (Date.now() - startedAt > timeLimitMs) {
-      result.timeLimitReached = true
-      // Carry the unconsumed cursor forward so the next cron tick resumes here.
-      nextCursors[source.sourceUrl] = persistedCursors[source.sourceUrl] ?? null
-      continue
+    for (const lane of lanes) {
+      const cursorKey = getGammaSyncCursorKey(source.sourceUrl, lane)
+
+      if (Date.now() - startedAt > timeLimitMs) {
+        result.timeLimitReached = true
+        if (lane.persistCursor) {
+          nextCursors[cursorKey] = persistedCursors[cursorKey] ?? null
+        }
+        continue
+      }
+
+      const startCursor = lane.persistCursor
+        ? options.startCursor !== undefined
+          ? options.startCursor
+          : persistedCursors[cursorKey] ?? null
+        : null
+
+      const sourceResult = await syncSingleSource(
+        source,
+        lane,
+        options,
+        startedAt,
+        timeLimitMs,
+        startCursor,
+        {
+          changedEventSlugs,
+          onListAffecting: () => { listAffectingChange = true },
+          onUrlSetChanged: () => { urlSetChanged = true },
+          collectError: error => result.errors.push(error),
+        },
+      )
+
+      result.sources.push(sourceResult)
+      result.totalEventsInserted += sourceResult.eventsInserted
+      result.totalEventsUpdated += sourceResult.eventsUpdated
+      result.totalMarketsInserted += sourceResult.marketsInserted
+      result.totalMarketsUpdated += sourceResult.marketsUpdated
+      result.totalMarketsSkipped += sourceResult.marketsSkipped
+      if (sourceResult.timeLimitReached) {
+        result.timeLimitReached = true
+      }
+      if (lane.persistCursor) {
+        // A null cursor means we exhausted the historical lane; next run wraps
+        // back to the start of the volume-sorted feed to refresh top events.
+        nextCursors[cursorKey] = sourceResult.cursor
+      }
     }
-
-    const startCursor = options.startCursor !== undefined
-      ? options.startCursor
-      : persistedCursors[source.sourceUrl] ?? null
-
-    const sourceResult = await syncSingleSource(
-      source,
-      options,
-      startedAt,
-      timeLimitMs,
-      startCursor,
-      {
-        changedEventSlugs,
-        onListAffecting: () => { listAffectingChange = true },
-        onUrlSetChanged: () => { urlSetChanged = true },
-        collectError: error => result.errors.push(error),
-      },
-    )
-
-    result.sources.push(sourceResult)
-    result.totalEventsInserted += sourceResult.eventsInserted
-    result.totalEventsUpdated += sourceResult.eventsUpdated
-    result.totalMarketsInserted += sourceResult.marketsInserted
-    result.totalMarketsUpdated += sourceResult.marketsUpdated
-    result.totalMarketsSkipped += sourceResult.marketsSkipped
-    if (sourceResult.timeLimitReached) {
-      result.timeLimitReached = true
-    }
-    // A null cursor means we exhausted the source; next run wraps back to the
-    // start of the volume-sorted feed to refresh top events.
-    nextCursors[source.sourceUrl] = sourceResult.cursor
   }
 
   for (const slug of changedEventSlugs) {
@@ -223,6 +274,16 @@ async function runWhileLocked(
   return result
 }
 
+function getGammaSyncCursorKey(sourceUrl: string, lane: GammaSyncLane) {
+  // Preserve the pre-lane cursor key for the historical all-volume crawl so
+  // existing production cursor state survives this deployment.
+  if (lane.id === 'all-volume') {
+    return sourceUrl
+  }
+
+  return `${sourceUrl}#${lane.id}`
+}
+
 function safeRevalidateTag(tag: string): boolean {
   try {
     revalidateTag(tag, 'max')
@@ -242,16 +303,23 @@ interface SourceContext {
 
 async function syncSingleSource(
   source: ResolvedGammaSource,
+  lane: GammaSyncLane,
   options: GammaSyncOptions,
   startedAt: number,
   timeLimitMs: number,
   startCursor: string | null,
   context: SourceContext,
 ): Promise<GammaSourceResult> {
-  const client = new GammaClient({ baseUrl: source.sourceUrl, pageSize: options.pageSize })
+  const client = new GammaClient({
+    baseUrl: source.sourceUrl,
+    pageSize: options.pageSize ?? lane.pageSize,
+    order: lane.order,
+    state: lane.state,
+  })
   const sourceResult: GammaSourceResult = {
     sourceUrl: source.sourceUrl,
-    displayName: source.displayName,
+    displayName: `${source.displayName} (${lane.displayName})`,
+    lane: lane.id,
     pagesFetched: 0,
     eventsSeen: 0,
     eventsSkippedNoMarkets: 0,
@@ -266,7 +334,7 @@ async function syncSingleSource(
 
   let cursor: string | null = startCursor
   let firstPage = true
-  const maxPages = options.maxPagesPerSource ?? Number.POSITIVE_INFINITY
+  const maxPages = options.maxPagesPerSource ?? lane.maxPagesPerSource ?? Number.POSITIVE_INFINITY
 
   while (firstPage || cursor) {
     if (Date.now() - startedAt > timeLimitMs) {
@@ -278,9 +346,9 @@ async function syncSingleSource(
     }
 
     firstPage = false
-    const page = await client.fetchActiveEventsPage(cursor)
+    const page = await client.fetchEventsPage(cursor)
     sourceResult.pagesFetched += 1
-    sourceResult.cursor = page.nextCursor
+    sourceResult.cursor = lane.persistCursor ? page.nextCursor : null
 
     for (const gammaEvent of page.events) {
       sourceResult.eventsSeen += 1

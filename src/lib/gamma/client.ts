@@ -1,6 +1,6 @@
 import type { GammaKeysetPage } from './types'
 
-export type GammaEventOrder = 'volume' | 'createdAt' | 'endDate'
+export type GammaEventOrder = 'volume' | 'volume24hr' | 'createdAt' | 'startDate' | 'endDate'
 
 /**
  * Lifecycle state filter passed to Gamma's `/events/keyset`. The Polymarket

@@ -23,6 +23,26 @@ describe('gammaClient.fetchActiveEventsPage', () => {
     expect(url).toContain('limit=500')
   })
 
+  it('passes active lifecycle and current-volume order params when configured', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      mockResponse({ events: [], next_cursor: null }),
+    )
+    const client = new GammaClient({
+      fetcher,
+      baseUrl: 'https://gamma-api.test',
+      order: 'volume24hr',
+      state: 'active',
+    })
+
+    await client.fetchEventsPage(null)
+
+    const url = new URL(String(fetcher.mock.calls[0]?.[0]))
+    expect(url.searchParams.get('order')).toBe('volume24hr')
+    expect(url.searchParams.get('active')).toBe('true')
+    expect(url.searchParams.get('closed')).toBe('false')
+    expect(url.searchParams.get('archived')).toBe('false')
+  })
+
   it('passes cursor as after_cursor on subsequent pages', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       mockResponse({ events: [], next_cursor: null }),
