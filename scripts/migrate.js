@@ -4,9 +4,6 @@ const fs = require('node:fs')
 const path = require('node:path')
 const postgres = require('postgres')
 
-const MIGRATION_LOCK_NAMESPACE = 20817
-const MIGRATION_LOCK_KEY = 1
-
 function escapeSqlLiteral(value) {
   return String(value).replace(/'/g, '\'\'')
 }
@@ -278,30 +275,71 @@ async function configureSupabaseScheduler(sql) {
 }
 
 function resolveMigrationConnectionString() {
-  const migrationUrl = process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL
+  // Prefer POSTGRES_URL_NON_POOLING (Vercel/Neon canonical name for the
+  // direct DB URL). Fall back to POSTGRES_URL.
+  //
+  // We deliberately do NOT rewrite the port to 5432 anymore. The previous
+  // implementation forced session-mode (port 5432) so it could call
+  // `pg_advisory_lock`, but that pool has a hard cap at the per-tier Pool
+  // Size (~15 on smaller Supabase compute instances). Under any load --
+  // active syncs, wallet-balance polling, lingering build attempts -- the
+  // 15 slots fill, every new build hits ECHECKOUTTIMEOUT in Session mode,
+  // and migrations never run.
+  //
+  // Transaction-mode pooler (port 6543) accepts ~200 concurrent client
+  // connections. We use it directly. The advisory lock is gone (replaced
+  // by the row-based lock in `acquireMigrationLock` below) and migrations
+  // are wrapped in transactions, which is exactly the workload pgbouncer
+  // transaction-mode is designed for.
+  return process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL || null
+}
 
-  if (!migrationUrl) {
-    return null
-  }
+// Row-based migration lock. Replaces the previous `pg_advisory_lock`
+// implementation, which required session-mode pooling. Uses a single-row
+// table; INSERT/DELETE are atomic, ON CONFLICT prevents double-acquire.
+//
+// Stale lock recovery: if a previous build crashed mid-migration without
+// releasing, the row stays. We treat any lock acquired more than 15 minutes
+// ago as stale and reclaim it (`INTERVAL '15 minutes'` in the SQL below).
+// Vercel build timeout is shorter than that in practice, so a real
+// concurrent build is essentially impossible -- a build that's been
+// running 15+ minutes has already been killed by Vercel.
+const MIGRATION_LOCK_HOLDER = `vercel-build-${process.env.VERCEL_DEPLOYMENT_ID || process.pid}`
 
-  // Supabase's transaction-mode pooler (port 6543) does NOT support
-  // session-scoped features like `pg_advisory_lock`, which acquireMigrationLock
-  // depends on. The lock call hangs and the build dies on the 2-min
-  // statement_timeout. If POSTGRES_URL_NON_POOLING isn't configured and we're
-  // pointed at the transaction pooler, swap to the session-mode pooler on
-  // port 5432 (same hostname) so advisory locks work.
-  const sessionModeUrl = migrationUrl
-    .replace(/:6543\b/, ':5432')
-
-  return sessionModeUrl.replace('require', 'disable')
+async function ensureMigrationLockTable(sql) {
+  await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS migration_locks (
+      id           INTEGER PRIMARY KEY,
+      holder       TEXT NOT NULL,
+      acquired_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `)
 }
 
 async function acquireMigrationLock(sql) {
-  await sql`SELECT pg_advisory_lock(${MIGRATION_LOCK_NAMESPACE}, ${MIGRATION_LOCK_KEY})`
+  await ensureMigrationLockTable(sql)
+
+  // Insert if absent. If a stale row exists, take it over.
+  const result = await sql`
+    INSERT INTO migration_locks (id, holder, acquired_at)
+    VALUES (1, ${MIGRATION_LOCK_HOLDER}, NOW())
+    ON CONFLICT (id) DO UPDATE
+      SET holder = EXCLUDED.holder,
+          acquired_at = NOW()
+      WHERE migration_locks.acquired_at < NOW() - INTERVAL '15 minutes'
+    RETURNING holder
+  `
+  if (result.length === 0) {
+    const existing = await sql`SELECT holder, acquired_at FROM migration_locks WHERE id = 1`
+    const detail = existing[0]
+      ? `held by ${existing[0].holder} since ${existing[0].acquired_at?.toISOString?.() ?? existing[0].acquired_at}`
+      : 'unknown holder'
+    throw new Error(`Migration lock already held (${detail}). If this is wrong, manually DELETE FROM migration_locks WHERE id = 1.`)
+  }
 }
 
 async function releaseMigrationLock(sql) {
-  await sql`SELECT pg_advisory_unlock(${MIGRATION_LOCK_NAMESPACE}, ${MIGRATION_LOCK_KEY})`
+  await sql`DELETE FROM migration_locks WHERE id = 1 AND holder = ${MIGRATION_LOCK_HOLDER}`
 }
 
 async function run() {
@@ -313,34 +351,36 @@ async function run() {
 
   const requiresSsl = connectionString.includes('sslmode=require')
     || connectionString.includes('neon.tech')
+  // `prepare: false` is required for pgbouncer transaction-mode (it
+  // rotates underlying backend connections per transaction, so prepared
+  // statements registered on one connection won't exist on the next).
   const sql = postgres(connectionString, {
     max: 1,
+    prepare: false,
     connect_timeout: 30,
     idle_timeout: 5,
     ...(requiresSsl ? { ssl: 'require' } : {}),
   })
-  let reserved = null
   let lockAcquired = false
 
   try {
     const isSupabaseMode = resolveSupabaseMode(process.env)
 
     console.log('Connecting to database...')
-    reserved = await sql.reserve()
-    await reserved`SELECT 1`
+    await sql`SELECT 1`
     console.log('Connected to database successfully')
 
     console.log('Acquiring migration lock...')
-    await acquireMigrationLock(reserved)
+    await acquireMigrationLock(sql)
     lockAcquired = true
     console.log('Migration lock acquired')
 
     console.log(`Migration mode: ${isSupabaseMode ? 'Supabase' : 'Postgres+S3'}`)
-    await applyMigrations(reserved, isSupabaseMode)
-    await ensureSyncSeedRows(reserved)
+    await applyMigrations(sql, isSupabaseMode)
+    await ensureSyncSeedRows(sql)
 
     if (isSupabaseMode) {
-      await configureSupabaseScheduler(reserved)
+      await configureSupabaseScheduler(sql)
     }
     else {
       console.log('Skipping database scheduler setup because Supabase mode is not configured. Sync routes are scheduled via vercel.json cron.')
@@ -351,23 +391,16 @@ async function run() {
     process.exitCode = 1
   }
   finally {
-    if (reserved) {
+    if (sql) {
       if (lockAcquired) {
         try {
           console.log('Releasing migration lock...')
-          await releaseMigrationLock(reserved)
+          await releaseMigrationLock(sql)
           console.log('Migration lock released')
         }
         catch (error) {
           console.error('Failed to release migration lock:', error)
         }
-      }
-
-      try {
-        await reserved.release()
-      }
-      catch (error) {
-        console.error('Failed to release reserved connection:', error)
       }
     }
 

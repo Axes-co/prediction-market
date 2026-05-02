@@ -17,7 +17,20 @@ function createDb(): DrizzleDb {
   }
 
   const requiresSsl = url.includes('sslmode=require') || url.includes('neon.tech')
+  // Serverless-tuned. Each Vercel function instance keeps at most ONE
+  // connection from the upstream pool (Supabase pgbouncer / Neon) instead
+  // of postgres.js's default of 10. With dozens of warm function
+  // instances (every wallet poll spins one up), the default behavior
+  // demands 100+ concurrent connections from a pool that's hard-capped
+  // at the compute-tier limit (Supabase pgbouncer transaction-mode caps
+  // ~200 client connections, session-mode caps at the per-tier Pool Size
+  // which defaults to 15 on the smaller compute sizes). Verified
+  // 2026-05-02: ECHECKOUTTIMEOUT in Transaction mode in production
+  // runtime + ECHECKOUTTIMEOUT in Session mode at build/migrate. Per
+  // Supabase serverless guidance: `max: 1, prepare: false` for pgbouncer
+  // transaction-mode pooling.
   const client = globalForDb.client ?? postgres(url, {
+    max: 1,
     prepare: false,
     connect_timeout: 10,
     idle_timeout: 20,
