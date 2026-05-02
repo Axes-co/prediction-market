@@ -242,7 +242,15 @@ export function mapTags(gammaTags: GammaTag[] | null | undefined): MappedTag[] {
     const forceShow = booleanFlag(tag.forceShow)
     const forceHide = booleanFlag(tag.forceHide)
     const isCarousel = booleanFlag(tag.isCarousel)
-    const isMainCategory = forceShow || isCarousel
+    // `is_main_category` is curated locally (migration
+    // `2026_04_30_004_polymarket_header_categories.sql` defines the canonical
+    // 14 tags rendered in the platform nav). We DO NOT auto-derive it from
+    // gamma's `forceShow` / `isCarousel` flags: polymarket marks ~20 legacy
+    // tags as forceShow (djt, biden, airdrops, featured, fed-rates, ...) that
+    // we don't want surfaced in our nav. Keeping the local migration as the
+    // single source of truth for this flag means admin can curate it without
+    // gamma sync silently overwriting their choices on the next cron tick.
+    const isMainCategory = false
     const publishedAt = parseDate(tag.publishedAt)
     const existing = seen.get(slug)
     if (existing) {
