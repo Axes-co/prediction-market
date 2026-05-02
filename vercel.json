@@ -4,7 +4,7 @@
   "crons": [
     {
       "path": "/api/sync/gamma",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/30 * * * *"
     },
     {
       "path": "/api/sync/tags",
@@ -12,15 +12,15 @@
     },
     {
       "path": "/api/sync/gamma-comments",
-      "schedule": "*/15 * * * *"
-    },
-    {
-      "path": "/api/sync/users",
       "schedule": "*/30 * * * *"
     },
     {
+      "path": "/api/sync/users",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/sync/resolution",
-      "schedule": "*/5 * * * *"
+      "schedule": "15,45 * * * *"
     },
     {
       "path": "/api/sync/translations",
