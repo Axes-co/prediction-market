@@ -66,18 +66,30 @@ function buildSyncCronSql({
 }
 
 function resolveSupabaseMode(env = process.env) {
-  const supabaseUrl = env.SUPABASE_URL?.trim()
-  const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY?.trim()
-
-  const hasAnySupabaseConfig = Boolean(supabaseUrl || supabaseServiceRoleKey)
-  if (!hasAnySupabaseConfig) {
+  // Supabase mode controls migration SQL rewriting: when true, leave
+  // `TO service_role` grants intact; when false, rewrite to `TO CURRENT_USER`.
+  // Detection has to look at the ACTUAL database the migrations target,
+  // not at any `SUPABASE_*` env var presence -- those env vars stay set
+  // for auth/storage features even when the DB itself has moved to a
+  // different provider (e.g., Neon).
+  const databaseUrl = (env.POSTGRES_URL_NON_POOLING || env.POSTGRES_URL || '').trim()
+  if (!databaseUrl) {
+    // No DB URL at all => not on Supabase. Caller will skip migration anyway.
     return false
   }
 
-  if (!supabaseUrl || !supabaseServiceRoleKey) {
-    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set together when configuring Supabase mode.')
+  const isSupabaseHost = /\.supabase\.(?:co|com)\b/i.test(databaseUrl)
+    || /pooler\.supabase\.(?:co|com)\b/i.test(databaseUrl)
+  if (!isSupabaseHost) {
+    return false
   }
 
+  // We're targeting a Supabase DB; require the matching service_role key
+  // since the migrations create policies that grant TO service_role.
+  const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  if (!supabaseServiceRoleKey) {
+    throw new Error('POSTGRES_URL points at Supabase but SUPABASE_SERVICE_ROLE_KEY is not set; migrations need it to grant policies to the service_role role.')
+  }
   return true
 }
 
