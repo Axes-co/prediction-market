@@ -608,6 +608,159 @@ export const TagRepository = {
     return { data: enhanced, error: null, globalChilds }
   },
 
+  /**
+   * Lightweight variant of `getMainTags` for the layout-level platform nav.
+   *
+   * `getMainTags` produces full sidebar data: per-(main, sub) market counts,
+   * resolved sidebar items, and active-event filtering. That requires a
+   * 5-table aggregate (`v_main_tag_subcategories` joins `markets` and does
+   * `count(DISTINCT condition_id)`) and a separate event-tags scan for the
+   * count overlay. Under the gamma cron's continuous tag/event_tags upsert
+   * pressure, the aggregate cost regularly exceeds Supabase's 8s
+   * `statement_timeout` (`code: '57014'`) and aborts the layout's prerender
+   * with USE_CACHE_TIMEOUT.
+   *
+   * The platform nav (`buildPlatformNavigationTags`) doesn't need any of
+   * that. It reads `slug`, `name`, and `childs[].slug + .name`. Counts are
+   * an optional badge — present in `PlatformNavigationChild` as `count?` —
+   * not required for navigation to render.
+   *
+   * This function returns the same `MainTagsResult` shape but skips:
+   *   - the `v_main_tag_subcategories` view (uses a direct event_tags JOIN
+   *     on tag-only columns, no markets, no aggregate)
+   *   - the visible-events JOIN that produces sidebar counts
+   *   - `resolveCategorySidebarData` (sidebar items remain undefined; the
+   *     pages that render sidebars call `getMainTags` directly)
+   *
+   * Used by `loadPlatformMainTags` -> `(platform)/layout.tsx`. The five
+   * heavy callers (admin tools, settings, predictions filter,
+   * dynamic-home-category, admin events) keep using `getMainTags` for the
+   * full count-bearing payload they actually consume.
+   */
+  async getMainTagsForNav(locale: SupportedLocale = DEFAULT_LOCALE): Promise<MainTagsResult> {
+    'use cache'
+    cacheTag(cacheTags.mainTags(locale))
+
+    const { data: mainVisibleTags, error: mainTagsError } = await runQuery(async () => {
+      const result = await db
+        .select({
+          id: tags.id,
+          name: tags.name,
+          slug: tags.slug,
+          is_main_category: tags.is_main_category,
+          is_hidden: tags.is_hidden,
+          display_order: tags.display_order,
+          active_markets_count: tags.active_markets_count,
+          created_at: tags.created_at,
+          updated_at: tags.updated_at,
+        })
+        .from(tags)
+        .where(and(
+          eq(tags.is_main_category, true),
+          eq(tags.is_hidden, false),
+        ))
+        .orderBy(asc(tags.display_order), asc(tags.name))
+      return { data: result, error: null }
+    })
+
+    if (mainTagsError) {
+      const errorMessage = typeof mainTagsError === 'string' ? mainTagsError : 'Unknown error'
+      return { data: null, error: errorMessage, globalChilds: [] }
+    }
+    if (!mainVisibleTags || mainVisibleTags.length === 0) {
+      return { data: [], error: null, globalChilds: [] }
+    }
+
+    const mainSlugs = mainVisibleTags.map(tag => tag.slug)
+    const mainSlugSet = new Set(mainSlugs)
+
+    // Pull DISTINCT (main_slug, sub_id, sub_slug, sub_name) pairs from the
+    // event_tags overlap. No markets, no aggregate, no view dependency.
+    // PG can hash-distinct this in milliseconds even under contention,
+    // since `event_tags(tag_id)` and `event_tags(event_id)` are both
+    // covered by `idx_event_tags_tag_id_event_id` + the PK.
+    const subTags = alias(tags, 'sub_tags')
+    const subEventTags = alias(event_tags, 'sub_event_tags')
+    const { data: subTagRows } = await runQuery(async () => {
+      const result = await db
+        .selectDistinct({
+          main_tag_slug: tags.slug,
+          sub_tag_id: subTags.id,
+          sub_tag_slug: subTags.slug,
+          sub_tag_name: subTags.name,
+        })
+        .from(tags)
+        .innerJoin(event_tags, eq(event_tags.tag_id, tags.id))
+        .innerJoin(subEventTags, eq(subEventTags.event_id, event_tags.event_id))
+        .innerJoin(subTags, eq(subTags.id, subEventTags.tag_id))
+        .where(and(
+          inArray(tags.slug, mainSlugs),
+          eq(tags.is_main_category, true),
+          eq(tags.is_hidden, false),
+          eq(subTags.is_main_category, false),
+          eq(subTags.is_hidden, false),
+        ))
+      return { data: result, error: null }
+    })
+
+    const validSubTagRows = (subTagRows ?? []).filter(row =>
+      Boolean(row.sub_tag_slug)
+      && !mainSlugSet.has(row.sub_tag_slug!)
+      && !EXCLUDED_SUB_SLUGS.has(row.sub_tag_slug!),
+    )
+
+    const involvedTagIds = new Set<number>()
+    for (const tag of mainVisibleTags) {
+      involvedTagIds.add(tag.id)
+    }
+    for (const row of validSubTagRows) {
+      if (typeof row.sub_tag_id === 'number') {
+        involvedTagIds.add(row.sub_tag_id)
+      }
+    }
+
+    const { data: localizedNamesByTagId, error: translationError } = await getLocalizedNamesByTagId(
+      Array.from(involvedTagIds),
+      locale,
+    )
+    if (translationError) {
+      return { data: null, error: translationError, globalChilds: [] }
+    }
+
+    const grouped = new Map<string, Map<string, PlatformNavigationChild>>()
+    const globalSubMap = new Map<string, PlatformNavigationChild>()
+    for (const row of validSubTagRows) {
+      const subSlug = row.sub_tag_slug!
+      const localizedSubName = localizedNamesByTagId.get(row.sub_tag_id ?? -1) ?? row.sub_tag_name ?? subSlug
+      const child: PlatformNavigationChild = { slug: subSlug, name: localizedSubName }
+
+      const bucket = grouped.get(row.main_tag_slug!) ?? new Map<string, PlatformNavigationChild>()
+      if (!bucket.has(child.slug)) {
+        bucket.set(child.slug, child)
+        grouped.set(row.main_tag_slug!, bucket)
+      }
+      if (!globalSubMap.has(child.slug)) {
+        globalSubMap.set(child.slug, child)
+      }
+    }
+
+    const enhanced: TagWithChilds[] = mainVisibleTags.map((tag) => {
+      const localizedTagName = localizedNamesByTagId.get(tag.id) ?? tag.name
+      const sortedChilds = Array.from((grouped.get(tag.slug) ?? new Map()).values())
+        .sort((a, b) => a.name.localeCompare(b.name))
+      return {
+        ...tag,
+        name: localizedTagName,
+        childs: sortedChilds,
+      }
+    })
+
+    const globalChilds = Array.from(globalSubMap.values())
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+    return { data: enhanced, error: null, globalChilds }
+  },
+
   async listTags({
     limit = 50,
     offset = 0,
