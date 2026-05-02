@@ -1,7 +1,7 @@
 'use client'
 
 import type { Route } from 'next'
-import type { ReactNode, RefObject } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from 'react'
 import { SearchIcon, XIcon } from 'lucide-react'
 import { useExtracted } from 'next-intl'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -190,7 +190,7 @@ export default function HeaderSearch({
   const hasActiveQuery = query.trim().length >= 2
   const showDropdown = hasActiveQuery
     && (showResults || isLoading.events || isLoading.profiles)
-    && (isManagedSearchSurface || !isResultsDismissed)
+    && !isResultsDismissed
   const showDiscoveryDropdown = showDesktopDiscovery && !emptyState && query.trim().length === 0 && hasFocusWithin && !isResultsDismissed
   const showAttachedDropdown = showDropdown || showDiscoveryDropdown
   const inputBaseClass = showAttachedDropdown ? 'bg-background' : 'bg-accent'
@@ -243,6 +243,18 @@ export default function HeaderSearch({
     }
   }, [blurFrameRef])
 
+  function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Escape' || event.nativeEvent.isComposing || !showAttachedDropdown) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    clearPendingBlurFrame()
+    setIsResultsDismissed(true)
+    hideResults()
+  }
+
   useSlashFocusShortcut(inputRef)
   useExternalFocusTrigger(focusTrigger, inputRef)
   useDismissSearchOnOutsidePointerDown({
@@ -264,6 +276,7 @@ export default function HeaderSearch({
         className="relative w-full"
         ref={searchRef}
         data-testid="header-search-container"
+        onKeyDown={handleSearchKeyDown}
         onFocusCapture={() => {
           clearPendingBlurFrame()
           setHasFocusWithin(true)

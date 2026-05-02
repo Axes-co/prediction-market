@@ -7,8 +7,8 @@ interface PriceApiResponse {
   [tokenId: string]: { BUY?: string, SELL?: string } | undefined
 }
 
-interface MidpointApiResponse {
-  mid?: string
+interface MidpointsApiResponse {
+  [tokenId: string]: string | undefined
 }
 
 export interface MarketQuote {
@@ -41,22 +41,21 @@ function resolveQuote(
   return { bid, ask, mid }
 }
 
-async function fetchMidpointByToken(tokenId: string): Promise<number | null> {
-  if (!CLOB_BASE_URL) {
-    return null
+async function parseMidpointsResponse(response: Response | null): Promise<MidpointsApiResponse> {
+  if (!response?.ok) {
+    return {}
   }
 
   try {
-    const response = await fetch(`${CLOB_BASE_URL}/midpoint?token_id=${encodeURIComponent(tokenId)}`)
-    if (!response.ok) {
-      return null
+    const payload = await response.json() as unknown
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return {}
     }
 
-    const payload = await response.json() as MidpointApiResponse
-    return normalizePrice(payload?.mid)
+    return payload as MidpointsApiResponse
   }
   catch {
-    return null
+    return {}
   }
 }
 
@@ -73,35 +72,35 @@ async function fetchQuotesByMarket(targets: MarketTokenTarget[]): Promise<Market
     throw new Error('CLOB URL is not configured.')
   }
 
-  const response = await fetch(`${CLOB_BASE_URL}/prices`, {
+  const payload = uniqueTokenIds.map(tokenId => ({ token_id: tokenId }))
+  const requestInit = {
     method: 'POST',
     headers: {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(uniqueTokenIds.map(tokenId => ({ token_id: tokenId }))),
-  })
+    body: JSON.stringify(payload),
+  }
+  const [pricesResponse, midpointsResponse] = await Promise.all([
+    fetch(`${CLOB_BASE_URL}/prices`, requestInit),
+    fetch(`${CLOB_BASE_URL}/midpoints`, requestInit).catch(() => null),
+  ])
 
-  if (!response.ok) {
-    const message = `Failed to fetch market quotes (${response.status} ${response.statusText}).`
+  if (!pricesResponse.ok) {
+    const message = `Failed to fetch market quotes (${pricesResponse.status} ${pricesResponse.statusText}).`
     console.error(message)
     throw new Error(message)
   }
 
-  const [data, midpointResults] = await Promise.all([
-    response.json() as Promise<PriceApiResponse>,
-    Promise.allSettled(uniqueTokenIds.map(tokenId => fetchMidpointByToken(tokenId))),
-  ])
+  const data = await pricesResponse.json() as PriceApiResponse
+  const midpoints = await parseMidpointsResponse(midpointsResponse)
   const quotesByToken = new Map<string, MarketQuote>()
-  const midpointByToken = new Map<string, number | null>()
-
-  midpointResults.forEach((result, index) => {
-    const tokenId = uniqueTokenIds[index]
-    midpointByToken.set(tokenId, result.status === 'fulfilled' ? result.value : null)
-  })
 
   uniqueTokenIds.forEach((tokenId) => {
-    quotesByToken.set(tokenId, resolveQuote(data?.[tokenId], midpointByToken.get(tokenId) ?? null))
+    quotesByToken.set(
+      tokenId,
+      resolveQuote(data?.[tokenId], normalizePrice(midpoints?.[tokenId])),
+    )
   })
 
   return targets.reduce<MarketQuotesByMarket>((acc, target) => {
@@ -137,6 +136,7 @@ export function useEventMarketQuotes(
     refetchInterval: refetchIntervalMs,
     refetchIntervalInBackground: refetchIntervalMs !== false,
     placeholderData: keepPreviousData,
+    retry: false,
   })
 
   return data ?? {}

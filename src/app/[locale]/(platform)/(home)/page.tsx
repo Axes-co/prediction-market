@@ -12,5 +12,6 @@ export default async function HomePage({ params }: PageProps<'/[locale]'>) {
   const { locale } = await params
   setRequestLocale(locale)
   const resolvedLocale = locale as SupportedLocale
+
   return <CachedHomePageContent locale={resolvedLocale} />
 }
