@@ -98,8 +98,14 @@ function rewriteMigrationSqlForMode(migrationSql, isSupabase) {
     return migrationSql
   }
 
+  // Replace `TO "service_role"` and `TO service_role` (Supabase-specific
+  // role) with `TO CURRENT_USER` so policies/grants apply against whatever
+  // user the connection is using on Postgres providers that don't ship
+  // service_role (Neon, RDS, self-hosted). The trailing `\b` from the
+  // earlier version did not match after a closing double-quote followed
+  // by a space (both non-word), so quoted occurrences slipped through.
   return migrationSql
-    .replace(/\bTO\s+"service_role"\b/gi, 'TO CURRENT_USER')
+    .replace(/\bTO\s+"service_role"/gi, 'TO CURRENT_USER')
     .replace(/\bTO\s+service_role\b/gi, 'TO CURRENT_USER')
 }
 
