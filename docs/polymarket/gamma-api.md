@@ -1,3 +1,7 @@
+---
+title: Polymarket Gamma API (offline reference)
+---
+
 # Polymarket Gamma API (offline reference)
 
 > Sources:

@@ -1,3 +1,7 @@
+---
+title: Polymarket Bridge Deposit (offline reference)
+---
+
 # Polymarket Bridge Deposit (offline reference)
 
 > Source: https://docs.polymarket.com/trading/bridge/deposit

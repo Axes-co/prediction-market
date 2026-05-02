@@ -1,3 +1,7 @@
+---
+title: Polymarket CLOB Authentication (offline reference)
+---
+
 # Polymarket CLOB Authentication (offline reference)
 
 > Source: https://docs.polymarket.com/developers/CLOB/authentication
