@@ -65,7 +65,7 @@
                   ],
                   "usdcToken": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
                   "umaAdapter": "0x08Ce1f626Ef319fAB728F8b4cE3D8875C2C9Ce66",
-                  "ctfExchange": "0xB5592f7CccA122558D2201e190826276f3a661cb",
+                  "ctfExchange": "0x41a02c3c3E1883baF66C4F1706DAb3C07AbedDe1",
                   "negRiskOperator": "0x6538FC1837Ffb577f9f02355E2dBd73410E66D9",
                   "negRiskCtfExchange": "0xef02d1Ea5B42432C4E99C2785d1a4020d2F2bB31",
                   "negRiskUmaAdapter": "0xD6fa9B2bE6E345Ee357658Fd980d48f1bEF2D1B7",
@@ -84,7 +84,7 @@
                       "chainId": 80002,
                       "usdcToken": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
                       "umaAdapter": "0x08Ce1f626Ef319fAB728F8b4cE3D8875C2C9Ce66",
-                      "ctfExchange": "0xB5592f7CccA122558D2201e190826276f3a661cb",
+                      "ctfExchange": "0x41a02c3c3E1883baF66C4F1706DAb3C07AbedDe1",
                       "negRiskOperator": "0x6538FC1837Ffb577f9f02355E2dBd73410E66D9",
                       "negRiskCtfExchange": "0xef02d1Ea5B42432C4E99C2785d1a4020d2F2bB31",
                       "negRiskUmaAdapter": "0xD6fa9B2bE6E345Ee357658Fd980d48f1bEF2D1B7"
@@ -133,7 +133,6 @@
                 "example": {
                   "requestId": "8b583ebd-1f8f-46fa-b31b-06643f58d457",
                   "nonce": "0x4f7f7ec0db1ebce7db6f0c8b9426fe2fd836682fef5f50013ad0dbb37412de11",
-                  "expiresAt": 1771292548580,
                   "creator": "0x1111111111111111111111111111111111111111",
                   "chainId": 80002,
                   "payloadHash": "0x80f7bf1a2f8c6d6fc0b4537437d1c8f0f1d9ed9d622f5af7e253d45c0f8f2a31",
@@ -160,10 +159,6 @@
                       {
                         "name": "nonce",
                         "type": "bytes32"
-                      },
-                      {
-                        "name": "expiresAt",
-                        "type": "uint256"
                       },
                       {
                         "name": "chainId",
@@ -201,7 +196,7 @@
                   "summary": "Binary market",
                   "value": {
                     "payload": "{\"chainId\":80002,\"creator\":\"0x1111111111111111111111111111111111111111\",\"title\":\"Will BTC close above $110k on March 31, 2028?\",\"slug\":\"will-btc-close-above-110k-on-march-31-2028\",\"endDateIso\":\"2028-03-31T23:00:00Z\",\"mainCategorySlug\":\"crypto\",\"categories\":[{\"label\":\"Crypto\",\"slug\":\"crypto\"},{\"label\":\"Bitcoin\",\"slug\":\"bitcoin\"},{\"label\":\"Price Action\",\"slug\":\"price-action\"},{\"label\":\"March\",\"slug\":\"march\"},{\"label\":\"Macro\",\"slug\":\"macro\"}],\"marketMode\":\"binary\",\"binaryQuestion\":\"Will BTC close above $110k on March 31, 2028?\",\"binaryOutcomeYes\":\"Yes\",\"binaryOutcomeNo\":\"No\",\"resolutionSource\":\"https://www.reuters.com/\",\"resolutionRules\":\"Resolve YES if BTC/USD spot closes strictly above 110000.00 at 23:00:00 UTC on March 31, 2028 using the listed source and fallback source when unavailable.\"}",
-                    "auth": "{\"requestId\":\"8b583ebd-1f8f-46fa-b31b-06643f58d457\",\"nonce\":\"0x4f7f7ec0db1ebce7db6f0c8b9426fe2fd836682fef5f50013ad0dbb37412de11\",\"expiresAt\":1771292548580,\"payloadHash\":\"0x80f7bf1a2f8c6d6fc0b4537437d1c8f0f1d9ed9d622f5af7e253d45c0f8f2a31\",\"signature\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+                    "auth": "{\"requestId\":\"8b583ebd-1f8f-46fa-b31b-06643f58d457\",\"nonce\":\"0x4f7f7ec0db1ebce7db6f0c8b9426fe2fd836682fef5f50013ad0dbb37412de11\",\"payloadHash\":\"0x80f7bf1a2f8c6d6fc0b4537437d1c8f0f1d9ed9d622f5af7e253d45c0f8f2a31\",\"signature\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
                     "eventImage": "(binary)"
                   }
                 }
@@ -370,7 +365,6 @@
                     "status": "prepared",
                     "creator": "0x1111111111111111111111111111111111111111",
                     "chainId": 80002,
-                    "expiresAt": 1771292548580,
                     "updatedAt": 1771290202392,
                     "errorMessage": null,
                     "prepared": {
@@ -491,7 +485,7 @@
         },
         "responses": {
           "200": {
-            "description": "Finalized request and registerToken execution result.",
+            "description": "Finalized request and token derivation result.",
             "content": {
               "application/json": {
                 "schema": {
@@ -505,7 +499,7 @@
                     {
                       "key": "binary",
                       "conditionId": "0x8169d94703726c1312976a3f408a15184334d95dcadc78e4e9f96d3b0f0df8df",
-                      "exchange": "0xB5592f7CccA122558D2201e190826276f3a661cb",
+                      "exchange": "0x41a02c3c3E1883baF66C4F1706DAb3C07AbedDe1",
                       "tokenA": "78849133110239156497695610160414324368604052631638211845571054319779561887178",
                       "tokenB": "74971562590235665669963598240180085947836206808199917948309517561307482247352",
                       "alreadyRegistered": false,
@@ -584,7 +578,6 @@
         "required": [
           "requestId",
           "nonce",
-          "expiresAt",
           "creator",
           "chainId",
           "payloadHash",
@@ -598,9 +591,6 @@
           },
           "nonce": {
             "$ref": "#/components/schemas/Hex32"
-          },
-          "expiresAt": {
-            "type": "integer"
           },
           "creator": {
             "$ref": "#/components/schemas/Address"
@@ -657,7 +647,6 @@
         "required": [
           "requestId",
           "nonce",
-          "expiresAt",
           "payloadHash",
           "signature"
         ],
@@ -667,9 +656,6 @@
           },
           "nonce": {
             "$ref": "#/components/schemas/Hex32"
-          },
-          "expiresAt": {
-            "type": "integer"
           },
           "payloadHash": {
             "$ref": "#/components/schemas/Hex32"
@@ -714,6 +700,159 @@
           "slug": {
             "type": "string",
             "description": "Optional. If omitted, slug is derived from title."
+          }
+        }
+      },
+      "SportsTeamPayload": {
+        "type": "object",
+        "required": [
+          "name",
+          "host_status"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "abbreviation": {
+            "type": "string"
+          },
+          "host_status": {
+            "type": "string",
+            "enum": [
+              "home",
+              "away"
+            ]
+          }
+        }
+      },
+      "SportsTemplatePayload": {
+        "type": "object",
+        "properties": {
+          "includeDraw": {
+            "type": "boolean"
+          },
+          "includeBothTeamsToScore": {
+            "type": "boolean"
+          },
+          "includeSpreads": {
+            "type": "boolean"
+          },
+          "includeTotals": {
+            "type": "boolean"
+          },
+          "spreadLines": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "totalLines": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "SportsPropPayload": {
+        "type": "object",
+        "required": [
+          "id",
+          "playerName",
+          "statType",
+          "line",
+          "teamHostStatus"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "playerName": {
+            "type": "string"
+          },
+          "statType": {
+            "type": "string",
+            "enum": [
+              "points",
+              "rebounds",
+              "assists",
+              "receiving_yards",
+              "rushing_yards"
+            ]
+          },
+          "line": {
+            "type": "number"
+          },
+          "teamHostStatus": {
+            "type": "string",
+            "enum": [
+              "home",
+              "away"
+            ]
+          }
+        }
+      },
+      "SportsPayload": {
+        "type": "object",
+        "required": [
+          "section",
+          "eventVariant",
+          "sportSlug",
+          "leagueSlug",
+          "eventDate",
+          "startTime",
+          "teams",
+          "template",
+          "props"
+        ],
+        "properties": {
+          "section": {
+            "type": "string",
+            "enum": [
+              "games",
+              "props"
+            ]
+          },
+          "eventVariant": {
+            "type": "string",
+            "enum": [
+              "standard",
+              "more_markets",
+              "exact_score",
+              "halftime_result",
+              "custom"
+            ]
+          },
+          "sportSlug": {
+            "type": "string"
+          },
+          "leagueSlug": {
+            "type": "string"
+          },
+          "eventDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "startTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "teams": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "$ref": "#/components/schemas/SportsTeamPayload"
+            }
+          },
+          "template": {
+            "$ref": "#/components/schemas/SportsTemplatePayload"
+          },
+          "props": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SportsPropPayload"
+            }
           }
         }
       },
@@ -781,8 +920,7 @@
           },
           "options": {
             "type": "array",
-            "description": "Required when marketMode=multi_multiple or marketMode=multi_unique.",
-            "minItems": 2,
+            "description": "Required when marketMode=multi_multiple or marketMode=multi_unique. For sports payloads, backend can regenerate markets from sports and the frontend may send generated preview options.",
             "items": {
               "$ref": "#/components/schemas/PrepareOption"
             }
@@ -798,6 +936,9 @@
           "resolutionRules": {
             "type": "string",
             "minLength": 60
+          },
+          "sports": {
+            "$ref": "#/components/schemas/SportsPayload"
           }
         }
       },
@@ -837,6 +978,16 @@
               "type": "string",
               "format": "binary"
             }
+          },
+          "teamLogo:home": {
+            "type": "string",
+            "format": "binary",
+            "description": "Optional for standard flows. Required for sports payloads when the home team logo is not already embedded in payload.sports."
+          },
+          "teamLogo:away": {
+            "type": "string",
+            "format": "binary",
+            "description": "Optional for standard flows. Required for sports payloads when the away team logo is not already embedded in payload.sports."
           }
         },
         "additionalProperties": true
@@ -1222,7 +1373,6 @@
           "status",
           "creator",
           "chainId",
-          "expiresAt",
           "updatedAt",
           "errorMessage",
           "prepared",
@@ -1239,9 +1389,6 @@
             "$ref": "#/components/schemas/Address"
           },
           "chainId": {
-            "type": "integer"
-          },
-          "expiresAt": {
             "type": "integer"
           },
           "updatedAt": {

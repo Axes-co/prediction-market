@@ -4,7 +4,17 @@ import { loadEnabledLocales } from '@/i18n/locale-settings'
 import { DEFAULT_LOCALE } from '@/i18n/locales'
 import { withLocalePrefix } from '@/lib/locale-path'
 import siteUrlUtils from '@/lib/site-url'
-import { DOCS_SITEMAP_ID, formatDateForSitemap, getDynamicSitemapEntriesById, getSitemapIds } from '@/lib/sitemap'
+import {
+  ACTIVE_EVENTS_SITEMAP_PREFIX,
+  BASE_SITEMAP_ID,
+  CATEGORIES_SITEMAP_ID,
+  CLOSED_EVENTS_SITEMAP_PREFIX,
+  DOCS_SITEMAP_ID,
+  formatDateForSitemap,
+  getDynamicSitemapEntriesById,
+  getSitemapIds,
+  PREDICTIONS_SITEMAP_PREFIX,
+} from '@/lib/sitemap'
 
 const { resolveSiteUrl } = siteUrlUtils
 
@@ -42,7 +52,7 @@ async function buildSitemapEntries(
   lastModified: string,
   enabledLocales: SupportedLocale[],
 ): Promise<MetadataRoute.Sitemap> {
-  if (sitemapId === 'base') {
+  if (sitemapId === BASE_SITEMAP_ID) {
     return buildPathEntries(BASE_PATHS, siteUrl, lastModified, enabledLocales)
   }
 
@@ -51,22 +61,22 @@ async function buildSitemapEntries(
     return buildDynamicEntries(dynamicEntries, siteUrl, enabledLocales)
   }
 
-  if (sitemapId === 'categories') {
+  if (sitemapId === CATEGORIES_SITEMAP_ID) {
     const dynamicEntries = await getDynamicSitemapEntriesById(sitemapId)
     return buildDynamicEntries(dynamicEntries, siteUrl, enabledLocales)
   }
 
-  if (sitemapId.startsWith('predictions-')) {
+  if (sitemapId.startsWith(PREDICTIONS_SITEMAP_PREFIX)) {
     const dynamicEntries = await getDynamicSitemapEntriesById(sitemapId)
     return buildDynamicEntries(dynamicEntries, siteUrl, enabledLocales)
   }
 
-  if (sitemapId.startsWith('events-active-')) {
+  if (sitemapId.startsWith(ACTIVE_EVENTS_SITEMAP_PREFIX)) {
     const dynamicEntries = await getDynamicSitemapEntriesById(sitemapId)
     return buildDynamicEntries(dynamicEntries, siteUrl, enabledLocales)
   }
 
-  if (sitemapId.startsWith('events-closed-')) {
+  if (sitemapId.startsWith(CLOSED_EVENTS_SITEMAP_PREFIX)) {
     const dynamicEntries = await getDynamicSitemapEntriesById(sitemapId)
     return buildDynamicEntries(dynamicEntries, siteUrl, enabledLocales)
   }

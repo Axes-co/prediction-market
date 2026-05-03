@@ -38,6 +38,7 @@ import { useHasHydrated } from '@/hooks/useHasHydrated'
 import { useOutcomeLabel } from '@/hooks/useOutcomeLabel'
 import { useSignaturePromptRunner } from '@/hooks/useSignaturePromptRunner'
 import { defaultNetwork } from '@/lib/appkit'
+import { addressToBuilderCode } from '@/lib/builder-code'
 import { CLOB_ORDER_TYPE, DEFAULT_ERROR_MESSAGE, getExchangeEip712Domain, ORDER_SIDE, ORDER_TYPE, OUTCOME_INDEX } from '@/lib/constants'
 import { resolveEventPagePath } from '@/lib/events-routing'
 import { formatCentsLabel, formatCurrency, formatSharesLabel, toCents } from '@/lib/formatters'
@@ -746,6 +747,11 @@ export default function EventOrderPanelForm({
   const locale = useLocale()
   const currentTimestamp = useCurrentTimestamp({ intervalMs: 60_000 })
   const normalizeOutcomeLabel = useOutcomeLabel()
+  const affiliateMetadata = useAffiliateOrderMetadata()
+  const builderCode = useMemo(
+    () => addressToBuilderCode(affiliateMetadata.referrerAddress),
+    [affiliateMetadata.referrerAddress],
+  )
   const user = useUser()
   const addLocalOrderFillNotification = useNotifications(state => state.addLocalOrderFillNotification)
   const state = useOrder()
@@ -822,7 +828,6 @@ export default function EventOrderPanelForm({
     outcomeTokenId ? [outcomeTokenId] : [],
     { enabled: shouldLoadOrderBookSummary },
   )
-  const affiliateMetadata = useAffiliateOrderMetadata()
   const { ensureTradingReady, openTradeRequirements, startDepositFlow } = useTradingOnboarding()
   const hasDeployedProxyWallet = Boolean(user?.proxy_wallet_address && user?.proxy_wallet_status === 'deployed')
   const proxyWalletAddress = hasDeployedProxyWallet ? normalizeAddress(user?.proxy_wallet_address) : null
@@ -1235,10 +1240,10 @@ export default function EventOrderPanelForm({
       limitPrice: state.limitPrice,
       limitShares: state.limitShares,
       marketPriceCents: marketLimitPriceCents,
+      builder: builderCode,
       expirationTimestamp: state.limitExpirationEnabled
         ? (customExpirationTimestamp ?? endOfDayTimestamp)
         : undefined,
-      feeRateBps: affiliateMetadata.tradeFeeBps,
     })
     const submittedSide = state.side
     const submittedIsLimitOrder = state.type === ORDER_TYPE.LIMIT

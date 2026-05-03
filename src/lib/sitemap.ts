@@ -14,17 +14,14 @@ import { source } from '@/lib/source'
 import { isSportsAuxiliaryEventSlug } from '@/lib/sports-event-slugs'
 import { resolveCanonicalSportsSportSlug } from '@/lib/sports-slug-mapping'
 
-const STATIC_SITEMAP_IDS = [
-  'base',
-] as const
-
-const CATEGORIES_SITEMAP_ID = 'categories'
+export const BASE_SITEMAP_ID = 'base'
+export const CATEGORIES_SITEMAP_ID = 'categories'
 export const DOCS_SITEMAP_ID = 'docs'
-const PREDICTIONS_SITEMAP_PREFIX = 'predictions-'
+export const PREDICTIONS_SITEMAP_PREFIX = 'predictions-'
 const PREDICTIONS_SITEMAP_PATTERN = /^predictions-(\d{3})$/
-const ACTIVE_EVENTS_SITEMAP_PREFIX = 'events-active-'
+export const ACTIVE_EVENTS_SITEMAP_PREFIX = 'events-active-'
 const ACTIVE_EVENTS_SITEMAP_PATTERN = /^events-active-(\d{3})$/
-const CLOSED_EVENTS_SITEMAP_PREFIX = 'events-closed-'
+export const CLOSED_EVENTS_SITEMAP_PREFIX = 'events-closed-'
 const CLOSED_EVENTS_SITEMAP_PATTERN = /^events-closed-(\d{4}-\d{2})(?:-(\d{3}))?$/
 const SITEMAP_URL_LIMIT = 50_000
 
@@ -111,7 +108,10 @@ export async function getSitemapIndexEntries(): Promise<SitemapIndexEntry[]> {
   const predictionEntries = await getPredictionSitemapEntries()
   const chunkSize = await resolveLocalizedSitemapChunkSize()
   const entries: SitemapIndexEntry[] = [
-    ...STATIC_SITEMAP_IDS.map(id => ({ id, lastmod: fallbackDate })),
+    {
+      id: BASE_SITEMAP_ID,
+      lastmod: fallbackDate,
+    },
     {
       id: DOCS_SITEMAP_ID,
       lastmod: getLatestLastModified(docsEntries, fallbackDate),

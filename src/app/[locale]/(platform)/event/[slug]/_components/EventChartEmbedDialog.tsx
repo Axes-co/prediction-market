@@ -134,7 +134,7 @@ export default function EventChartEmbedDialog({
   const [toggles, setToggles] = useState<EmbedToggles>(DEFAULT_TOGGLES)
   const [copied, setCopied] = useState(false)
   const [affiliateSharePercent, setAffiliateSharePercent] = useState<number | null>(null)
-  const [tradeFeePercent, setTradeFeePercent] = useState<number | null>(null)
+  const [builderTakerFeePercent, setBuilderTakerFeePercent] = useState<number | null>(null)
 
   // Reset on open
   useEffect(() => {
@@ -155,7 +155,7 @@ export default function EventChartEmbedDialog({
   useEffect(() => {
     if (!affiliateCode || !open) {
       setAffiliateSharePercent(null)
-      setTradeFeePercent(null)
+      setBuilderTakerFeePercent(null)
       return
     }
     let active = true
@@ -166,15 +166,15 @@ export default function EventChartEmbedDialog({
         }
         if (r.success) {
           const s = Number.parseFloat(r.data.affiliateSharePercent)
-          const f = Number.parseFloat(r.data.tradeFeePercent)
+          const f = Number.parseFloat(r.data.builderTakerFeePercent)
           setAffiliateSharePercent(Number.isFinite(s) && s > 0 ? s : null)
-          setTradeFeePercent(Number.isFinite(f) && f > 0 ? f : null)
+          setBuilderTakerFeePercent(Number.isFinite(f) && f > 0 ? f : null)
         }
       })
       .catch(() => {
         if (active) {
           setAffiliateSharePercent(null)
-          setTradeFeePercent(null)
+          setBuilderTakerFeePercent(null)
         }
       })
     return () => {
@@ -234,7 +234,7 @@ export default function EventChartEmbedDialog({
       await navigator.clipboard.writeText(embedCode)
       setCopied(true)
       window.setTimeout(setCopied, 1500, false)
-      maybeShowAffiliateToast({ affiliateCode, affiliateSharePercent, tradeFeePercent, siteName: site.name, context: 'embed' })
+      maybeShowAffiliateToast({ affiliateCode, affiliateSharePercent, builderTakerFeePercent, siteName: site.name, context: 'embed' })
     }
     catch (e) { console.error(e) }
   }

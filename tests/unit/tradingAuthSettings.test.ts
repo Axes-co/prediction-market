@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { TOKEN_APPROVALS_VERSION } from '@/lib/trading-auth/approvals'
 import { sanitizeTradingAuthSettings } from '@/lib/trading-auth/utils'
 
 describe('sanitizeTradingAuthSettings', () => {
@@ -9,13 +10,18 @@ describe('sanitizeTradingAuthSettings', () => {
     expect(sanitizeTradingAuthSettings(undefined)).toBe(undefined)
   })
 
-  it('strips keys and exposes only enabled+updatedAt', () => {
+  it('strips keys and exposes trading auth status', () => {
     const input = {
       foo: 'bar',
       tradingAuth: {
         relayer: { key: 'secret-1', updatedAt: '2025-01-01' },
         clob: { key: '', updatedAt: '2025-01-02' },
-        approvals: { completed: true, updatedAt: '2025-01-03', extra: 'ignored' },
+        approvals: {
+          completed: true,
+          updatedAt: '2025-01-03',
+          version: TOKEN_APPROVALS_VERSION,
+          extra: 'ignored',
+        },
       },
     }
 
@@ -24,7 +30,19 @@ describe('sanitizeTradingAuthSettings', () => {
       tradingAuth: {
         relayer: { enabled: true, updatedAt: '2025-01-01' },
         clob: { enabled: false, updatedAt: '2025-01-02' },
-        approvals: { enabled: true, updatedAt: '2025-01-03' },
+        approvals: { enabled: true, updatedAt: '2025-01-03', version: TOKEN_APPROVALS_VERSION },
+      },
+    })
+  })
+
+  it('requires current approval version', () => {
+    expect(sanitizeTradingAuthSettings({
+      tradingAuth: {
+        approvals: { completed: true, updatedAt: '2025-01-03' },
+      },
+    })).toEqual({
+      tradingAuth: {
+        approvals: { enabled: false, updatedAt: '2025-01-03', version: undefined },
       },
     })
   })

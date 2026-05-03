@@ -17,6 +17,7 @@ import {
   GLOBAL_ANNOUNCEMENT_MESSAGE_KEY,
   validateGlobalAnnouncementInput,
 } from '@/lib/global-announcement-settings'
+import { reportOperatorDomainSnapshot } from '@/lib/operator-domain-register'
 import siteUrlUtils from '@/lib/site-url'
 import { uploadPublicAsset } from '@/lib/storage'
 import { normalizeTermsOfServicePdfPath, TERMS_OF_SERVICE_PDF_PATH_KEY } from '@/lib/terms-of-service'
@@ -401,6 +402,8 @@ export async function updateGeneralSettingsAction(
   if (error) {
     return { error: DEFAULT_ERROR_MESSAGE }
   }
+
+  await reportOperatorDomainSnapshot()
 
   try {
     await syncGeoblockSettings()

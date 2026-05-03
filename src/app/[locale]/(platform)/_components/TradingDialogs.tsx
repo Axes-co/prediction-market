@@ -221,7 +221,7 @@ function TradingStepsList({
 
       <TradingRequirementStep
         title="Approve Tokens"
-        description="Start trading securely with your USDC."
+        description="Approve USDC and position permissions for trading."
         actionLabel={approvalsStep === 'signing' ? 'Signing…' : 'Sign'}
         isLoading={approvalsStep === 'signing'}
         disabled={
