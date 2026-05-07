@@ -976,5 +976,14 @@
   "5+e6Wv": "Taker",
   "iVoUgg": "Maker",
   "TrDqKR": "Comisiones de Kuest no disponibles.",
-  "edFrBw": "Se paga desde tu comisión de operador."
+  "edFrBw": "Se paga desde tu comisión de operador.",
+  "4NWXo7": "Explora mercados de predicción de {slug} en vivo.",
+  "f8MlV0": "No se pudo eliminar la cuenta. Inténtalo de nuevo.",
+  "wyxJrL": "Eliminar cuenta",
+  "M8odX2": "Elimina permanentemente tu cuenta. Esta acción no se puede deshacer.",
+  "c0hXZK": "Esto eliminará permanentemente tu cuenta. Se eliminarán todos tus datos y se cerrará tu sesión en todos los dispositivos. Esta acción no se puede deshacer.",
+  "t4Ybzr": "Escribe DELETE para confirmar",
+  "TwyMau": "Cuenta",
+  "evKSZ8": "Administra la seguridad y la eliminación de tu cuenta.",
+  "vv675f": "Tu comisión más la comisión de Kuest de {kuestFee}%."
 }

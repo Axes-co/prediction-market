@@ -15,9 +15,10 @@ import { toast } from 'sonner'
 import { WagmiProvider } from 'wagmi'
 import { AppKitContext, defaultAppKitValue } from '@/hooks/useAppKit'
 import { useSiteIdentity } from '@/hooks/useSiteIdentity'
-import { defaultNetwork, networks, projectId, wagmiAdapter, wagmiConfig } from '@/lib/appkit'
+import { defaultNetwork, networks, wagmiAdapter, wagmiConfig } from '@/lib/appkit'
 import { authClient } from '@/lib/auth-client'
 import { IS_BROWSER } from '@/lib/constants'
+import { reownProjectId } from '@/lib/reown-project-id'
 import { clearBrowserStorage, clearNonHttpOnlyCookies } from '@/lib/utils'
 import { mergeSessionUserState, useUser } from '@/stores/useUser'
 
@@ -67,7 +68,7 @@ function initializeAppKitSingleton(
 
   try {
     appKitInstance = createAppKit({
-      projectId: projectId!,
+      projectId: reownProjectId,
       adapters: [wagmiAdapter],
       themeMode,
       defaultAccountTypes: { eip155: 'eoa' },
@@ -85,7 +86,14 @@ function initializeAppKitSingleton(
       networks,
       featuredWalletIds: ['c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96'],
       features: {
-        analytics: process.env.NODE_ENV === 'production',
+        analytics: false,
+        swaps: false,
+        onramp: false,
+        receive: false,
+        send: false,
+        history: false,
+        pay: false,
+        headless: false,
       },
       siweConfig: createSIWEConfig({
         signOutOnAccountChange: true,

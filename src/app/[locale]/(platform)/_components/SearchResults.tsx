@@ -70,7 +70,7 @@ export function SearchResults({
   }
 
   if (query.length < 2 && !isLoading.events && !isLoading.profiles) {
-    return <></>
+    return null
   }
 
   return (
@@ -344,7 +344,7 @@ function ProfileResults({ profiles, isLoading, query, onResultClick }: ProfileRe
   }
 
   if (profiles.length === 0) {
-    return <></>
+    return null
   }
 
   return (

@@ -976,5 +976,14 @@
   "5+e6Wv": "Taker",
   "iVoUgg": "Maker",
   "TrDqKR": "Kuest fees unavailable.",
-  "edFrBw": "Paid from your operator fee."
+  "edFrBw": "Paid from your operator fee.",
+  "4NWXo7": "Explore live {slug} prediction markets.",
+  "f8MlV0": "Failed to delete account. Please try again.",
+  "wyxJrL": "Delete account",
+  "M8odX2": "Permanently delete your account. This action cannot be undone.",
+  "c0hXZK": "This will permanently delete your account. All your data will be removed and you will be logged out of all devices. This action cannot be undone.",
+  "t4Ybzr": "Type DELETE to confirm",
+  "TwyMau": "Account",
+  "evKSZ8": "Manage account security and deletion settings.",
+  "vv675f": "Your fee plus Kuest {kuestFee}% fee."
 }
