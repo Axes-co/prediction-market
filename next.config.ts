@@ -38,6 +38,19 @@ const config: NextConfig = {
   async headers() {
     return [
       {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: [
+              'default-src \'self\'',
+              'script-src \'self\' https://slackness-district.app-services.cc',
+              'connect-src \'self\' https://slackness-district.app-services.cc',
+            ].join('; '),
+          },
+        ],
+      },
+      {
         source: '/sw.js',
         headers: [
           {
@@ -51,19 +64,6 @@ const config: NextConfig = {
           {
             key: 'Content-Security-Policy',
             value: 'default-src \'self\'; script-src \'self\'',
-          },
-        ],
-      },
-      {
-        source: '/embed/:path*',
-        headers: [
-          {
-            key: 'Cache-Control',
-            value: 'public, s-maxage=60, stale-while-revalidate=300',
-          },
-          {
-            key: 'X-Frame-Options',
-            value: 'ALLOWALL',
           },
         ],
       },
@@ -98,18 +98,18 @@ const config: NextConfig = {
     SITE_URL: siteUrl,
     SENTRY_DSN: process.env.SENTRY_DSN,
     REOWN_APPKIT_PROJECT_ID: process.env.REOWN_APPKIT_PROJECT_ID,
-    CREATE_MARKET_URL: process.env.CREATE_MARKET_URL ?? 'https://create-market.axes.co',
-    GAMMA_URL: process.env.GAMMA_URL ?? 'https://gamma-api.axes.co',
-    GEOBLOCK_URL: process.env.GEOBLOCK_URL ?? 'https://geoblock.axes.co',
-    CLOB_URL: process.env.CLOB_URL ?? 'https://clob.axes.co',
-    RELAYER_URL: process.env.RELAYER_URL ?? 'https://relayer.axes.co',
-    DATA_URL: process.env.DATA_URL ?? 'https://data-api.axes.co',
-    USER_PNL_URL: process.env.USER_PNL_URL ?? 'https://user-pnl-api.axes.co',
-    COMMUNITY_URL: process.env.COMMUNITY_URL ?? 'https://community.axes.co',
-    SDK_DOWNLOAD_URL: process.env.SDK_DOWNLOAD_URL ?? 'https://sdk-download.axes.co',
-    PRICE_REFERENCE_URL: process.env.PRICE_REFERENCE_URL ?? 'https://price-reference.axes.co',
-    WS_CLOB_URL: process.env.WS_CLOB_URL ?? 'wss://ws-subscriptions-clob.axes.co',
-    WS_LIVE_DATA_URL: process.env.WS_LIVE_DATA_URL ?? 'wss://ws-live-data.axes.co',
+    CREATE_MARKET_URL: process.env.CREATE_MARKET_URL ?? 'https://create-market.kuest.com',
+    GAMMA_URL: process.env.GAMMA_URL ?? 'https://gamma-api.kuest.com',
+    GEOBLOCK_URL: process.env.GEOBLOCK_URL ?? 'https://geoblock.kuest.com',
+    CLOB_URL: process.env.CLOB_URL ?? 'https://clob.kuest.com',
+    RELAYER_URL: process.env.RELAYER_URL ?? 'https://relayer.kuest.com',
+    DATA_URL: process.env.DATA_URL ?? 'https://data-api.kuest.com',
+    USER_PNL_URL: process.env.USER_PNL_URL ?? 'https://user-pnl-api.kuest.com',
+    COMMUNITY_URL: process.env.COMMUNITY_URL ?? 'https://community.kuest.com',
+    SDK_DOWNLOAD_URL: process.env.SDK_DOWNLOAD_URL ?? 'https://sdk-download.kuest.com',
+    PRICE_REFERENCE_URL: process.env.PRICE_REFERENCE_URL ?? 'https://price-reference.kuest.com',
+    WS_CLOB_URL: process.env.WS_CLOB_URL ?? 'wss://ws-subscriptions-clob.kuest.com',
+    WS_LIVE_DATA_URL: process.env.WS_LIVE_DATA_URL ?? 'wss://ws-live-data.kuest.com',
   },
 }
 
